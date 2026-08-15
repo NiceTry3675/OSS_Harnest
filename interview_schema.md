@@ -173,12 +173,16 @@
 "loop": {
   "maxIterations": 30,
   "llmRoute": "trial",
+  "branching": { "width": 1 },
+  "critic": true,
   "stop": { "targetScore": null, "plateauRounds": 8 }
 }
 ```
 
 - `llmRoute`: `"trial"`(무료 체험 — 서버 프록시, 쿼터·반복 상한은 서버가 강제) / `"byok"`(사용자 키, 브라우저 직행)
 - `maxIterations`: trial일 때 서버 상한 이하로 클램프 (정책 수치는 무료 티어 정책 문서에서 확정)
+- `branching.width`: 라운드당 병렬 변이 수 (Generator 에이전트 수). trial은 1로 서버 강제, byok는 1~4
+- `critic`: plateau 시 Critic 에이전트(채점 내역 진단 → 변이 방향 제시) 활성화 여부
 - `stop.plateauRounds`: N회 연속 개선 없으면 조기 종료
 
 ---
