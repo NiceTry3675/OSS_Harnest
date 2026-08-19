@@ -1,21 +1,18 @@
-"use client";
-
-import Link from "next/link";
+import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { startRun } from "@/lib/api/client";
 import { harnestStorage } from "@/lib/api/storage";
 import type { RunResult } from "@/lib/api/types";
 
-export default function RunPage() {
+export function RunPage() {
   const [result, setResult] = useState<RunResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const currentScore = result?.finalScore ?? 0;
   const startScore = result?.startScore ?? 0;
   const acceptedCount =
     result?.nodes.filter((node) => node.status === "accepted" && node.round > 0).length ?? 0;
-  const chartPoints = buildChartPoints(result);
-  const chartPointString = chartPoints.map((point) => `${point.x},${point.y}`).join(" ");
+  const rejectedCount = result?.nodes.filter((node) => node.status === "rejected").length ?? 0;
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -99,26 +96,29 @@ export default function RunPage() {
 
           <section className="section-block chart-panel">
             <div className="section-heading">
-              <p className="eyebrow">Score curve</p>
-              <h2 className="section-title">개선 곡선</h2>
+              <p className="eyebrow">Version record</p>
+              <h2 className="section-title">아직 저장된 버전 그래프는 없습니다</h2>
             </div>
-            <svg className="score-chart" viewBox="0 0 640 300" role="img">
-              <title>
-                {result
-                  ? `${result.startScore}점에서 ${result.finalScore}점까지 개선되는 점수 그래프`
-                  : "실행 결과를 기다리는 점수 그래프"}
-              </title>
-              <line className="chart-axis" x1="44" x2="596" y1="238" y2="238" />
-              <polyline className="chart-line" points={chartPointString} />
-              {chartPoints.map(({ label, x, y }) => (
-                <g key={`${label}-${x}`}>
-                  <circle className="chart-dot" cx={x} cy={y} r="7" />
-                  <text x={x + 12} y={y - 12}>
-                    {label}
-                  </text>
-                </g>
-              ))}
-            </svg>
+            <div className="version-note">
+              <p>
+                현재 Lite 실행은 최종 산출물과 채택 로그만 반환합니다. 실제 개선 곡선은
+                라운드별 산출물 버전이 저장된 뒤 표시해야 합니다.
+              </p>
+              <div className="version-stats">
+                <span>
+                  시작 점수 <b>{result ? startScore : "--"}</b>
+                </span>
+                <span>
+                  현재 점수 <b>{result ? currentScore : "--"}</b>
+                </span>
+                <span>
+                  채택 <b>{acceptedCount}</b>
+                </span>
+                <span>
+                  폐기 <b>{rejectedCount}</b>
+                </span>
+              </div>
+            </div>
           </section>
 
           <section className="section-block diff-panel">
@@ -144,7 +144,7 @@ export default function RunPage() {
               <span>직무 적합도 루브릭</span>
               <span>글자 수 제한</span>
             </div>
-            <Link className="primary-button" href="/result">
+            <Link className="primary-button" to="/result">
               결과 확인
             </Link>
           </aside>
@@ -152,23 +152,4 @@ export default function RunPage() {
       </section>
     </AppShell>
   );
-}
-
-function buildChartPoints(result: RunResult | null) {
-  const acceptedNodes =
-    result?.nodes.filter((node) => node.status === "accepted") ?? [
-      { score: 0, round: 0, id: "empty", title: "", status: "accepted" as const, note: "" },
-    ];
-  const nodeCount = Math.max(acceptedNodes.length, 1);
-
-  return acceptedNodes.map((node, index) => {
-    const x = nodeCount === 1 ? 48 : 48 + (548 / (nodeCount - 1)) * index;
-    const y = 238 - (Math.min(Math.max(node.score, 0), 100) / 100) * 176;
-
-    return {
-      label: String(node.score),
-      x: Math.round(x),
-      y: Math.round(y),
-    };
-  });
 }

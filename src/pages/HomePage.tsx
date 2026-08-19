@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { Link } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { templates } from "@/lib/mock-data";
 
@@ -25,7 +25,7 @@ const buildSteps = [
   },
 ];
 
-export default function Home() {
+export function HomePage() {
   return (
     <AppShell activeStep="template">
       <section className="workspace-home">
@@ -38,7 +38,7 @@ export default function Home() {
               사용자가 승인한 기준을 잠근 뒤 웹에서 반복 개선을 실행하는 작업대입니다.
             </p>
             <div className="hero-actions">
-              <Link className="primary-button" href="/interview">
+              <Link className="primary-button" to="/interview">
                 개선 루프 만들기
               </Link>
               <a className="secondary-button" href="#how-it-works">
@@ -105,7 +105,7 @@ export default function Home() {
                 자소서 예시는 첫 템플릿일 뿐입니다. 핵심은 어떤 도메인이든 사용자의
                 목표를 평가 가능한 루프로 바꾸는 것입니다.
               </p>
-              <Link className="primary-button" href="/interview">
+              <Link className="primary-button" to="/interview">
                 작업 지시서 작성
               </Link>
             </div>
@@ -175,7 +175,7 @@ export default function Home() {
                   <div className="template-meta">
                     <span>{template.evaluation}</span>
                     {template.status === "active" ? (
-                      <Link className="secondary-button compact" href="/interview">
+                      <Link className="secondary-button compact" to="/interview">
                         시작
                       </Link>
                     ) : (

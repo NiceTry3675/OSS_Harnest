@@ -15,10 +15,10 @@ uvicorn app.main:app --reload --port 8000
 프론트는 다음 환경 변수를 사용하면 FastAPI Lite 엔진을 호출합니다.
 
 ```bash
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api
+VITE_API_BASE_URL=http://localhost:8000/api
 ```
 
-환경 변수가 없으면 프론트 내부 fallback adapter가 동작합니다.
+환경 변수가 없으면 프론트 API 호출이 실패합니다. 로컬에서는 repo 루트의 `.env.local`에 위 값을 넣습니다.
 
 ## Endpoints
 

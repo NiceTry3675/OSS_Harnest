@@ -1,7 +1,5 @@
-"use client";
-
 import { FormEvent, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { LiveBlueprint } from "@/components/LiveBlueprint";
 import { blueprintItems } from "@/lib/mock-data";
@@ -9,8 +7,8 @@ import { submitInterviewDraft } from "@/lib/api/client";
 import { harnestStorage } from "@/lib/api/storage";
 import type { InterviewPayload } from "@/lib/api/types";
 
-export default function InterviewPage() {
-  const router = useRouter();
+export function InterviewPage() {
+  const navigate = useNavigate();
   const [goal, setGoal] = useState("카카오 서버 개발자 공고에 맞게 자기소개서를 개선하고 싶다");
   const [jobPosting, setJobPosting] = useState(
     "카카오 서버 개발자 채용 공고: Spring 기반 REST API 개발, MSA 환경 운영, 대용량 트래픽 처리, 장애 대응 경험, 주문/결제 도메인 이해를 요구합니다.",
@@ -71,10 +69,10 @@ export default function InterviewPage() {
         projectId: suggestion.projectId,
       });
       harnestStorage.setEvaluationSuggestion(suggestion);
-      router.push("/criteria");
+      navigate("/criteria");
     } catch {
       setError(
-        "평가 기준 후보를 가져오지 못했습니다. FastAPI 서버 실행 여부와 NEXT_PUBLIC_API_BASE_URL 설정을 확인하세요.",
+        "평가 기준 후보를 가져오지 못했습니다. FastAPI 서버 실행 여부와 VITE_API_BASE_URL 설정을 확인하세요.",
       );
     } finally {
       setIsSubmitting(false);

@@ -1,14 +1,14 @@
-import Link from "next/link";
 import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import type { StepId } from "@/lib/types";
 
-const steps: Array<{ id: StepId; label: string; href: string }> = [
-  { id: "template", label: "시작", href: "/" },
-  { id: "interview", label: "인터뷰", href: "/interview" },
-  { id: "criteria", label: "기준", href: "/criteria" },
-  { id: "run", label: "관제", href: "/run" },
-  { id: "result", label: "결과", href: "/result" },
+const steps: Array<{ id: StepId; label: string; to: string }> = [
+  { id: "template", label: "시작", to: "/" },
+  { id: "interview", label: "인터뷰", to: "/interview" },
+  { id: "criteria", label: "기준", to: "/criteria" },
+  { id: "run", label: "관제", to: "/run" },
+  { id: "result", label: "결과", to: "/result" },
 ];
 
 export function AppShell({
@@ -21,7 +21,7 @@ export function AppShell({
   return (
     <main className="app-shell">
       <header className="topbar">
-        <Link className="brand" href="/">
+        <Link className="brand" to="/">
           <span className="brand-mark">H</span>
           <span>Harnest Studio</span>
         </Link>
@@ -30,7 +30,7 @@ export function AppShell({
             {steps.map((step) => (
               <Link
                 className={`step-pill ${step.id === activeStep ? "active" : ""}`}
-                href={step.href}
+                to={step.to}
                 key={step.id}
               >
                 {step.label}

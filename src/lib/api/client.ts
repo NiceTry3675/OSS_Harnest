@@ -6,11 +6,11 @@ import type {
   RunResult,
 } from "./types";
 
-const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL;
 
 function apiUrl(path: string) {
   if (!apiBaseUrl) {
-    throw new Error("NEXT_PUBLIC_API_BASE_URL is required for the E2E API flow");
+    throw new Error("VITE_API_BASE_URL is required for the E2E API flow");
   }
 
   return `${apiBaseUrl?.replace(/\/$/, "")}${path}`;

@@ -1,15 +1,13 @@
-"use client";
-
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { criteria } from "@/lib/mock-data";
 import { submitApprovedCriteria } from "@/lib/api/client";
 import { harnestStorage } from "@/lib/api/storage";
 import type { EvaluationSuggestion, InterviewPayload } from "@/lib/api/types";
 
-export default function CriteriaPage() {
-  const router = useRouter();
+export function CriteriaPage() {
+  const navigate = useNavigate();
   const [payload, setPayload] = useState<InterviewPayload | null>(null);
   const [suggestion, setSuggestion] = useState<EvaluationSuggestion | null>(null);
   const [isApproving, setIsApproving] = useState(false);
@@ -45,7 +43,7 @@ export default function CriteriaPage() {
       const loopSpec = await submitApprovedCriteria(approvedPayload);
       harnestStorage.setInterviewPayload(approvedPayload);
       harnestStorage.setLoopSpec(loopSpec);
-      router.push("/run");
+      navigate("/run");
     } catch {
       setError("승인된 평가 기준으로 loop spec을 만들지 못했습니다.");
     } finally {

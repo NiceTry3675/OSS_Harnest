@@ -1,13 +1,11 @@
-"use client";
-
-import Link from "next/link";
+import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { uploadRunResult } from "@/lib/api/client";
 import { harnestStorage } from "@/lib/api/storage";
 import type { RunResult } from "@/lib/api/types";
 
-export default function ResultPage() {
+export function ResultPage() {
   const [result, setResult] = useState<RunResult | null>(null);
 
   useEffect(() => {
@@ -48,10 +46,10 @@ export default function ResultPage() {
               <p className="muted">백엔드 loop spec 연동 후 표시 예정</p>
             </article>
             <div className="button-row">
-              <Link className="secondary-button" href="/run">
+              <Link className="secondary-button" to="/run">
                 실행 기록 보기
               </Link>
-              <Link className="primary-button" href="/">
+              <Link className="primary-button" to="/">
                 새 작업 시작
               </Link>
             </div>
