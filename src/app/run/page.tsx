@@ -1,15 +1,49 @@
-import Link from "next/link";
-import { AppShell } from "@/components/AppShell";
+"use client";
 
-const events = [
-  { id: "00", title: "초안 기준선", score: 62, status: "kept" },
-  { id: "03", title: "직무 키워드 재배치", score: 71, status: "kept" },
-  { id: "07", title: "표현 확장 후보", score: 69, status: "dropped" },
-  { id: "09", title: "성과 중심 문장 교체", score: 78, status: "kept" },
-  { id: "14", title: "다음 후보 평가 중", score: 78, status: "running" },
-];
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { AppShell } from "@/components/AppShell";
+import { startRun } from "@/lib/api/client";
+import { harnestStorage } from "@/lib/api/storage";
+import type { RunResult } from "@/lib/api/types";
 
 export default function RunPage() {
+  const [result, setResult] = useState<RunResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const currentScore = result?.finalScore ?? 0;
+  const startScore = result?.startScore ?? 0;
+  const acceptedCount =
+    result?.nodes.filter((node) => node.status === "accepted" && node.round > 0).length ?? 0;
+  const chartPoints = buildChartPoints(result);
+  const chartPointString = chartPoints.map((point) => `${point.x},${point.y}`).join(" ");
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      const cachedResult = harnestStorage.getRunResult();
+
+      if (cachedResult) {
+        setResult(cachedResult);
+        return;
+      }
+
+      const loopSpec = harnestStorage.getLoopSpec();
+
+      if (!loopSpec) {
+        setError("실행할 loop spec이 없습니다. 인터뷰와 평가 기준 승인을 먼저 완료하세요.");
+        return;
+      }
+
+      startRun(loopSpec)
+        .then((runResult) => {
+          harnestStorage.setRunResult(runResult);
+          setResult(runResult);
+        })
+        .catch(() => {
+          setError("Lite 실행을 시작하지 못했습니다. FastAPI 서버 상태를 확인하세요.");
+        });
+    });
+  }, []);
+
   return (
     <AppShell activeStep="run">
       <section className="run-page">
@@ -25,16 +59,17 @@ export default function RunPage() {
           <div className="run-summary">
             <div>
               <span>현재 점수</span>
-              <strong>78</strong>
+              <strong>{result ? currentScore : "--"}</strong>
               <small>/100</small>
             </div>
             <div>
               <span>시작 대비</span>
-              <strong>+16</strong>
-              <small>2 kept edits</small>
+              <strong>{result ? `+${currentScore - startScore}` : "--"}</strong>
+              <small>{acceptedCount} kept edits</small>
             </div>
           </div>
         </div>
+        {error ? <p className="error-text">{error}</p> : null}
 
         <div className="run-layout">
           <section className="section-block timeline-panel">
@@ -43,12 +78,18 @@ export default function RunPage() {
               <h2 className="section-title">채택된 수정만 본선으로 이어집니다</h2>
             </div>
             <div className="event-list">
-              {events.map((event) => (
+              {(result?.nodes ?? []).map((event) => (
                 <div className={`event-row ${event.status}`} key={event.id}>
-                  <span className="event-id">#{event.id}</span>
+                  <span className="event-id">#{event.round}</span>
                   <div>
                     <strong>{event.title}</strong>
-                    <p>{event.status === "dropped" ? "폐기됨" : event.status === "running" ? "평가 중" : "채택됨"}</p>
+                    <p>
+                      {event.status === "rejected"
+                        ? "폐기됨"
+                        : event.status === "running"
+                          ? "평가 중"
+                          : "채택됨"}
+                    </p>
                   </div>
                   <b>{event.score}</b>
                 </div>
@@ -62,21 +103,17 @@ export default function RunPage() {
               <h2 className="section-title">개선 곡선</h2>
             </div>
             <svg className="score-chart" viewBox="0 0 640 300" role="img">
-              <title>62점에서 78점까지 개선되는 점수 그래프</title>
+              <title>
+                {result
+                  ? `${result.startScore}점에서 ${result.finalScore}점까지 개선되는 점수 그래프`
+                  : "실행 결과를 기다리는 점수 그래프"}
+              </title>
               <line className="chart-axis" x1="44" x2="596" y1="238" y2="238" />
-              <polyline
-                className="chart-line"
-                points="48,204 154,204 248,152 348,152 456,104 596,82"
-              />
-              {[
-                ["62", 48, 204],
-                ["71", 248, 152],
-                ["78", 456, 104],
-                ["78", 596, 82],
-              ].map(([label, x, y]) => (
+              <polyline className="chart-line" points={chartPointString} />
+              {chartPoints.map(({ label, x, y }) => (
                 <g key={`${label}-${x}`}>
                   <circle className="chart-dot" cx={x} cy={y} r="7" />
-                  <text x={Number(x) + 12} y={Number(y) - 12}>
+                  <text x={x + 12} y={y - 12}>
                     {label}
                   </text>
                 </g>
@@ -91,11 +128,9 @@ export default function RunPage() {
             </div>
             <div className="diff-text">
               <span>Before</span>
-              <p>다양한 프로젝트를 경험했습니다.</p>
+              <p>{result?.diff.before ?? "실행 결과를 기다리는 중입니다."}</p>
               <span>After</span>
-              <p>
-                Spring 기반 주문 API를 설계하며 트래픽 3배 증가를 무중단으로 처리했습니다.
-              </p>
+              <p>{result?.diff.after ?? "채택된 변경이 생성되면 여기에 표시됩니다."}</p>
             </div>
           </section>
 
@@ -117,4 +152,23 @@ export default function RunPage() {
       </section>
     </AppShell>
   );
+}
+
+function buildChartPoints(result: RunResult | null) {
+  const acceptedNodes =
+    result?.nodes.filter((node) => node.status === "accepted") ?? [
+      { score: 0, round: 0, id: "empty", title: "", status: "accepted" as const, note: "" },
+    ];
+  const nodeCount = Math.max(acceptedNodes.length, 1);
+
+  return acceptedNodes.map((node, index) => {
+    const x = nodeCount === 1 ? 48 : 48 + (548 / (nodeCount - 1)) * index;
+    const y = 238 - (Math.min(Math.max(node.score, 0), 100) / 100) * 176;
+
+    return {
+      label: String(node.score),
+      x: Math.round(x),
+      y: Math.round(y),
+    };
+  });
 }

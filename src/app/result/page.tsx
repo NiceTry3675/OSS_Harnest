@@ -1,22 +1,47 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
+import { uploadRunResult } from "@/lib/api/client";
+import { harnestStorage } from "@/lib/api/storage";
+import type { RunResult } from "@/lib/api/types";
 
 export default function ResultPage() {
+  const [result, setResult] = useState<RunResult | null>(null);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      const cachedResult = harnestStorage.getRunResult();
+      setResult(cachedResult);
+
+      if (cachedResult) {
+        uploadRunResult(cachedResult).catch(() => {
+          // Result upload is non-blocking in the Lite E2E flow.
+        });
+      }
+    });
+  }, []);
+
+  const startScore = result?.startScore ?? 62;
+  const finalScore = result?.finalScore ?? 78;
+  const acceptedCount =
+    result?.nodes.filter((node) => node.status === "accepted" && node.round > 0).length ?? 2;
+
   return (
     <AppShell activeStep="result">
       <section className="page-frame">
         <div className="panel">
           <div className="panel-header">
             <p className="eyebrow">Final result</p>
-            <h1 className="title">62점에서 시작한 초안이 78점까지 개선됐습니다.</h1>
+            <h1 className="title">
+              {startScore}점에서 시작한 초안이 {finalScore}점까지 개선됐습니다.
+            </h1>
           </div>
           <div className="panel-body template-grid">
             <article className="metric-card">
               <strong>최종 결과물</strong>
-              <p>
-                서버 개발 직무 요구사항에 맞춰 프로젝트 경험, 장애 대응, MSA
-                설계 경험이 전면에 오도록 재구성된 자기소개서입니다.
-              </p>
+              <p>{result?.finalArtifact ?? "실행 결과가 생성되면 최종 산출물이 표시됩니다."}</p>
             </article>
             <article className="metric-card">
               <strong>홀드아웃 점수</strong>
@@ -40,15 +65,15 @@ export default function ResultPage() {
           <div className="panel-body metric-grid">
             <div className="blueprint-item">
               <strong>시작 점수</strong>
-              <span>62</span>
+              <span>{startScore}</span>
             </div>
             <div className="blueprint-item">
               <strong>최종 점수</strong>
-              <span>78</span>
+              <span>{finalScore}</span>
             </div>
             <div className="blueprint-item">
               <strong>채택된 개선</strong>
-              <span>2회</span>
+              <span>{acceptedCount}회</span>
             </div>
           </div>
         </aside>

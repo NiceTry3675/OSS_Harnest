@@ -205,6 +205,127 @@ button {
   line-height: 1.65;
 }
 
+.product-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.46fr);
+  gap: 18px;
+  align-items: stretch;
+  margin: 8px 0 22px;
+}
+
+.product-hero > div:first-child,
+.contract-preview {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.product-hero > div:first-child {
+  padding: 30px;
+}
+
+.product-hero h1 {
+  max-width: 820px;
+  margin: 0;
+  color: var(--text);
+  font-size: clamp(34px, 5vw, 64px);
+  font-weight: 880;
+  letter-spacing: -0.055em;
+  line-height: 1.02;
+}
+
+.product-hero p {
+  max-width: 760px;
+  margin: 16px 0 0;
+  color: var(--text-soft);
+  font-size: 17px;
+  line-height: 1.68;
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.contract-preview {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 20px;
+}
+
+.contract-topline,
+.contract-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.contract-topline {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.contract-topline strong {
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--text-soft);
+  padding: 6px 9px;
+  font-size: 12px;
+}
+
+.contract-row {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-soft);
+  padding: 13px;
+}
+
+.contract-row span {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.contract-row b {
+  color: var(--text);
+  font-size: 14px;
+  text-align: right;
+}
+
+.contract-row.locked {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  background: var(--surface-tint);
+}
+
+.contract-flow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.contract-flow span {
+  min-height: 40px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 850;
+  text-align: center;
+}
+
 .eyebrow {
   margin: 0 0 8px;
   color: var(--text-muted);
@@ -326,6 +447,22 @@ textarea {
   font-weight: 750;
 }
 
+.work-order-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.work-order-grid span {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-soft);
+  padding: 11px 12px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .harness-config {
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -425,6 +562,10 @@ textarea {
   padding: 22px;
 }
 
+.harness-card {
+  align-content: start;
+}
+
 .preview-toolbar span,
 .preview-diff span,
 .dock-count,
@@ -494,6 +635,46 @@ textarea {
 .insight-copy {
   margin: 0;
   line-height: 1.55;
+}
+
+.harness-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.harness-stack div {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 6px 12px;
+  align-items: start;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-soft);
+  padding: 14px;
+}
+
+.harness-stack span {
+  grid-row: span 2;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.harness-stack strong {
+  color: var(--text);
+  font-size: 16px;
+}
+
+.harness-stack p {
+  margin: 0;
+  color: var(--text-soft);
+  line-height: 1.45;
 }
 
 .template-section {
@@ -592,6 +773,89 @@ textarea {
 
 .recent-section {
   grid-column: 1 / -1;
+}
+
+.build-step-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.build-step {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-soft);
+  padding: 14px;
+}
+
+.build-step > span {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.build-step strong {
+  color: var(--text);
+  font-size: 16px;
+}
+
+.build-step p {
+  margin: 5px 0 0;
+  color: var(--text-soft);
+  line-height: 1.5;
+}
+
+.comparison-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.comparison-grid article {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-soft);
+  padding: 16px;
+}
+
+.comparison-grid article:last-child {
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--line));
+  background: var(--surface-tint);
+}
+
+.comparison-grid span {
+  display: block;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.comparison-grid strong {
+  display: block;
+  margin-top: 8px;
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 850;
+  letter-spacing: -0.025em;
+}
+
+.comparison-grid p {
+  margin: 8px 0 0;
+  color: var(--text-soft);
+  line-height: 1.55;
 }
 
 .recent-row {
@@ -703,7 +967,8 @@ textarea {
   font-size: 20px;
 }
 
-.event-row.dropped {
+.event-row.dropped,
+.event-row.rejected {
   opacity: 0.62;
 }
 
@@ -842,6 +1107,18 @@ textarea {
   gap: 10px;
 }
 
+.error-text {
+  margin: 0;
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--warning) 10%, var(--surface));
+  color: var(--warning);
+  padding: 12px 14px;
+  font-size: 14px;
+  font-weight: 750;
+  line-height: 1.5;
+}
+
 .form-grid {
   display: grid;
   gap: 14px;
@@ -940,11 +1217,13 @@ textarea {
   }
 
   .workspace-layout,
+  .product-hero,
   .page-frame,
   .run-hero,
   .run-layout,
   .control-grid,
-  .home-grid {
+  .home-grid,
+  .comparison-grid {
     grid-template-columns: 1fr;
   }
 
@@ -998,6 +1277,8 @@ textarea {
   .run-summary,
   .recent-row,
   .scorecard-grid,
+  .work-order-grid,
+  .contract-flow,
   .factory-strip,
   .gauge-row {
     grid-template-columns: 1fr;

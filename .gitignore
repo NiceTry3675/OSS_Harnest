@@ -20,6 +20,12 @@ pnpm-debug.log*
 
 # env
 .env*
+!.env.example
 
 # local planning notes
 plan.md
+
+# python
+__pycache__/
+*.py[cod]
+.venv/

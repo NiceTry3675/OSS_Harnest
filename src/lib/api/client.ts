@@ -2,24 +2,24 @@ import type {
   EvaluationSuggestion,
   InterviewPayload,
   LoopSpec,
+  ResultUploadResponse,
   RunResult,
 } from "./types";
-import {
-  submitApprovedCriteria as submitApprovedCriteriaMock,
-  submitInterviewDraft as submitInterviewDraftMock,
-  uploadRunResult as uploadRunResultMock,
-} from "./mock";
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+
+function apiUrl(path: string) {
+  if (!apiBaseUrl) {
+    throw new Error("NEXT_PUBLIC_API_BASE_URL is required for the E2E API flow");
+  }
+
+  return `${apiBaseUrl?.replace(/\/$/, "")}${path}`;
+}
 
 export async function submitInterviewDraft(
   payload: InterviewPayload,
 ): Promise<EvaluationSuggestion> {
-  if (!apiBaseUrl) {
-    return submitInterviewDraftMock(payload);
-  }
-
-  const response = await fetch(`${apiBaseUrl}/interviews/draft`, {
+  const response = await fetch(apiUrl("/interviews/draft"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -35,11 +35,7 @@ export async function submitInterviewDraft(
 export async function submitApprovedCriteria(
   payload: InterviewPayload,
 ): Promise<LoopSpec> {
-  if (!apiBaseUrl) {
-    return submitApprovedCriteriaMock(payload);
-  }
-
-  const response = await fetch(`${apiBaseUrl}/interviews/approved`, {
+  const response = await fetch(apiUrl("/interviews/approved"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -52,12 +48,34 @@ export async function submitApprovedCriteria(
   return response.json();
 }
 
-export async function uploadRunResult(result: RunResult) {
-  if (!apiBaseUrl) {
-    return uploadRunResultMock(result);
+export async function startRun(loopSpec: LoopSpec): Promise<RunResult> {
+  const response = await fetch(apiUrl("/runs"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(loopSpec),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to start run");
   }
 
-  const response = await fetch(`${apiBaseUrl}/runs/${result.runId}/result`, {
+  return response.json();
+}
+
+export async function getRun(runId: string): Promise<RunResult> {
+  const response = await fetch(apiUrl(`/runs/${runId}`));
+
+  if (!response.ok) {
+    throw new Error("Failed to get run");
+  }
+
+  return response.json();
+}
+
+export async function uploadRunResult(
+  result: RunResult,
+): Promise<ResultUploadResponse> {
+  const response = await fetch(apiUrl(`/runs/${result.runId}/result`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(result),

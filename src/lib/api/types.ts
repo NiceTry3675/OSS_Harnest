@@ -47,6 +47,11 @@ export type LoopSpec = {
   runId: string;
   criteriaLocked: true;
   maxIterations: number;
+  stop: {
+    targetScore: number | null;
+    plateauRounds: number;
+  };
+  llmRoute: "trial" | "byok";
 };
 
 export type RunResult = {
@@ -54,4 +59,14 @@ export type RunResult = {
   startScore: number;
   finalScore: number;
   nodes: ExperimentNode[];
+  diff: {
+    before: string;
+    after: string;
+  };
+  finalArtifact: string;
+};
+
+export type ResultUploadResponse = {
+  projectId: string;
+  shareUrl: string | null;
 };
