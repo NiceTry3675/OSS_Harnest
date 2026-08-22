@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0, \"why\": \"The response fails to convey the policy that in-tree memory provider additions are closed, and incorrectly suggests opening a PR to integrate it into the core repo.\"}\n```", "tag": "grade:case-9975", "model": "gemini-3.7-flash"}

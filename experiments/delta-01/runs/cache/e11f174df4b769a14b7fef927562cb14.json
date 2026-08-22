@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies UID/GID mapping issues on NAS mounts as the root cause, but misses the specific solution implemented in the codebase (using the `PUID`/`PGID` environment variables).\"}\n```", "tag": "grade:case-15290", "model": "gemini-3.7-flash"}

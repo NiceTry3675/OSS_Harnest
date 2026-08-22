@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly states that Raspberry Pi and ARM64 are supported, but misses the specific Docker/release resolution details mentioned in the reference answer.\"}\n```", "tag": "grade:case-5554", "model": "gemini-3.7-flash"}

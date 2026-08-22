@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly states that DingTalk integration and Markdown image rendering are not supported or documented, whereas the reference answer confirms this feature is already implemented on main.\"}\n```", "tag": "grade:case-21462", "model": "gemini-3.7-flash"}

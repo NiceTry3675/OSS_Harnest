@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies that the `/api` endpoint is incorrect and suggests using `/v1`, but misses the key solution that this is a known bug fixed by updating to Hermes Agent v0.15.0.\"}\n```", "tag": "grade:case-33811", "model": "gemini-3.7-flash"}

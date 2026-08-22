@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly states the feature is not available instead of identifying the existing bundled Langfuse observability integration.\"}\n```", "tag": "grade:case-12871", "model": "gemini-3.7-flash"}

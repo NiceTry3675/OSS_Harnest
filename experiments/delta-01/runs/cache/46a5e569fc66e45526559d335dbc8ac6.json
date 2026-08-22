@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately explains that API keys bill per token and that Claude OAuth must be used instead to leverage Pro/Max subscription allowances.\"}\n```", "tag": "grade:case-29539", "model": "gemini-3.7-flash"}

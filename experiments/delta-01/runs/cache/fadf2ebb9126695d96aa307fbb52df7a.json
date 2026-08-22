@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly claims Hermes lacks a built-in context management/compression mechanism for tool output, missing the core facts of the reference answer.\"}\n```", "tag": "grade:case-21567", "model": "gemini-3.7-flash"}

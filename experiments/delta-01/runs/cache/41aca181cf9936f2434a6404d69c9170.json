@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0.5, \"why\": \"The response correctly identifies the core issue with capability detection and points to a vision override configuration as the solution, but lacks the specific PR/issue context and exact config parameter name.\"}", "tag": "grade:case-20376", "model": "gemini-3.7-flash"}

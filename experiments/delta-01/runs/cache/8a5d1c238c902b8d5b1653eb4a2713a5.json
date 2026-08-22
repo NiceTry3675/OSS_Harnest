@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies the client validation issue and suggests the placeholder API key workaround, but misses that the bug was officially resolved in an update.\"}\n```", "tag": "grade:case-3555", "model": "gemini-3.7-flash"}

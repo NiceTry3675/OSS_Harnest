@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies that agent tool definitions cause high prompt evaluation latency on local models, but it misses specific Hermes-level solutions like disabling unused toolsets.\"}\n```", "tag": "grade:case-1451", "model": "gemini-3.7-flash"}

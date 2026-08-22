@@ -277,8 +277,11 @@ def run_harnest(material, cap, visible):
     champ_score, champ_traces, _ = evaluate(champ, visible, cap)
     curve = [champ_score]
     for i in range(1, ROUNDS):
+        # 라운드 논스: 챔피언 불변 구간에서 동일 프롬프트→캐시 히트로 탐색이 붕괴하는
+        # 결함(§9.3, 2026-08-22 발견)의 수정 — temp 0.7 샘플링이 실제로 일어나게 한다.
         cand = llm(P_MUTATE.format(limit=limit_block(cap), material=material, doc=champ,
-                                   score=champ_score, traces="\n".join(champ_traces) or "(전 케이스 정답)"),
+                                   score=champ_score, traces="\n".join(champ_traces) or "(전 케이스 정답)")
+                   + f"\n<!-- round {i} -->",
                    tag=f"h{i}")
         s, traces, gate = evaluate(cand, visible, cap)
         if not gate and s > champ_score:            # 제3 채택 모드: 엄격 개선 시 채택
@@ -309,7 +312,8 @@ def run_scoreloop(material, cap, visible):
     curve = [champ_score]
     for i in range(1, ROUNDS):
         cand = llm(P_MUTATE_SCORE.format(limit=limit_block(cap), material=material,
-                                         doc=champ, score=champ_score), tag=f"s{i}")
+                                         doc=champ, score=champ_score)
+                   + f"\n<!-- round {i} -->", tag=f"s{i}")
         s, _, gate = evaluate(cand, visible, cap)
         if not gate and s > champ_score:
             champ, champ_score = cand, s

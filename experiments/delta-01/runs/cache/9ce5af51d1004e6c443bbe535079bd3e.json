@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0, \"why\": \"The response does not identify the root cause involving auto-provider detection or provide the actual workaround of setting `provider: custom` in the config.\"}\n```", "tag": "grade:case-3846", "model": "gemini-3.7-flash"}

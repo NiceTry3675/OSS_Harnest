@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1, \"why\": \"The response accurately covers all key facts from the reference answer, including auto-detection of ANTHROPIC_FOUNDRY_BASE_URL, running hermes setup, setting provider: azure-foundry, and ignoring Claude Code-specific variables.\"}\n```", "tag": "grade:case-9580", "model": "gemini-3.7-flash"}

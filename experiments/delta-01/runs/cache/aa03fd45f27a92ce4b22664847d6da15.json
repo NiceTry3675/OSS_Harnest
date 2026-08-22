@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response states the information is not covered and provides speculative guesses that fail to identify the correct `allow_from` configuration key for Telegram user authorization.\"}\n```", "tag": "grade:case-34751", "model": "gemini-3.7-flash"}

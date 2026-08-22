@@ -1,0 +1,1 @@
+{"text": "Yes, this is **expected behavior**. \n\nDuring the `\u2192 Updating Node.js dependencies...` step, the process is silently downloading the **Camofox browser binary** during post-installation without displaying terminal progress, which makes the step appear hung or significantly slower than the others.", "tag": "resp:case-22237", "model": "gemini-3.7-flash"}

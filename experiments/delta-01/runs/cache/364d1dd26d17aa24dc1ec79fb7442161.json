@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately covers the Tier 1 native Windows support status via install.ps1 and the specific POSIX PTY limitation for the web dashboard embedded terminal.\"}\n```", "tag": "grade:case-9196", "model": "gemini-3.7-flash"}

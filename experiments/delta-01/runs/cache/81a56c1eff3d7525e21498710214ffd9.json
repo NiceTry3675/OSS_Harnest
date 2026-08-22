@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0, \"why\": \"The response incorrectly claims that outgoing file transfers are likely unsupported and suggests a workaround, whereas the reference answer clarifies that the feature is implemented on main.\"}", "tag": "grade:case-5537", "model": "gemini-3.7-flash"}

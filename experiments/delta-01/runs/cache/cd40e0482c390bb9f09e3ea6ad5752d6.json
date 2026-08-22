@@ -1,0 +1,1 @@
+{"text": "This is expected behavior when using an API key. \n\nAccording to the Hermes documentation:\n* Entering an Anthropic API key always bills per token via the standard API.\n* To use your **Claude Pro / Max subscription allowance** instead of paying for API tokens, you must authenticate via **Claude OAuth**.", "tag": "resp:case-29539", "model": "gemini-3.7-flash"}

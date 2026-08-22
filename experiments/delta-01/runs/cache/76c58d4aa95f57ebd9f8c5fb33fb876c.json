@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately identifies the root cause regarding model normalization in hermes_cli/model_normalize.py and provides the exact fix.\"}\n```", "tag": "grade:case-26105", "model": "gemini-3.7-flash"}
