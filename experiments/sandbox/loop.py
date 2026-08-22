@@ -25,7 +25,10 @@ def run_loop(client, config: dict) -> dict:
     rounds = []
 
     # 라운드 0 — 원샷 베이스라인. SPEC §3 원칙 6: 설정값이 아니라 모든 루프의 상수.
-    seed_artifact = generator.generate_seed(client, gen_model, goal, source_material, length_limit)
+    seed_style = config.get("style")
+    seed_artifact = generator.generate_seed(
+        client, gen_model, goal, source_material, length_limit, style=seed_style
+    )
     seed_grade = judge.grade(client, judge_model, seed_artifact, questions)
     rounds.append(
         {
