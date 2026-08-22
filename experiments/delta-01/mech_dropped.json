@@ -1,0 +1,77 @@
+[
+ {
+  "number": 8774,
+  "title": "[Question] Can I let Hermes send a picture file through messaging, like Feishu?",
+  "reason": "본문 86자 < 100"
+ },
+ {
+  "number": 8831,
+  "title": "我感觉并没有学习也没有提升到",
+  "reason": "본문 19자 < 100"
+ },
+ {
+  "number": 8837,
+  "title": "我怎么知道它是多智能体协作还是？？",
+  "reason": "본문 2자 < 100"
+ },
+ {
+  "number": 10232,
+  "title": ".",
+  "reason": "본문 1자 < 100"
+ },
+ {
+  "number": 10967,
+  "title": "【测试】免费Claude api 名额",
+  "reason": "본문 33자 < 100"
+ },
+ {
+  "number": 11550,
+  "title": "Field Deployment Report: Bilbo Baggins — Based AI Production Agent (iMessage Gateway, Solar Sales Ops)",
+  "reason": "실질 답변 후보 없음(짧거나 링크만)"
+ },
+ {
+  "number": 11658,
+  "title": "Does wecom not support transferring word and Excel to BOT?",
+  "reason": "본문 59자 < 100"
+ },
+ {
+  "number": 19781,
+  "title": "Suggestion: Chinese-language channel in Discord",
+  "reason": "작성자 외 코멘트 없음"
+ },
+ {
+  "number": 20245,
+  "title": "[Bug]: Agent has no memory function at all",
+  "reason": "실질 답변 후보 없음(짧거나 링크만)"
+ },
+ {
+  "number": 22284,
+  "title": "Can I use custom APIs to use GPT Image2?",
+  "reason": "본문 41자 < 100"
+ },
+ {
+  "number": 26743,
+  "title": "[Setup]: how to make use of WEIXIN_ALLOWED_USERS=user_id_1",
+  "reason": "작성자 외 코멘트 없음"
+ },
+ {
+  "number": 30661,
+  "title": "How can I export a master environment and save it to another computer",
+  "reason": "본문 78자 < 100"
+ },
+ {
+  "number": 36041,
+  "title": "workflow issue",
+  "reason": "본문 0자 < 100"
+ },
+ {
+  "number": 46476,
+  "title": "Can I customize the installation directory?",
+  "reason": "본문 43자 < 100"
+ },
+ {
+  "number": 51213,
+  "title": "[Setup]: how to change UI theme , default is dark , how to change to light ?",
+  "reason": "실질 답변 후보 없음(짧거나 링크만)"
+ }
+]
