@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately explains that Hermes requires visible assistant output to remain in `content` while treating separated reasoning fields as secondary/metadata.\"}\n```", "tag": "grade:case-38360", "model": "gemini-3.7-flash"}

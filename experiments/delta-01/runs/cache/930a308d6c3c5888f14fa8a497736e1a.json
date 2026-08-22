@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately explains that `provider_routing` is an OpenRouter-specific feature that is not forwarded through the Nous Portal proxy.\"}\n```", "tag": "grade:case-32757", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly claims Hermes Agent lacks built-in multi-agent features and fails to identify the actual native implementations (`delegate_task` and `channel_prompts`).\"}\n```", "tag": "grade:case-11922", "model": "gemini-3.7-flash"}

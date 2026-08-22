@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies the workaround of using an Anthropic API key instead of OAuth, but misses the core cause that OAuth subscription routing is designed for the Max plan rather than Team/Pro plans.\"}\n```", "tag": "grade:case-37363", "model": "gemini-3.7-flash"}

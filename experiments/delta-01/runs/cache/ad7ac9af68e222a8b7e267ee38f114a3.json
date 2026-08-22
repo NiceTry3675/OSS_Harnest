@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response recommends submitting a core platform adapter PR and opening an RFC issue, missing the reference answer's specific guidance that community adapters should be standalone plugins in `~/.hermes/plugins/` rather than core integrations.\"}\n```", "tag": "grade:case-42473", "model": "gemini-3.7-flash"}

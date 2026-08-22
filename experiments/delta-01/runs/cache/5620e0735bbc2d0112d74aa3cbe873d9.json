@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0, \"why\": \"The response fails to mention the key solution from the reference answer, which is user/group ID remapping using PUID/PGID (or HERMES_UID/HERMES_GID) in the Docker container.\"}", "tag": "grade:case-15290", "model": "gemini-3.7-flash"}

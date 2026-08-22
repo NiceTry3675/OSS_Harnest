@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly states that in-tree PR contributions for memory plugins are welcome, directly contradicting the policy in the reference answer that in-tree additions are closed and must be standalone plugins.\"}\n```", "tag": "grade:case-9975", "model": "gemini-3.7-flash"}

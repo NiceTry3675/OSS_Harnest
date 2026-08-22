@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response provides a generic explanation of chat completion streaming rather than identifying the actual bug, root cause, or fix described in the reference answer.\"}\n```", "tag": "grade:case-5352", "model": "gemini-3.7-flash"}

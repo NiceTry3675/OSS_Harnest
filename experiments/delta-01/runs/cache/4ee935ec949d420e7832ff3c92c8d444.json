@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response accurately explains the vision gating mechanism and custom provider limitations, but misses the specific config-level override and PR tracked in the reference answer.\"}\n```", "tag": "grade:case-20376", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly states that Hermes Desktop lacks a profile switcher and offers workarounds, whereas the reference answer confirms the feature has already been implemented and shipped.\"}\n```", "tag": "grade:case-42239", "model": "gemini-3.7-flash"}

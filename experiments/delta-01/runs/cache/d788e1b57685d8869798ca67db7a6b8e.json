@@ -1,0 +1,1 @@
+{"text": "{\"score\": 1.0, \"why\": \"The response correctly identifies that updating Hermes resolves the issue because upstream fixes have already implemented session lifecycle improvements, compaction handling, and pagination.\"}", "tag": "grade:case-46046", "model": "gemini-3.7-flash"}

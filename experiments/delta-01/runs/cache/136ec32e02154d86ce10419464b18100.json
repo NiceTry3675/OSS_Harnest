@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies that high prompt processing time/tool calling overhead in local inference is the bottleneck rather than a bug, but misses the key Hermes-specific recommendation to reduce active toolsets via `hermes tools`.\"}\n```", "tag": "grade:case-1451", "model": "gemini-3.7-flash"}

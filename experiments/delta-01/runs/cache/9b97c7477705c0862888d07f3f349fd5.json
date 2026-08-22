@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0.5, \"why\": \"The response explains the technical rationale and correctly recommends `.hermes.md` for inherited rules, but misses the fact that this was already resolved via a specific documentation update.\"}", "tag": "grade:case-46775", "model": "gemini-3.7-flash"}

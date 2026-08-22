@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0, \"why\": \"The response incorrectly assumes vulnerability reporting is not yet configured, failing to inform the user that reporting is already enabled via SECURITY.md, email, and GitHub Security Advisories.\"}\n```", "tag": "grade:case-6090", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1, \"why\": \"The response correctly identifies that NanoGPT is already supported via Hermes's OpenAI-compatible custom provider endpoint and explains how to configure it.\"}\n```", "tag": "grade:case-38341", "model": "gemini-3.7-flash"}

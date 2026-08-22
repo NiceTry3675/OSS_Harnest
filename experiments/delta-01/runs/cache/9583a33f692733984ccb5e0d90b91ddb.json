@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0, \"why\": \"The response provides generic Termux troubleshooting steps rather than stating that this issue was resolved upstream in Hermes with dedicated Termux support and tempdir fixes.\"}\n```", "tag": "grade:case-17009", "model": "gemini-3.7-flash"}

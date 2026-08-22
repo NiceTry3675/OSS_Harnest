@@ -1,0 +1,1 @@
+{"text": "{\"score\": 1, \"why\": \"The response accurately confirms stdio MCP support in Hermes, details the configuration structure (`mcp_servers`), explains the process lifecycle, and addresses macOS-specific caveats.\"}", "tag": "grade:case-15694", "model": "gemini-3.7-flash"}

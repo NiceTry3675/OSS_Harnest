@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately identifies the root cause, provides the working workaround, and prescribes the exact permanent fix of increasing the timeout to 300 seconds and making it configurable via an environment variable.\"}\n```", "tag": "grade:case-14980", "model": "gemini-3.7-flash"}

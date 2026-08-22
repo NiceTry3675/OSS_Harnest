@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately identifies the uv/PRoot issue and provides the correct fix using UV_LINK_MODE=copy as well as the pip fallback.\"}\n```", "tag": "grade:case-2825", "model": "gemini-3.7-flash"}

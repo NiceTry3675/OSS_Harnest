@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0.5, \"why\": \"The response correctly identifies why the issue occurs (missing stream_options and extra_body forwarding issues), but suggests configuration workarounds instead of noting that this was a codebase bug resolved in main.\"}", "tag": "grade:case-31559", "model": "gemini-3.7-flash"}

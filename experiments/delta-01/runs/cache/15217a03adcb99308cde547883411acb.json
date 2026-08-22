@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response explains the cause and provides practical workarounds, but misses the key fact from the reference answer that this was fixed in main via PR #47235.\"}\n```", "tag": "grade:case-44894", "model": "gemini-3.7-flash"}

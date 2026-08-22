@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response gives generic troubleshooting steps instead of identifying the actual root cause: model normalization in `model_normalize.py` silently rewriting `deepseek-v4-flash` to `deepseek-chat`.\"}\n```", "tag": "grade:case-26105", "model": "gemini-3.7-flash"}

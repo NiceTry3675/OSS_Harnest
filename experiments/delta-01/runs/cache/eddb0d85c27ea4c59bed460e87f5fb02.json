@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately explains why runtime pip installs fail on NixOS and correctly validates managing the dependency declaratively in pyproject.toml and Nix flakes.\"}\n```", "tag": "grade:case-8873", "model": "gemini-3.7-flash"}

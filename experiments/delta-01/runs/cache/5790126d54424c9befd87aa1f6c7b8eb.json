@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0, \"why\": \"The response encourages an in-tree PR under gateway/platforms/, whereas the reference answer explicitly rejects in-tree integration and directs it to be built as a standalone external plugin repo.\"}", "tag": "grade:case-53407", "model": "gemini-3.7-flash"}

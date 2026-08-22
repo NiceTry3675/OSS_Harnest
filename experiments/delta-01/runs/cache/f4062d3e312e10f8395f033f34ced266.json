@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly endorses and details the exact proposed design, but frames it as a prospective recommendation rather than noting it was already accepted and implemented via PR #70457.\"}\n```", "tag": "grade:case-52995", "model": "gemini-3.7-flash"}

@@ -1,0 +1,28 @@
+{
+ "rule": "PROTOCOL §5·§9 — 무문서 만점 drop, 재산정 1회",
+ "date": "2026-08-22",
+ "drops": {
+  "case-1947": "The response accurately explains how to install packages without sudo by creating a derived Docker i",
+  "case-2825": "The response accurately identifies the uv/PRoot issue and provides the correct fix using UV_LINK_MOD",
+  "case-5695": "The response correctly explains that claude-code is not a Hermes plugin and clarifies how to properl",
+  "case-15694": "The response accurately confirms stdio MCP support in Hermes, details the configuration structure (`",
+  "case-8445": "The response accurately confirms the Greek mythology origin of the name (Hermes the messenger god of",
+  "case-8873": "The response accurately explains why runtime pip installs fail on NixOS and correctly validates mana",
+  "case-9129": "The response accurately explains that one gateway can run multiple platforms simultaneously and also",
+  "case-10387": "The response accurately identifies that the user is running a different 'hermes' package (the Helmho",
+  "case-14980": "The response accurately identifies the root cause, provides the working workaround, and prescribes t",
+  "case-17690": "The response accurately explains the cause of the warning and provides the exact two solutions outli",
+  "case-19752": "The response accurately and clearly answers all parts of the question in complete alignment with the",
+  "case-32757": "The response accurately explains that `provider_routing` is an OpenRouter-specific feature that is n",
+  "case-34662": "The response correctly explains that in-chat changes are session-specific and guides the user to set",
+  "case-38227": "The response accurately answers the question by confirming that Hermes Desktop is Apple Silicon only",
+  "case-38341": "The response correctly identifies that NanoGPT is already supported via Hermes's OpenAI-compatible c",
+  "case-38360": "The response accurately explains that Hermes requires visible assistant output to remain in `content",
+  "case-43880": "The response accurately answers both questions by stating that standard Claude subscriptions cannot ",
+  "case-46046": "The response correctly identifies that updating Hermes resolves the issue because upstream fixes hav",
+  "case-53359": "The response accurately explains the context window limitation in Ollama and provides the correct so",
+  "case-53760": "The response correctly identifies the agent turn/iteration limit (`max_turns`/`max_iterations`) as t",
+  "case-64020": "The response accurately explains the reason for the card decline and provides all the key workaround",
+  "case-71413": "The response accurately answers the core question about IPv4/IPv6 support and correctly addresses th"
+ }
+}

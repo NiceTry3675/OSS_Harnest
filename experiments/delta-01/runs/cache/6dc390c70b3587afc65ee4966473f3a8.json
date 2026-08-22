@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly states that file sending is unsupported and normal behavior, whereas the reference answer confirms that gateway file delivery is implemented and supported on main.\"}\n```", "tag": "grade:case-5537", "model": "gemini-3.7-flash"}

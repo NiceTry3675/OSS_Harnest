@@ -22,8 +22,8 @@ import time
 import urllib.request
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-RUNS = os.path.join(BASE, "runs")
-CACHE = os.path.join(RUNS, "cache")
+RUNS = os.path.join(BASE, os.environ.get("RUNS_DIR", "runs"))   # 델타 02: runs2
+CACHE = os.path.join(BASE, "runs", "cache")                     # 캐시는 실측 간 공유(동일 호출 재과금 방지)
 
 MODEL = os.environ.get("MODEL", "gemini-3.7-flash")   # 체험 티어 구성 (§7)
 PROVIDER = os.environ.get("LLM_PROVIDER", "gemini")
@@ -269,12 +269,13 @@ def main():
     ap.add_argument("--report", action="store_true")
     args = ap.parse_args()
 
-    data = json.load(open(os.path.join(BASE, "cases.json")))
+    data = json.load(open(os.path.join(BASE, os.environ.get("CASES_FILE", "cases.json"))))
     cases = {c["id"]: c for c in data["cases"]}
     visible = [cases[i] for i in data["meta"]["visible"]]
     holdout = [cases[i] for i in data["meta"]["holdout"]]
     material = material_of(visible)
-    cap = int(len(material) * LENGTH_CAP_RATIO)
+    # 분량 게이트: LENGTH_CAP(절대값, §9 개정 4) 우선, 없으면 상대 15%(델타 01)
+    cap = int(os.environ.get("LENGTH_CAP", len(material) * LENGTH_CAP_RATIO))
     print(f"가시 {len(visible)} / 홀드아웃 {len(holdout)} / 원료 {len(material)}자 / 분량 게이트 {cap}자 / {PROVIDER}:{MODEL}")
 
     if args.report:

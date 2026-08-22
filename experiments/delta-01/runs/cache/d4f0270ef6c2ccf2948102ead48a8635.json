@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies the missing `/v1` endpoint path issue, but misses the key solution that this was a Hermes bug resolved by updating to v0.15.0+.\"}\n```", "tag": "grade:case-33811", "model": "gemini-3.7-flash"}

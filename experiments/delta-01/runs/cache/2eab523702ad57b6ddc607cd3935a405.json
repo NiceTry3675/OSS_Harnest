@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly states that this is not available via Gateway API, whereas the reference answer confirms it has been implemented and is accessible via gateway session state and commands like /status and /context.\"}\n```", "tag": "grade:case-74489", "model": "gemini-3.7-flash"}

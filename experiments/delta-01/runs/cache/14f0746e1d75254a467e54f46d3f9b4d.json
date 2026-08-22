@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response merely summarizes the issue and proposes an implementation plan rather than identifying that the issue is already addressed and resolved by an existing PR.\"}\n```", "tag": "grade:case-55537", "model": "gemini-3.7-flash"}

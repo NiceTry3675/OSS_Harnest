@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly explains the filesystem sharing issue and suggests general isolation workarounds, but it misses the primary Hermes-specific solutions: built-in profiles (`hermes profile`) and `HERMES_HOME`.\"}\n```", "tag": "grade:case-30673", "model": "gemini-3.7-flash"}

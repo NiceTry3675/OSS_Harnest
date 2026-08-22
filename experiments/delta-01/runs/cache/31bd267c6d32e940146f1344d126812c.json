@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0.5, \"why\": \"The response correctly identifies that Hermes is defaulting to an unauthenticated cloud provider and gives general setup steps for Ollama, but misses the specific root cause and workaround involving changing `provider: auto` to `provider: custom` in `config.yaml`.\"}", "tag": "grade:case-3846", "model": "gemini-3.7-flash"}

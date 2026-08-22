@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately explains the context window limitation in Ollama and provides the correct solution to increase `num_ctx` in the Modelfile and match the Hermes configuration.\"}\n```", "tag": "grade:case-53359", "model": "gemini-3.7-flash"}

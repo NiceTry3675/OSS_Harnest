@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly states that Hermes does not support this and proposes workarounds, whereas the reference answer clarifies that the feature is already implemented.\"}\n```", "tag": "grade:case-6138", "model": "gemini-3.7-flash"}

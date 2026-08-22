@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response correctly identifies the agent turn/iteration limit (`max_turns`/`max_iterations`) as the bottleneck for processing batches across multiple tool calls.\"}\n```", "tag": "grade:case-53760", "model": "gemini-3.7-flash"}
