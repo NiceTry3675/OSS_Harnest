@@ -32,3 +32,7 @@ pnpm-debug.log*
 # --- 로컬 전용 메모 (팀 공유하려면 이 두 줄 삭제) ---
 plan.md
 background.md
+
+# --- 개인 실험 스크립트 실행 결과 (원할 때 개별적으로 add해서 기록용으로만 커밋) ---
+experiments/sandbox/runs/*.json
+experiments/sandbox/runs/*.md
