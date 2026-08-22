@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately identifies the correct configuration keys/methods for Telegram authorization and correctly notes that bootstrap.py/port 8787 is the wrong Web UI component.\"}\n```", "tag": "grade:case-34751", "model": "gemini-3.7-flash"}

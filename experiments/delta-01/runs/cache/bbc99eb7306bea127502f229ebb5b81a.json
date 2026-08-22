@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0, \"why\": \"The response fails to recognize that Hermes already has built-in context management and compression mechanisms addressing this use case, instead offering generic troubleshooting tips and plugin guidelines.\"}\n```", "tag": "grade:case-21567", "model": "gemini-3.7-flash"}

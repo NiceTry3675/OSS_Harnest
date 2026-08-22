@@ -1,0 +1,1 @@
+{"text": "{\"score\": 1, \"why\": \"The response correctly identifies that in-tree additions are discouraged in favor of building a standalone plugin under `~/.hermes/plugins/`.\"}", "tag": "grade:case-53407", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately captures the core facts of the reference answer: that automatic complexity routing is unsupported by design policy and that manual switching and subagent delegation are the supported alternatives.\"}\n```", "tag": "grade:case-33223", "model": "gemini-3.7-flash"}

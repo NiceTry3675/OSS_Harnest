@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0, \"why\": \"The response fails to identify the actual cause (Camofox postinstall downloading a browser binary silently) and instead provides a generic guess.\"}\n```", "tag": "grade:case-22237", "model": "gemini-3.7-flash"}

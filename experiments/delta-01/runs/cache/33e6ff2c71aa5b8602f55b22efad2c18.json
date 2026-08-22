@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0, \"why\": \"The response simply repeats the prompt's instructional text rather than providing the reference answer's explanation of recent codebase fixes and updated session-preservation behavior.\"}", "tag": "grade:case-8381", "model": "gemini-3.7-flash"}

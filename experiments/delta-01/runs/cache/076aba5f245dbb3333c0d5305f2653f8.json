@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response correctly identifies that DingTalk Markdown image syntax is supported in Hermes Agent, matching the core conclusion of the reference answer.\"}\n```", "tag": "grade:case-21462", "model": "gemini-3.7-flash"}

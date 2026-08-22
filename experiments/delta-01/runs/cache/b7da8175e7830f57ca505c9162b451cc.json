@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0, \"why\": \"The response completely misses the root cause regarding model normalization in `model_normalize.py` silently rewriting the model name, offering generic troubleshooting steps instead.\"}\n```", "tag": "grade:case-26105", "model": "gemini-3.7-flash"}

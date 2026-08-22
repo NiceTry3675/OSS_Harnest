@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0, \"why\": \"The response does not convey the reference answer's explanation that this issue is fixed on main/newer versions with specific environment variable support (FIRECRAWL_API_URL and SEARXNG_URL).\"}", "tag": "grade:case-44194", "model": "gemini-3.7-flash"}

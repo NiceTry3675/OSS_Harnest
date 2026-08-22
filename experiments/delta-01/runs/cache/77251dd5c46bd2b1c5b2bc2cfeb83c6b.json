@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response fails to mention the actual UI feature ('\u7f16\u8f91\u6a21\u578b\u2026' / model visibility dialog) to hide models and instead suggests unrelated CLI/config file workarounds.\"}\n```", "tag": "grade:case-57632", "model": "gemini-3.7-flash"}

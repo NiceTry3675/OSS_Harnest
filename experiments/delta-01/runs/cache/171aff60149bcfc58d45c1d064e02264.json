@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response correctly identifies that Hermes automatically sends `stream_options: {include_usage: true}` for OpenAI-compatible streaming backends without needing manual `extra_body` configuration.\"}\n```", "tag": "grade:case-31559", "model": "gemini-3.7-flash"}

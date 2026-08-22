@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately covers all key aspects from the reference answer, including `agent.max_turns` (default 90), how exhaustion behaves, and using `/goal` / `/goal resume` for long autonomous workflows.\"}\n```", "tag": "grade:case-6997", "model": "gemini-3.7-flash"}

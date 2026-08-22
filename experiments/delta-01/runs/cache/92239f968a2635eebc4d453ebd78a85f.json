@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0, \"why\": \"The response incorrectly states that this is not documented as a built-in feature, failing to mention that it is supported via the X-Hermes-Session-Key header.\"}\n```", "tag": "grade:case-52397", "model": "gemini-3.7-flash"}

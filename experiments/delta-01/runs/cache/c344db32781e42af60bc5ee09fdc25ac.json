@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0, \"why\": \"The response incorrectly states the feature needs to be implemented upstream, whereas the reference answer clarifies that it is already implemented and shipped.\"}\n```", "tag": "grade:case-42239", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response correctly identifies the root cause (using the /api endpoint instead of /v1) and provides the exact solution to fix the endpoint URL.\"}\n```", "tag": "grade:case-33811", "model": "gemini-3.7-flash"}

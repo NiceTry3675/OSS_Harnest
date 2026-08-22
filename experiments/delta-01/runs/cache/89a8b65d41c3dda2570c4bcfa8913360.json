@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly explains multi-profile gateway multiplexing and isolation, but incorrectly claims that WeChat/Weixin support is not explicitly mentioned or confirmed.\"}\n```", "tag": "grade:case-10030", "model": "gemini-3.7-flash"}

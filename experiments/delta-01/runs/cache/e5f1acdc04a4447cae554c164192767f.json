@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response fails to explain the core issue (OAuth routing being intended for Max plans, causing Team plans to fail) and does not provide the correct workarounds (using an API key or upgrading to Max).\"}\n```", "tag": "grade:case-37363", "model": "gemini-3.7-flash"}

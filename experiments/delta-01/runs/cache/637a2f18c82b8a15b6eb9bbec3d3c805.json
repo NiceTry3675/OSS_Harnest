@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response suggests the manual workaround of setting the API key to 'local', but misses the main resolution of updating Hermes to the version where this bug was fixed.\"}\n```", "tag": "grade:case-3555", "model": "gemini-3.7-flash"}

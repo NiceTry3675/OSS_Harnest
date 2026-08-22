@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly claims that the information is not available and that the value is only tracked ephemerally in-memory, missing the gateway support described in the reference answer.\"}\n```", "tag": "grade:case-74489", "model": "gemini-3.7-flash"}

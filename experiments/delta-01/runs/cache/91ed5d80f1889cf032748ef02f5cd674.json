@@ -1,0 +1,1 @@
+{"text": "{\"score\": 1, \"why\": \"The response accurately identifies that skill execution tracking is already implemented, citing the `/insights` and `hermes insights` commands as well as the `~/.hermes/skills/.usage.json` log location.\"}", "tag": "grade:case-21625", "model": "gemini-3.7-flash"}

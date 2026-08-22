@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately identifies the core solution: setting `supports_vision: true` in the model configuration to bypass the vision check fallback.\"}\n```", "tag": "grade:case-20376", "model": "gemini-3.7-flash"}

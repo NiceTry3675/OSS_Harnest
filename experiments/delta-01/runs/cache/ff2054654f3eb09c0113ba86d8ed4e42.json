@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies channel_prompts and user authorization settings, but it provides different configuration mechanisms than those specified in the reference answer.\"}\n```", "tag": "grade:case-47644", "model": "gemini-3.7-flash"}

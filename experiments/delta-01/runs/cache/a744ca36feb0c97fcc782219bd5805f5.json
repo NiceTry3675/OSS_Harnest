@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response fails to identify that the documentation was updated on main to explicitly state that macOS on Intel processors is unsupported.\"}\n```", "tag": "grade:case-38919", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly states that per-platform tool scoping is not supported or implemented, missing the key fact that the feature works and the issue was caused by including the 'browser' toolset.\"}\n```", "tag": "grade:case-52597", "model": "gemini-3.7-flash"}

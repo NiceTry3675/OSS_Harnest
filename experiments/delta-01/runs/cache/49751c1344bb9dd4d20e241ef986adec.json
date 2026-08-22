@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately covers the key architecture elements, including local USER.md/MEMORY.md storage for portability, model decoupling, and custom memory provider plugins.\"}\n```", "tag": "grade:case-51062", "model": "gemini-3.7-flash"}

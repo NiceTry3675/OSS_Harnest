@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately explains that the Gemini CLI OAuth provider is no longer supported and provides the correct solution to use a Google AI Studio API key.\"}\n```", "tag": "grade:case-25055", "model": "gemini-3.7-flash"}

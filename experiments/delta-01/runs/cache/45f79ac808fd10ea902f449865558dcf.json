@@ -1,0 +1,1 @@
+{"text": "{\"score\": 1.0, \"why\": \"The response correctly identifies that uploading Python scripts is already an existing, supported feature that automatically injects `.py` files into context.\"}", "tag": "grade:case-5047", "model": "gemini-3.7-flash"}

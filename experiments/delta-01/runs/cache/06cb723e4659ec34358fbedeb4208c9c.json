@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0, \"why\": \"The response suggests adding a custom normalizer in Hermes, which directly contradicts the reference answer's maintainer policy rejecting model-output repair and directing configuration to vLLM.\"}\n```", "tag": "grade:case-38376", "model": "gemini-3.7-flash"}

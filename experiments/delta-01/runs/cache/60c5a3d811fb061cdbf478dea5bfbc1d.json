@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately conveys all essential points from the reference answer, including provider configuration, base URL usage, and how Hermes handles Claude Code-specific environment variables.\"}\n```", "tag": "grade:case-9580", "model": "gemini-3.7-flash"}

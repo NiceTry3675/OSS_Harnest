@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately provides the exact solution identified in the reference answer by instructing the user to set PUID/PGID or HERMES_UID/HERMES_GID environment variables.\"}\n```", "tag": "grade:case-15290", "model": "gemini-3.7-flash"}
