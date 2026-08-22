@@ -62,16 +62,21 @@ Score strictly:
 
 Reply with JSON only: {{"score": 0 | 0.5 | 1, "why": "<one sentence>"}}"""
 
+P_LIMIT = ("HARD LIMIT: {cap} characters — any document over this is DISQUALIFIED (score 0). "
+           "Character counts are hard to judge, so target about {target} characters "
+           "(roughly {words} words) to stay safely under the limit.")
+
 P_ONESHOT = """You are writing an onboarding FAQ document for new users of the open-source project "Hermes Agent".
 Source material: real Q&A logs from the project's issue tracker (below).
 Write ONE self-contained document (markdown) that lets a reader answer as many future user questions as possible WITHOUT access to these logs.
-HARD LIMIT: at most {cap} characters. Exceeding it disqualifies the document.
+{limit}
 
 ## Q&A logs
 {material}"""
 
 P_ITERATE = """Below is an onboarding FAQ document for "Hermes Agent", plus the Q&A logs it was built from.
-Improve the document. Keep it self-contained and under {cap} characters.
+Improve the document. Keep it self-contained.
+{limit}
 
 ## Q&A logs
 {material}
@@ -82,7 +87,8 @@ Improve the document. Keep it self-contained and under {cap} characters.
 Output the full improved document only."""
 
 P_MUTATE = """Below is an onboarding FAQ document for "Hermes Agent", the Q&A logs it was built from, and a per-case error report from a frozen evaluator (a responder answered each logged question using ONLY the document; failures are listed).
-Revise the document to fix the reported failures without breaking what already works. Trade-offs are real: the HARD LIMIT is {cap} characters, so adding coverage may require compressing elsewhere.
+Revise the document to fix the reported failures without breaking what already works. Trade-offs are real: the length limit means adding coverage may require compressing elsewhere.
+{limit}
 
 ## Q&A logs
 {material}
@@ -94,6 +100,10 @@ Revise the document to fix the reported failures without breaking what already w
 {traces}
 
 Output the full revised document only."""
+
+
+def limit_block(cap):
+    return P_LIMIT.format(cap=cap, target=int(cap * 0.8), words=int(cap * 0.8 / 6.5))
 
 
 # ── LLM 어댑터 ───────────────────────────────────────────────────────────
@@ -220,27 +230,27 @@ def run_probe(visible, holdout):
 
 
 def run_oneshot(material, cap, visible):
-    doc = llm(P_ONESHOT.format(cap=cap, material=material), tag="oneshot")
+    doc = llm(P_ONESHOT.format(limit=limit_block(cap), material=material), tag="oneshot")
     vis, traces, gate = evaluate(doc, visible, cap)
     save("cond1_oneshot", {"doc": doc, "visible": vis, "gate_violation": gate, "traces": traces})
     return doc
 
 
 def run_iterate(material, cap, visible):
-    doc = llm(P_ONESHOT.format(cap=cap, material=material), tag="iter0")
+    doc = llm(P_ONESHOT.format(limit=limit_block(cap), material=material), tag="iter0")
     for i in range(1, ROUNDS):
-        doc = llm(P_ITERATE.format(cap=cap, material=material, doc=doc), tag=f"iter{i}")
+        doc = llm(P_ITERATE.format(limit=limit_block(cap), material=material, doc=doc), tag=f"iter{i}")
     vis, traces, gate = evaluate(doc, visible, cap)
     save("cond2_iterate", {"doc": doc, "visible": vis, "gate_violation": gate})
     return doc
 
 
 def run_harnest(material, cap, visible):
-    champ = llm(P_ONESHOT.format(cap=cap, material=material), tag="h0")
+    champ = llm(P_ONESHOT.format(limit=limit_block(cap), material=material), tag="h0")
     champ_score, champ_traces, _ = evaluate(champ, visible, cap)
     curve = [champ_score]
     for i in range(1, ROUNDS):
-        cand = llm(P_MUTATE.format(cap=cap, material=material, doc=champ,
+        cand = llm(P_MUTATE.format(limit=limit_block(cap), material=material, doc=champ,
                                    score=champ_score, traces="\n".join(champ_traces) or "(전 케이스 정답)"),
                    tag=f"h{i}")
         s, traces, gate = evaluate(cand, visible, cap)
@@ -254,7 +264,7 @@ def run_harnest(material, cap, visible):
 def run_bestof(material, cap, visible):
     best, best_score = None, -1
     for i in range(ROUNDS):
-        doc = llm(P_ONESHOT.format(cap=cap, material=material) + f"\n\n<!-- sample {i} -->",
+        doc = llm(P_ONESHOT.format(limit=limit_block(cap), material=material) + f"\n\n<!-- sample {i} -->",
                   tag=f"bo{i}")
         s, _, gate = evaluate(doc, visible, cap)
         if not gate and s > best_score:
