@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly claims the documentation lacks compatibility details for Intel Mac, missing the key resolution that the docs have been updated to explicitly mark macOS on Intel as unsupported.\"}\n```", "tag": "grade:case-38919", "model": "gemini-3.7-flash"}

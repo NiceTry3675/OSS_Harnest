@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately explains that Claude Code-specific environment variables are not used by Hermes and provides the correct configuration steps using `provider: azure-foundry` and `ANTHROPIC_FOUNDRY_BASE_URL`.\"}\n```", "tag": "grade:case-9580", "model": "gemini-3.7-flash"}

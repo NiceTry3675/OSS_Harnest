@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0, \"why\": \"The response incorrectly states that the information is unavailable and only stored in-memory, missing the actual Gateway API endpoints (`/status`, `/context`) and session state implementation described in the reference answer.\"}\n```", "tag": "grade:case-74489", "model": "gemini-3.7-flash"}

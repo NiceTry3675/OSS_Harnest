@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately captures the key policy points: in-tree additions are closed, and it should be built as a standalone plugin implementing MemoryProvider in ~/.hermes/plugins/.\"}\n```", "tag": "grade:case-9975", "model": "gemini-3.7-flash"}

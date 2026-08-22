@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately captures the key architectural mechanisms for memory portability and user ownership in Hermes, including local markdown storage and custom MemoryProvider plugins.\"}\n```", "tag": "grade:case-51062", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0, \"why\": \"The response incorrectly states that font/UI scaling is not currently supported, missing the reference answer's fact that UI scale controls and shortcuts are already implemented.\"}", "tag": "grade:case-53411", "model": "gemini-3.7-flash"}

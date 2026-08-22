@@ -1,0 +1,1 @@
+{"text": "According to the onboarding documentation, **API keys are always billed per-token by Anthropic**. \n\nTo use your **Claude Pro/Max subscription allowances** instead of paying for API tokens, you must authenticate via **Claude OAuth** rather than providing an API key.", "tag": "resp:case-29539", "model": "gemini-3.7-flash"}

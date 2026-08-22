@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response correctly identifies and provides the exact solution (setting PUID/PGID or HERMES_UID/HERMES_GID) to resolve permission issues on NAS bind mounts.\"}\n```", "tag": "grade:case-15290", "model": "gemini-3.7-flash"}

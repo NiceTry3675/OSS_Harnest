@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately identifies why `provider: auto` causes the 401 error and provides the correct configuration fix (`provider: custom` with the Ollama `base_url`).\"}\n```", "tag": "grade:case-3846", "model": "gemini-3.7-flash"}

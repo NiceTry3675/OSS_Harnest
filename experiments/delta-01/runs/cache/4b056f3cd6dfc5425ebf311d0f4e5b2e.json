@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0, \"why\": \"The response does not convey the key facts from the reference answer regarding the correct environment variables (SEARXNG_URL and FIRECRAWL_API_URL) and fixes implemented in the codebase.\"}", "tag": "grade:case-44194", "model": "gemini-3.7-flash"}

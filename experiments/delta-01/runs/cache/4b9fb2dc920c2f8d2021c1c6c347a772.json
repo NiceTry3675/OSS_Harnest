@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response correctly identifies that native Windows is Tier 1 supported via install.ps1 and accurately details the only remaining limitation regarding the Web Dashboard POSIX PTY terminal.\"}\n```", "tag": "grade:case-9196", "model": "gemini-3.7-flash"}

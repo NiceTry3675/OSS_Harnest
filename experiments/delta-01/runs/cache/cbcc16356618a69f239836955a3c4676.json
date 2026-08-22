@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately addresses the configuration mechanisms (channel_prompts, allowed_chats, and group permission settings) identified in the reference answer.\"}\n```", "tag": "grade:case-47644", "model": "gemini-3.7-flash"}

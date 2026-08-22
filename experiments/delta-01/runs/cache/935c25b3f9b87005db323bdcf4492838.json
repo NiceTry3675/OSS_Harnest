@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies the SDK validation issue and provides a valid dummy API key workaround, but misses the official update/release fix.\"}\n```", "tag": "grade:case-3555", "model": "gemini-3.7-flash"}

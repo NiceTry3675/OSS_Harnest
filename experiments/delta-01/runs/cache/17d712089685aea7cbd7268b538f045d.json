@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response does not know the answer and fails to identify that the issue was already addressed in a merged PR.\"}\n```", "tag": "grade:case-55537", "model": "gemini-3.7-flash"}

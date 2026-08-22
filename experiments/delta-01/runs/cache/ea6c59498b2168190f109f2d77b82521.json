@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response correctly identifies that Team plan OAuth is likely unsupported/incompatible and suggests the valid workarounds of using an API key or switching account types.\"}\n```", "tag": "grade:case-37363", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response fails to identify that the user likely downloaded malware from an unofficial link and does not provide the official desktop download URL.\"}\n```", "tag": "grade:case-39532", "model": "gemini-3.7-flash"}

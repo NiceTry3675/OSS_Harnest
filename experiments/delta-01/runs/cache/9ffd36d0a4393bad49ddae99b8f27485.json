@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies that the adapter should be built as an external plugin in `~/.hermes/plugins/`, but hesitates with meta-commentary about missing docs rather than giving the definitive maintainer decision.\"}\n```", "tag": "grade:case-53407", "model": "gemini-3.7-flash"}

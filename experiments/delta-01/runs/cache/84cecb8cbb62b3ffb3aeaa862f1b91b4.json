@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly states that per-platform toolset configuration is not supported, whereas the reference answer confirms it is implemented and explains why the user's configuration failed (due to including 'browser').\"}\n```", "tag": "grade:case-52597", "model": "gemini-3.7-flash"}

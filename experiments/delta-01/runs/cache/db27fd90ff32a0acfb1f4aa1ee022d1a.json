@@ -1,0 +1,1 @@
+{"text": "Legacy **Gemini CLI OAuth** has been removed in Hermes Agent. \n\nTo use Gemini, you need to use Google AI Studio by setting an API key instead. \n\nSet either of the following environment variables:\n* `GOOGLE_API_KEY`\n* `GEMINI_API_KEY`", "tag": "resp:case-25055", "model": "gemini-3.7-flash"}

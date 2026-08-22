@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies the MEDIA:<path> delivery mechanism for Telegram, but fails to mention that MCP image forwarding is already natively implemented for standard MCP ImageContent blocks in the latest release.\"}\n```", "tag": "grade:case-6138", "model": "gemini-3.7-flash"}

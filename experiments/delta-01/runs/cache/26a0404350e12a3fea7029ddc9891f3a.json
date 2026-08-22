@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly mentions concepts like resume_pending and mode: none, but frames the answer as user onboarding instructions rather than explaining the technical resolution and code updates described in the reference answer.\"}\n```", "tag": "grade:case-8381", "model": "gemini-3.7-flash"}

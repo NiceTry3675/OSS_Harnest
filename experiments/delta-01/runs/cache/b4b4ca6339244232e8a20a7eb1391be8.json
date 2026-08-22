@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately answers that this behavior is not normal and correctly identifies the platform mechanisms for file delivery (Matrix m.file events and SMTP attachments) matching the reference answer.\"}\n```", "tag": "grade:case-5537", "model": "gemini-3.7-flash"}

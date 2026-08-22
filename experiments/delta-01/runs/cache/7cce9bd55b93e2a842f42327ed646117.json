@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly suggests editing configuration files instead of using the 'Edit models...' UI option in the desktop picker to toggle model visibility.\"}\n```", "tag": "grade:case-57632", "model": "gemini-3.7-flash"}

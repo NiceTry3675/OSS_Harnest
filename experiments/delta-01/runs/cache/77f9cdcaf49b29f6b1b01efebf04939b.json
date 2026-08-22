@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0.5, \"why\": \"The response correctly identifies configuring vLLM's tool-call parser as a solution, but misses Hermes's core policy rejecting text-repair adapter layers in the codebase.\"}", "tag": "grade:case-38376", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response correctly identifies that Raspberry Pi is supported natively via the multi-architecture linux/arm64 Docker image.\"}\n```", "tag": "grade:case-5554", "model": "gemini-3.7-flash"}

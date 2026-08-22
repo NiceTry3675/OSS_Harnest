@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly states that no built-in context management exists for tool output, whereas the reference answer explains that Hermes already implements this via ContextCompressor and ContextEngine.\"}\n```", "tag": "grade:case-21567", "model": "gemini-3.7-flash"}

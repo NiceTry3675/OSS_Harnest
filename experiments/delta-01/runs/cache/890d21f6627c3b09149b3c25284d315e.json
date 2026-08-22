@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1, \"why\": \"The response accurately identifies that the feature is already implemented via the `/insights` / `hermes insights` command backed by the skill usage log file.\"}\n```", "tag": "grade:case-21625", "model": "gemini-3.7-flash"}

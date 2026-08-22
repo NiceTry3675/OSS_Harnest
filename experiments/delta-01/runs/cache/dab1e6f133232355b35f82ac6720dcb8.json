@@ -1,0 +1,1 @@
+{"text": "Hermes Agent is not restricted to the command line\u2014it includes a built-in web interface for chatting in the browser.\n\nTo launch the local web UI and browser chat:\n\n1. Run the command:\n   ```bash\n   hermes dashboard\n   ```\n2. Open your browser and navigate to:\n   ```\n   http://127.0.0.1:9119\n   ```", "tag": "resp:case-4420", "model": "gemini-3.7-flash"}

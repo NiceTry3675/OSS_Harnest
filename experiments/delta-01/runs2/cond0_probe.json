@@ -1,0 +1,286 @@
+{
+ "contamination_rate": 16.964285714285715,
+ "verdict": "통과",
+ "cases": [
+  {
+   "id": "case-1451",
+   "score": 0.5,
+   "why": "The response correctly identifies that high prompt processing time/tool calling overhead in local inference is the bottleneck rather than a bug, but misses the key Hermes-specific recommendation to reduce active toolsets via `hermes tools`."
+  },
+  {
+   "id": "case-33223",
+   "score": 0.0,
+   "why": "The response admits it lacks the maintainer context and speculates on technical reasons, failing to capture the actual standing project policy against automatic/complexity-based model routing."
+  },
+  {
+   "id": "case-3555",
+   "score": 0.5,
+   "why": "The response correctly identifies the root cause and provides a working workaround, but misses mentioning the actual release fix/update referenced in the ground truth."
+  },
+  {
+   "id": "case-3846",
+   "score": 0.5,
+   "why": "The response correctly identifies that Hermes is defaulting to an unauthenticated cloud provider and gives general setup steps for Ollama, but misses the specific root cause and workaround involving changing `provider: auto` to `provider: custom` in `config.yaml`."
+  },
+  {
+   "id": "case-4420",
+   "score": 0.0,
+   "why": "The response incorrectly claims that there is no built-in web interface, whereas Hermes does have a first-party web dashboard with browser chat."
+  },
+  {
+   "id": "case-5047",
+   "score": 0.0,
+   "why": "The response incorrectly states that file attachments are not supported and suggests requesting the feature, whereas the reference answer confirms it is already implemented in current main."
+  },
+  {
+   "id": "case-5352",
+   "score": 0.0,
+   "why": "The response provides a generic explanation of chat completion streaming rather than identifying the actual bug, root cause, or fix described in the reference answer."
+  },
+  {
+   "id": "case-5537",
+   "score": 0.0,
+   "why": "The response incorrectly states that file sending is unsupported and normal behavior, whereas the reference answer confirms that gateway file delivery is implemented and supported on main."
+  },
+  {
+   "id": "case-5554",
+   "score": 0.0,
+   "why": "The response provides general setup advice rather than noting that ARM64/Raspberry Pi support was implemented via multi-arch Docker builds in release v2026.4.13."
+  },
+  {
+   "id": "case-6090",
+   "score": 0.0,
+   "why": "The response incorrectly assumes vulnerability reporting is not yet configured, failing to inform the user that reporting is already enabled via SECURITY.md, email, and GitHub Security Advisories."
+  },
+  {
+   "id": "case-6138",
+   "score": 0.0,
+   "why": "The response incorrectly states that Hermes does not support this and proposes workarounds, whereas the reference answer clarifies that the feature is already implemented."
+  },
+  {
+   "id": "case-6997",
+   "score": 0.5,
+   "why": "The response accurately explains the general concepts of iteration limits and turn-based continuation, but it misses the specific Hermes features and configuration commands mentioned in the reference answer, notably `/goal` and `agent.max_turns`."
+  },
+  {
+   "id": "case-8381",
+   "score": 0.0,
+   "why": "The response explains the CLI message text rather than addressing the codebase fix and updated session preservation behavior described in the reference answer."
+  },
+  {
+   "id": "case-9196",
+   "score": 0.0,
+   "why": "The response incorrectly states that native Windows is unsupported and experimental, directly contradicting the reference answer which confirms it is now officially Tier 1 supported."
+  },
+  {
+   "id": "case-9580",
+   "score": 0.0,
+   "why": "The response incorrectly states that Hermes does not support ANTHROPIC_FOUNDRY_BASE_URL and fails to mention native Azure Foundry provider auto-detection support."
+  },
+  {
+   "id": "case-9975",
+   "score": 0.0,
+   "why": "The response incorrectly states that in-tree PR contributions for memory plugins are welcome, directly contradicting the policy in the reference answer that in-tree additions are closed and must be standalone plugins."
+  },
+  {
+   "id": "case-10030",
+   "score": 0.0,
+   "why": "The response incorrectly claims the feature is not supported natively, directly contradicting the reference answer which confirms it is supported."
+  },
+  {
+   "id": "case-11922",
+   "score": 0.0,
+   "why": "The response incorrectly claims Hermes Agent lacks built-in multi-agent features and fails to identify the actual native implementations (`delegate_task` and `channel_prompts`)."
+  },
+  {
+   "id": "case-12871",
+   "score": 0.0,
+   "why": "The response proposes a new tracing implementation from scratch instead of recognizing that the requested feature is already implemented via the bundled Langfuse observability plugin."
+  },
+  {
+   "id": "case-15290",
+   "score": 0.0,
+   "why": "The response fails to mention the key solution from the reference answer, which is user/group ID remapping using PUID/PGID (or HERMES_UID/HERMES_GID) in the Docker container."
+  },
+  {
+   "id": "case-17009",
+   "score": 0.0,
+   "why": "The response provides generic Termux troubleshooting steps rather than stating that this issue was resolved upstream in Hermes with dedicated Termux support and tempdir fixes."
+  },
+  {
+   "id": "case-20376",
+   "score": 0.5,
+   "why": "The response accurately explains the vision gating mechanism and custom provider limitations, but misses the specific config-level override and PR tracked in the reference answer."
+  },
+  {
+   "id": "case-21462",
+   "score": 0.5,
+   "why": "The response correctly identifies the technical mechanism (DingTalk markdown payload with public HTTPS URLs) but fails to note that this feature has already been implemented on main."
+  },
+  {
+   "id": "case-21567",
+   "score": 0.0,
+   "why": "The response fails to mention that Hermes already has a built-in context-management/compression implementation addressing this issue."
+  },
+  {
+   "id": "case-21625",
+   "score": 0.0,
+   "why": "The response provides generic advice on how to implement logging instead of recognizing that skill execution logging is already implemented in main via the insights and skill usage systems."
+  },
+  {
+   "id": "case-22237",
+   "score": 0.5,
+   "why": "The response correctly identifies post-install lifecycle scripts and browser tools as a primary cause of the delay, but misses the specific known issue regarding the Camofox postinstall silent browser download."
+  },
+  {
+   "id": "case-25055",
+   "score": 0.5,
+   "why": "The response suggests the correct working alternative (Google AI Studio API key), but misses that the Gemini CLI OAuth provider was completely removed and mistakenly suggests re-authenticating with OAuth."
+  },
+  {
+   "id": "case-26105",
+   "score": 0.0,
+   "why": "The response gives generic troubleshooting steps instead of identifying the actual root cause: model normalization in `model_normalize.py` silently rewriting `deepseek-v4-flash` to `deepseek-chat`."
+  },
+  {
+   "id": "case-29351",
+   "score": 0.0,
+   "why": "The response provides generic troubleshooting steps instead of explaining the actual Hermes tool architecture, such as using the plugin system for custom tools or using the correct file paths (`tools/` and `toolsets.py`)."
+  },
+  {
+   "id": "case-29476",
+   "score": 0.0,
+   "why": "The response provides generic user troubleshooting advice instead of identifying that this was a known installer and memory-routing bug resolved in v2026.7.1."
+  },
+  {
+   "id": "case-29534",
+   "score": 0.0,
+   "why": "The response treats the issue as an open problem requiring a proposed solution instead of identifying that it has already been implemented on main via the Discord gateway setup wizard."
+  },
+  {
+   "id": "case-29539",
+   "score": 0.5,
+   "why": "The response correctly identifies that API keys bill per-token rather than using Pro/Max subscription allowances, but misses the key solution that OAuth authentication allows using the Pro/Max subscription in Hermes Agent."
+  },
+  {
+   "id": "case-31559",
+   "score": 0.5,
+   "why": "The response correctly identifies why the issue occurs (missing stream_options and extra_body forwarding issues), but suggests configuration workarounds instead of noting that this was a codebase bug resolved in main."
+  },
+  {
+   "id": "case-33811",
+   "score": 0.5,
+   "why": "The response correctly identifies the missing `/v1` endpoint path issue, but misses the key solution that this was a Hermes bug resolved by updating to v0.15.0+."
+  },
+  {
+   "id": "case-34751",
+   "score": 0.0,
+   "why": "The response incorrectly identifies the root cause for Problem 1 as YAML formatting for `allowed_chats` instead of recognizing that `allow_from` (not `allowed_chats`) is the correct configuration key for user authorization."
+  },
+  {
+   "id": "case-37363",
+   "score": 0.5,
+   "why": "The response correctly identifies the workaround of using an Anthropic API key instead of OAuth, but misses the core cause that OAuth subscription routing is designed for the Max plan rather than Team/Pro plans."
+  },
+  {
+   "id": "case-38376",
+   "score": 0.5,
+   "why": "The response identifies the formatting mismatch and server-side vLLM configuration fix, but erroneously suggests a client-side Hermes adapter which the reference answer explicitly rejects under its standing model-output-repair policy."
+  },
+  {
+   "id": "case-38919",
+   "score": 0.0,
+   "why": "The response provides a technical workaround instead of addressing the resolution in the reference answer, which notes that Intel macOS was officially documented as unsupported."
+  },
+  {
+   "id": "case-38935",
+   "score": 0.5,
+   "why": "The response suggests generic installation workarounds rather than the official `-HermesHome` and `-InstallDir` script parameters documented in the reference."
+  },
+  {
+   "id": "case-39532",
+   "score": 0.0,
+   "why": "The response fails to identify that the user downloaded a fake installer/malware and does not provide the official download link as in the reference answer."
+  },
+  {
+   "id": "case-42239",
+   "score": 0.0,
+   "why": "The response incorrectly states that Hermes Desktop lacks a profile switcher and offers workarounds, whereas the reference answer confirms the feature has already been implemented and shipped."
+  },
+  {
+   "id": "case-42473",
+   "score": 0.0,
+   "why": "The response recommends submitting a core platform adapter PR and opening an RFC issue, missing the reference answer's specific guidance that community adapters should be standalone plugins in `~/.hermes/plugins/` rather than core integrations."
+  },
+  {
+   "id": "case-44194",
+   "score": 0.0,
+   "why": "The response perpetuates the outdated workarounds instead of conveying the actual resolution where SEARXNG_URL is used and the Firecrawl API key is optional."
+  },
+  {
+   "id": "case-44894",
+   "score": 0.5,
+   "why": "The response explains the cause and provides practical workarounds, but misses the key fact from the reference answer that this was fixed in main via PR #47235."
+  },
+  {
+   "id": "case-46775",
+   "score": 0.5,
+   "why": "The response explains the technical rationale and correctly recommends `.hermes.md` for inherited rules, but misses the fact that this was already resolved via a specific documentation update."
+  },
+  {
+   "id": "case-47644",
+   "score": 0.0,
+   "why": "The response provides generic Telegram bot troubleshooting rather than the specific code/configuration fixes and issue resolution detailed in the reference answer."
+  },
+  {
+   "id": "case-51062",
+   "score": 0.5,
+   "why": "The response provides good general architectural guidance on tiered, portable memory but misses Hermes-specific implementation details such as the MemoryProvider plugin architecture, supported providers, and write approval configuration."
+  },
+  {
+   "id": "case-52397",
+   "score": 0.5,
+   "why": "The response correctly identifies that this is achievable, but incorrectly claims it is done via the JSON `user` field rather than the `X-Hermes-Session-Key` HTTP header."
+  },
+  {
+   "id": "case-52597",
+   "score": 0.0,
+   "why": "The response incorrectly claims that per-platform toolset configuration is not supported, whereas the reference answer confirms it is implemented and explains that the user needed to remove 'browser' as well."
+  },
+  {
+   "id": "case-52995",
+   "score": 0.5,
+   "why": "The response correctly endorses and details the exact proposed design, but frames it as a prospective recommendation rather than noting it was already accepted and implemented via PR #70457."
+  },
+  {
+   "id": "case-53407",
+   "score": 0.0,
+   "why": "The response encourages an in-tree PR under gateway/platforms/, whereas the reference answer explicitly rejects in-tree integration and directs it to be built as a standalone external plugin repo."
+  },
+  {
+   "id": "case-53411",
+   "score": 0.0,
+   "why": "The response fails to recognize that the feature has already been implemented and instead treats it as a pending feature request."
+  },
+  {
+   "id": "case-54393",
+   "score": 0.0,
+   "why": "The response suggests manual YAML configuration adjustments rather than mentioning the font picker feature recently added to the dashboard."
+  },
+  {
+   "id": "case-55537",
+   "score": 0.0,
+   "why": "The response merely summarizes the issue and proposes an implementation plan rather than identifying that the issue is already addressed and resolved by an existing PR."
+  },
+  {
+   "id": "case-57632",
+   "score": 0.0,
+   "why": "The response incorrectly instructs editing backend configuration files instead of using the built-in '编辑模型…' UI toggle in the model picker."
+  },
+  {
+   "id": "case-74489",
+   "score": 0.0,
+   "why": "The response incorrectly states that this is not available via Gateway API, whereas the reference answer confirms it has been implemented and is accessible via gateway session state and commands like /status and /context."
+  }
+ ]
+}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly explains multiplexed profiles and account isolation, but incorrectly claims WeChat/Weixin is not explicitly supported.\"}\n```", "tag": "grade:case-10030", "model": "gemini-3.7-flash"}

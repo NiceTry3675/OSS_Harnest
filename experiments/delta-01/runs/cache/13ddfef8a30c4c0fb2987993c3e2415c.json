@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response fails to mention that the hardcoded fallback bug was fixed in PR #47235 and instead provides a generic configuration workaround.\"}\n```", "tag": "grade:case-44894", "model": "gemini-3.7-flash"}

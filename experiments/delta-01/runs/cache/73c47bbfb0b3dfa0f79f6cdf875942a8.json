@@ -1,0 +1,1 @@
+{"text": "{\"score\": 1, \"why\": \"The response accurately identifies why allowed_chats failed and provides the correct fix (allow_from/pairing), while correctly identifying that bootstrap.py/port 8787 is the wrong web UI component instead of the standard hermes dashboard.\"}", "tag": "grade:case-34751", "model": "gemini-3.7-flash"}

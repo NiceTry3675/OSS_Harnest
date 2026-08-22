@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0, \"why\": \"The response incorrectly claims the feature is undocumented and suggests filing a feature request, whereas the reference answer confirms it has already been implemented.\"}\n```", "tag": "grade:case-42239", "model": "gemini-3.7-flash"}
