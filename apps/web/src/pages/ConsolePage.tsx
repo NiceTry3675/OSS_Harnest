@@ -1,9 +1,13 @@
 /** 관제실 — 사용자는 AI와 대화하지 않고 지켜보고 통제한다.
+ *  템플릿 접점은 등록소(getTemplate) 인터페이스뿐 — 템플릿별 분기 코드를 두지 않는다.
  *  실행 인스턴스는 마운트당 1회 생성(StrictMode 이중 이펙트는 ref로 흡수),
- *  runId는 프로젝트 상태에 보존되어 재진입 시 체크포인트에서 재개된다. */
+ *  runId는 프로젝트 상태에 보존되어 재진입 시 체크포인트에서 재개된다.
+ *  홀드아웃 채점은 라운드 0과 종료 시에만 — 결과는 표시 전용, 루프 제어에 절대 유입되지 않는다
+ *  (SPEC §3 원칙 7). */
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import type { LoopCheckpoint } from "@harnest/contracts";
 import {
   createLoopRun,
   IndexedDbCheckpointStore,
@@ -11,13 +15,9 @@ import {
   type LoopHandle,
   type LoopRunOptions,
 } from "@harnest/loop-engine";
-import {
-  initialTimetable,
-  mutate,
-  score,
-  type Timetable,
-} from "@harnest/template-timetable";
-import { useProject } from "../state";
+import { useProject, type HoldoutScores } from "../state";
+import { getTemplate, type TemplateRuntime } from "../templates";
+import { setByoKey } from "../lib/llm";
 import { CurveChart } from "../components/CurveChart";
 import { ExperimentTree } from "../components/ExperimentTree";
 
@@ -42,36 +42,103 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 export function ConsolePage() {
-  const { compiled, approvedAt, runId, setRunId, checkpoint, setCheckpoint } = useProject();
+  const {
+    templateId,
+    compiled,
+    approvedAt,
+    runId,
+    setRunId,
+    checkpoint,
+    setCheckpoint,
+    holdout,
+    setHoldout,
+  } = useProject();
   const navigate = useNavigate();
+  const entry = getTemplate(templateId);
+
+  /** 실행 준비(모델 구성) 실패 — 카드로 표시하고 키 저장 후 재시도할 수 있다 */
+  const [setupError, setSetupError] = useState<string | null>(null);
+  const [keyInput, setKeyInput] = useState("");
+  const [retryTick, setRetryTick] = useState(0);
+  /** 실행 중 오류 — 체크포인트가 남아 있으므로 재시도는 start() 재호출로 이어서 진행 */
   const [runError, setRunError] = useState<string | null>(null);
+  const [holdoutError, setHoldoutError] = useState<string | null>(null);
+  const [callsPerRound, setCallsPerRound] = useState<number>(0);
+
   const handleRef = useRef<LoopHandle | null>(null);
   // 재진입이면 기존 runId로 재개, 최초 진입이면 새로 발급
   const runIdRef = useRef<string>(runId ?? crypto.randomUUID());
+  // 홀드아웃 진행 상태 — onEvent 클로저에서 최신값을 보기 위한 ref (표시 전용 데이터)
+  const holdoutRef = useRef<HoldoutScores>({ ...holdout });
+  const baselineStartedRef = useRef(false);
+  const finalStartedRef = useRef(false);
 
-  const ready = compiled !== null && approvedAt !== null;
+  const ready = entry !== null && compiled !== null && approvedAt !== null;
 
   useEffect(() => {
     if (ready && runId === null) setRunId(runIdRef.current);
   }, [ready, runId, setRunId]);
 
   useEffect(() => {
-    if (!compiled || !approvedAt || handleRef.current !== null) return;
-    const { problem, pack, loopSpec } = compiled;
-    const store: CheckpointStore<Timetable> = new IndexedDbCheckpointStore();
-    const options: LoopRunOptions<Timetable> = {
+    if (!entry || !compiled || !approvedAt || handleRef.current !== null) return;
+
+    let runtime: TemplateRuntime;
+    try {
+      // 승인·동결된 팩의 저지 선언과 실행 모델이 어긋나면 여기서 throw — 재승인 원칙
+      const llm = entry.createLlm(compiled);
+      runtime = entry.createRuntime(compiled, llm);
+    } catch (e) {
+      setSetupError(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    setSetupError(null);
+    setCallsPerRound(runtime.callsPerRound);
+
+    const scoreHoldout = runtime.scoreHoldout;
+    const onEvent = (cp: LoopCheckpoint<unknown>): void => {
+      setCheckpoint(cp);
+      if (!scoreHoldout) return;
+      // 홀드아웃은 표시 전용 — 아래 어떤 결과도 루프 제어·Generator로 되돌아가지 않는다
+      if (cp.round === 0 && holdoutRef.current.baseline === null && !baselineStartedRef.current) {
+        baselineStartedRef.current = true;
+        const champion = cp.champion; // 그 시점 챔피언을 지역 캡처(이후 라운드 변이와 격리)
+        void scoreHoldout(champion)
+          .then((score) => {
+            holdoutRef.current = { ...holdoutRef.current, baseline: score };
+            setHoldout({ ...holdoutRef.current });
+          })
+          .catch((e: unknown) =>
+            setHoldoutError(e instanceof Error ? e.message : String(e)),
+          );
+      }
+      if (cp.status === "done" && !finalStartedRef.current) {
+        finalStartedRef.current = true;
+        const champion = cp.champion;
+        void scoreHoldout(champion)
+          .then((score) => {
+            holdoutRef.current = { ...holdoutRef.current, final: score };
+            setHoldout({ ...holdoutRef.current });
+          })
+          .catch((e: unknown) =>
+            setHoldoutError(e instanceof Error ? e.message : String(e)),
+          );
+      }
+    };
+
+    const store: CheckpointStore<unknown> = new IndexedDbCheckpointStore();
+    const options: LoopRunOptions<unknown> = {
       runId: runIdRef.current,
-      pack,
-      spec: loopSpec,
-      scorer: (tt) => score(problem, tt),
-      generate: (champion, rng) => mutate(problem, champion, rng),
-      initial: (rng) => initialTimetable(problem, rng),
+      pack: compiled.pack,
+      spec: compiled.loopSpec,
+      scorer: runtime.scorer,
+      generate: runtime.generate,
+      initial: runtime.initial,
       store,
-      onEvent: (cp) => setCheckpoint(cp),
-      roundDelayMs: 120,
+      onEvent,
+      roundDelayMs: runtime.roundDelayMs,
     };
     handleRef.current = createLoopRun(options);
-  }, [compiled, approvedAt, setCheckpoint]);
+  }, [entry, compiled, approvedAt, retryTick, setCheckpoint, setHoldout]);
 
   useEffect(() => () => handleRef.current?.pause(), []);
 
@@ -89,8 +156,11 @@ export function ConsolePage() {
             실행 전에 채점 기준을 확인하고 승인해야 합니다. 승인된 기준만이 실행에 쓰이며,
             실행 중에는 변경되지 않습니다.
           </p>
-          <button className="primary" onClick={() => navigate(compiled ? "/approve" : "/wizard")}>
-            {compiled ? "승인 화면으로 이동" : "프로젝트 설정부터 시작"}
+          <button
+            className="primary"
+            onClick={() => navigate(entry && compiled ? "/approve" : "/wizard")}
+          >
+            {entry && compiled ? "승인 화면으로 이동" : "프로젝트 설정부터 시작"}
           </button>
         </div>
       </div>
@@ -104,6 +174,12 @@ export function ConsolePage() {
       ?.start()
       .catch((e: unknown) => setRunError(e instanceof Error ? e.message : String(e)));
   };
+  const retrySetup = () => {
+    const key = keyInput.trim();
+    if (key.length > 0) setByoKey(key);
+    setSetupError(null);
+    setRetryTick((t) => t + 1);
+  };
 
   return (
     <div>
@@ -113,6 +189,36 @@ export function ConsolePage() {
         <span className="lock-badge">기준 동결</span>{" "}
         <span className="mono digest">{compiled.pack.definitionDigest.slice(0, 16)}…</span>
       </p>
+
+      {setupError !== null && (
+        <div className="card" style={{ borderColor: "var(--bad)" }}>
+          <p className="error" style={{ marginTop: 0 }}>{setupError}</p>
+          <div className="field">
+            <label htmlFor="byo-key">채점 모델 API 키</label>
+            <input
+              id="byo-key"
+              type="password"
+              placeholder="승인된 채점 모델의 API 키를 입력하세요"
+              value={keyInput}
+              onChange={(e) => setKeyInput(e.target.value)}
+            />
+            <p className="hint">
+              키는 이 브라우저(localStorage)에만 저장되고 벤더 API로 직행합니다 — 우리 서버로는
+              가지 않습니다.
+            </p>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="primary" onClick={retrySetup}>
+              저장 후 다시 시도
+            </button>
+            <button onClick={() => navigate("/wizard")}>기준 다시 만들기</button>
+          </div>
+          <p className="hint" style={{ marginBottom: 0 }}>
+            키 없이 사용하려면 기준을 처음부터 다시 만들어 모의 모델로 승인해 주세요 — 승인된
+            판정 절차는 여기서 바꿀 수 없습니다.
+          </p>
+        </div>
+      )}
 
       <div className="card">
         <div className="row">
@@ -132,14 +238,38 @@ export function ConsolePage() {
             }
           />
         </div>
+        {holdout.baseline !== null && (
+          <div style={{ marginTop: 10 }}>
+            <span className="badge">숨김 케이스(시작): {fmt(holdout.baseline)}점</span>
+            {holdoutError !== null && (
+              <span className="hint" style={{ marginLeft: 4 }}>
+                숨김 케이스 채점 오류: {holdoutError}
+              </span>
+            )}
+          </div>
+        )}
+        {holdout.baseline === null && holdoutError !== null && (
+          <p className="hint" style={{ marginBottom: 0 }}>
+            숨김 케이스 채점 오류: {holdoutError} (표시용 지표만 누락 — 실행에는 영향 없음)
+          </p>
+        )}
+        {callsPerRound > 0 && (
+          <p className="hint" style={{ marginTop: 10, marginBottom: 0 }}>
+            라운드당 약 {callsPerRound}회 모델 호출 · 최대 {compiled.loopSpec.maxRounds}라운드
+          </p>
+        )}
         <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-          <button className="primary" onClick={start} disabled={status !== "idle"}>
+          <button
+            className="primary"
+            onClick={start}
+            disabled={status !== "idle" || setupError !== null}
+          >
             실행 시작
           </button>
           <button onClick={() => handleRef.current?.pause()} disabled={status !== "running"}>
             일시정지
           </button>
-          <button onClick={start} disabled={status !== "paused"}>
+          <button onClick={start} disabled={status !== "paused" || setupError !== null}>
             재개
           </button>
           {status === "done" && (
@@ -148,12 +278,17 @@ export function ConsolePage() {
             </button>
           )}
         </div>
-        {runError !== null && (
-          <p className="error" style={{ marginBottom: 0 }}>
-            실행 오류: {runError}
-          </p>
-        )}
       </div>
+
+      {runError !== null && (
+        <div className="card" style={{ borderColor: "var(--bad)" }}>
+          <p className="error" style={{ marginTop: 0 }}>모델 호출 중 오류가 발생했습니다: {runError}</p>
+          <p className="hint">
+            지금까지의 진행은 체크포인트에 저장되어 있습니다 — 다시 시도하면 이어서 진행됩니다.
+          </p>
+          <button onClick={start}>다시 시도</button>
+        </div>
+      )}
 
       <div className="card">
         <CurveChart curve={checkpoint?.curve ?? []} adopted={adopted} xMax={compiled.loopSpec.maxRounds} />

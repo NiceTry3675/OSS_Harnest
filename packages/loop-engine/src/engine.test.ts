@@ -281,6 +281,121 @@ describe("createLoopRun", () => {
   });
 });
 
+describe("createLoopRun — 비동기 슬롯", () => {
+  it("Promise를 반환하는 scorer·generate·initial로도 결정성과 채택이 동작한다", async () => {
+    const spec = makeSpec({ maxRounds: 10, seed: 21 });
+    const scorer = async (a: number): Promise<ScoreResult> => {
+      await new Promise((r) => setTimeout(r, 0));
+      return ok(a);
+    };
+    const generate = async (champion: number, rng: () => number): Promise<number> => {
+      await Promise.resolve();
+      return champion + (rng() * 2 - 0.9);
+    };
+    const initial = async (rng: () => number): Promise<number> => rng() * 10;
+
+    // (a) 끝까지 실행 — 채택이 실제로 일어난다
+    const storeA = new MemoryCheckpointStore<number>();
+    await createLoopRun<number>({
+      runId: "async-det",
+      pack,
+      spec,
+      scorer,
+      generate,
+      initial,
+      store: storeA,
+      onEvent: () => {},
+    }).start();
+    const finalA = await storeA.load("async-det");
+    expect(finalA).not.toBeNull();
+    expect(finalA?.status).toBe("done");
+    expect(finalA?.tree.some((r) => r.adopted)).toBe(true);
+    expect(finalA!.championScore).toBeGreaterThan(finalA!.curve[0]);
+
+    // (b) 라운드 4에서 pause 후 재개 — 곡선·챔피언이 (a)와 동일(결정성)
+    const storeB = new MemoryCheckpointStore<number>();
+    let handleB: LoopHandle;
+    const optsB: LoopRunOptions<number> = {
+      runId: "async-det",
+      pack,
+      spec,
+      scorer,
+      generate,
+      initial,
+      store: storeB,
+      onEvent: (cp) => {
+        if (cp.status === "running" && cp.round === 4) handleB.pause();
+      },
+    };
+    handleB = createLoopRun(optsB);
+    await handleB.start();
+    expect((await storeB.load("async-det"))?.status).toBe("paused");
+
+    await createLoopRun({ ...optsB, onEvent: () => {} }).start();
+    const finalB = await storeB.load("async-det");
+    expect(finalB?.status).toBe("done");
+    expect(finalB?.curve).toEqual(finalA?.curve);
+    expect(finalB?.champion).toBe(finalA?.champion);
+    expect(finalB?.championScore).toBe(finalA?.championScore);
+    expect(finalB?.tree.map((r) => [r.candidateScore, r.adopted])).toEqual(
+      finalA?.tree.map((r) => [r.candidateScore, r.adopted]),
+    );
+  });
+});
+
+describe("createLoopRun — Generator 피드백", () => {
+  it("generate는 매 라운드 직전 챔피언(채택 확정 후)의 score·violations를 정확히 받는다", async () => {
+    // 후보별 채점 결과를 고정해 두고 라운드별 feedback을 캡처해 대조한다:
+    // r1 채택(30) → r2 기각(20) → r3 게이트 기각(90) → r4 채택(55)
+    const results: Record<string, ScoreResult> = {
+      c0: { total: 10, violations: ["초기 위반"], parts: {}, gateRejected: false },
+      c1: { total: 30, violations: ["위반 A"], parts: {}, gateRejected: false },
+      c2: { total: 20, violations: ["위반 B"], parts: {}, gateRejected: false },
+      c3: { total: 90, violations: ["게이트 위반"], parts: {}, gateRejected: true },
+      c4: { total: 55, violations: ["위반 C"], parts: {}, gateRejected: false },
+    };
+    let n = 0;
+    const captured: Array<{
+      round: number;
+      champion: string;
+      score: number;
+      violations: string[];
+    }> = [];
+    const store = new MemoryCheckpointStore<string>();
+    await createLoopRun<string>({
+      runId: "feedback",
+      pack,
+      spec: makeSpec({ maxRounds: 4 }),
+      scorer: async (a) => results[a],
+      generate: async (champion, _rng, feedback) => {
+        captured.push({
+          round: feedback.round,
+          champion,
+          score: feedback.championScore,
+          violations: [...feedback.championViolations],
+        });
+        return `c${++n}`;
+      },
+      initial: async () => "c0",
+      store,
+      onEvent: () => {},
+    }).start();
+
+    expect(captured).toEqual([
+      { round: 1, champion: "c0", score: 10, violations: ["초기 위반"] }, // 원샷 기준선
+      { round: 2, champion: "c1", score: 30, violations: ["위반 A"] }, // r1 채택 반영
+      { round: 3, champion: "c1", score: 30, violations: ["위반 A"] }, // r2 기각 → 유지
+      { round: 4, champion: "c1", score: 30, violations: ["위반 A"] }, // r3 게이트 기각 → 유지
+    ]);
+
+    const final = await store.load("feedback");
+    expect(final?.champion).toBe("c4");
+    expect(final?.championScore).toBe(55);
+    expect(final?.championViolations).toEqual(["위반 C"]);
+    expect(final?.curve).toEqual([10, 30, 30, 30, 55]);
+  });
+});
+
 describe("IndexedDbCheckpointStore", () => {
   it("저장·복원 왕복, 없는 runId는 null", async () => {
     globalThis.indexedDB = fakeIndexedDB;

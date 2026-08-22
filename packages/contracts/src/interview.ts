@@ -7,7 +7,17 @@ export interface InterviewSubmission {
   answers: Record<string, unknown>;
 }
 
-export type QuestionType = "text" | "number" | "staffList";
+export type QuestionType = "text" | "number" | "staffList" | "textarea" | "caseList";
+
+/** 평가 케이스 — 케이스 기반 템플릿의 원료이자 정답(ground truth).
+ *  interview_schema.md caseList의 스켈레톤 부분집합. */
+export interface CaseDef {
+  id: string;
+  /** 실제로 받았던 질문·요청 */
+  question: string;
+  /** 그때의 실제 답·처리 — grader가 대조할 정답 */
+  expectedAnswer: string;
+}
 
 export interface Question {
   id: string;

@@ -67,8 +67,8 @@ export function createLoopRun<A>(opts: LoopRunOptions<A>): LoopHandle {
         note(c, "resumed", `체크포인트에서 재개 — 라운드 ${c.round} 이후부터 계속`);
         await commit(c);
       } else {
-        const champion = initial(rng);
-        const first = scorer(champion);
+        const champion = await initial(rng);
+        const first = await scorer(champion);
         c = {
           runId,
           packDigest: pack.definitionDigest,
@@ -101,8 +101,12 @@ export function createLoopRun<A>(opts: LoopRunOptions<A>): LoopHandle {
         }
 
         const round = c.round + 1;
-        const candidate = generate(c.champion, rng);
-        const result = scorer(candidate);
+        const candidate = await generate(c.champion, rng, {
+          round,
+          championScore: c.championScore,
+          championViolations: c.championViolations,
+        });
+        const result = await scorer(candidate);
         const prevScore = c.championScore;
         // 게이트 기각 후보는 채택 판정에 진입하지 않는다; 동점은 챔피언 유지(scalar_strict)
         const adopted = !result.gateRejected && result.total > prevScore;

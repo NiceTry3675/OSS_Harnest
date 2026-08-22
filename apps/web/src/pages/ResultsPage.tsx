@@ -1,13 +1,15 @@
 /** 결과 — 산출물보다 측정이 먼저(PHILOSOPHY §5): 점수 헤드라인이 최상단.
+ *  산출물 렌더는 등록소의 ArtifactView로 위임 — 이 파일은 템플릿을 모른다.
+ *  홀드아웃 점수는 표시 전용 참고 지표(SPEC §3 원칙 7) — 루프에 관여하지 않았다.
  *  서버 기록은 있으면 남기고 없으면 조용히 넘어간다(오프라인 완결). */
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ProvenanceType } from "@harnest/contracts";
 import { useProject } from "../state";
+import { getTemplate } from "../templates";
 import { saveProject, uploadResult } from "../lib/api";
 import { CurveChart } from "../components/CurveChart";
-import { TimetableGrid } from "../components/TimetableGrid";
 
 const PROVENANCE_LABEL: Record<ProvenanceType, string> = {
   run_started: "실행 시작",
@@ -28,39 +30,40 @@ function timeOf(iso: string): string {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleTimeString("ko-KR", { hour12: false });
 }
 
-export function ResultsPage() {
-  const { compiled, approvedAt, answers, runId, checkpoint } = useProject();
-  const navigate = useNavigate();
-  const [saved, setSaved] = useState(false);
-  const saveTried = useRef(false);
+function deltaColor(delta: number): string {
+  return delta > 0 ? "var(--good)" : delta < 0 ? "var(--bad)" : "var(--ink-3)";
+}
 
-  useEffect(() => {
-    if (saveTried.current) return;
-    if (!compiled || !checkpoint || checkpoint.status !== "done") return;
-    saveTried.current = true;
-    void (async () => {
-      // API 계약(apps/api/main.py): POST /projects {interview, pack, loopSpec} / results {checkpoint}
-      const projectId = await saveProject({
-        interview: {
-          schemaVersion: "skeleton-1",
-          templateId: compiled.pack.templateId,
-          answers,
-        },
-        pack: compiled.pack,
-        loopSpec: compiled.loopSpec,
-      });
-      if (projectId === null) return;
-      const ok = await uploadResult(projectId, { checkpoint });
-      if (ok) setSaved(true);
-    })();
-  }, [compiled, checkpoint, answers, approvedAt, runId]);
+export function ResultsPage() {
+  const { compiled, approvedAt, answers, runId, checkpoint, holdout } = useProject();
+  const navigate = useNavigate();
+  const [saved, setSaved] = useState<"idle" | "saving" | "ok" | "fail">("idle");
+  const entry = compiled ? getTemplate(compiled.pack.templateId) : null;
+
+  // 업로드는 자동이 아니라 사용자의 선택이다 — 입력한 기록(질문·답 전체)과 산출물이
+  // 로컬 서버 DB에 저장되므로, 무엇이 전송되는지 고지하고 버튼으로만 보낸다.
+  const uploadToServer = async () => {
+    if (!compiled || !checkpoint || saved === "saving") return;
+    setSaved("saving");
+    const projectId = await saveProject({
+      interview: {
+        schemaVersion: "skeleton-1",
+        templateId: compiled.pack.templateId,
+        answers,
+      },
+      pack: compiled.pack,
+      loopSpec: compiled.loopSpec,
+    });
+    const ok = projectId !== null && (await uploadResult(projectId, { checkpoint }));
+    setSaved(ok ? "ok" : "fail");
+  };
 
   const adopted = useMemo(
     () => new Set((checkpoint?.tree ?? []).filter((r) => r.adopted).map((r) => r.round)),
     [checkpoint],
   );
 
-  if (!compiled || !checkpoint || checkpoint.status !== "done") {
+  if (!compiled || !entry || !checkpoint || checkpoint.status !== "done") {
     return (
       <div>
         <h1>결과</h1>
@@ -78,6 +81,11 @@ export function ResultsPage() {
   const final = checkpoint.championScore;
   const delta = final - baseline;
   const { pack } = compiled;
+  const jp = pack.judgeProcedure;
+  const hp = pack.holdoutPolicy;
+  const ArtifactView = entry.ArtifactView;
+  const holdoutDelta =
+    holdout.baseline !== null && holdout.final !== null ? holdout.final - holdout.baseline : null;
 
   return (
     <div>
@@ -102,23 +110,63 @@ export function ResultsPage() {
         <div style={{ fontSize: 13, color: "var(--ink-3)", marginTop: 4 }}>
           총 {checkpoint.round}라운드
           {checkpoint.doneReason === "plateau" ? " · 정체로 조기 종료" : ""}
-          {saved && (
-            <span className="badge" style={{ marginLeft: 8 }}>
-              서버에 기록됨
-            </span>
+        </div>
+        <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 10 }}>
+          {saved === "ok" ? (
+            <span className="badge">서버에 기록됨</span>
+          ) : (
+            <>
+              <button onClick={uploadToServer} disabled={saved === "saving"}>
+                {saved === "saving" ? "기록 중…" : "서버에 기록"}
+              </button>
+              <span style={{ fontSize: 12, color: "var(--ink-3)" }}>
+                입력한 질문·답 기록과 결과 문서가 로컬 서버(localhost:8000)에 저장됩니다.
+                {saved === "fail" ? " — 서버에 연결할 수 없습니다." : ""}
+              </span>
+            </>
           )}
         </div>
       </div>
 
-      <h2>근무표</h2>
+      {(holdout.baseline !== null || holdout.final !== null) && (
+        <div className="card">
+          <div style={{ fontSize: 16, fontWeight: 600 }}>
+            본 적 없는 질문에서 — 시작{" "}
+            {holdout.baseline !== null ? `${fmt(holdout.baseline)}점` : "측정 없음"} → 종료{" "}
+            {holdout.final !== null ? `${fmt(holdout.final)}점` : "측정 없음"}
+            {holdoutDelta !== null && (
+              <span
+                style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  marginLeft: 8,
+                  color: deltaColor(holdoutDelta),
+                }}
+              >
+                {holdoutDelta > 0
+                  ? `+${fmt(holdoutDelta)}점`
+                  : holdoutDelta < 0
+                    ? `${fmt(holdoutDelta)}점`
+                    : "변화 없음"}
+              </span>
+            )}
+          </div>
+          <p className="hint" style={{ marginBottom: 0 }}>
+            숨김 케이스는 실행 중 루프에 전혀 노출되지 않았습니다 — 시작과 종료 시에만 측정한
+            참고 지표입니다.
+          </p>
+        </div>
+      )}
+
+      <h2>산출물</h2>
       <div className="card">
-        <TimetableGrid problem={compiled.problem} timetable={checkpoint.champion} />
+        <ArtifactView problem={compiled.problem} artifact={checkpoint.champion} />
       </div>
 
-      <h2>남은 위반</h2>
+      <h2>남은 실패 항목</h2>
       <div className="card">
         {checkpoint.championViolations.length === 0 ? (
-          <p style={{ margin: 0, fontSize: 14, color: "var(--good)" }}>위반 없음</p>
+          <p style={{ margin: 0, fontSize: 14, color: "var(--good)" }}>남은 실패 항목 없음</p>
         ) : (
           <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: "var(--ink-2)" }}>
             {checkpoint.championViolations.map((v, i) => (
@@ -134,18 +182,40 @@ export function ResultsPage() {
 
       <h2>활성 방어 세트</h2>
       <div className="card">
-        <span className="badge" title={pack.judgeProcedure.exemptions.pairwise}>
-          결정적 채점 전용
-        </span>
-        <span className="badge muted" title={pack.judgeProcedure.exemptions.examinerReport}>
-          검증 리포트: 해당 없음(특례)
-        </span>
-        <span className="badge muted" title={pack.judgeProcedure.exemptions.calibration}>
-          캘리브레이션: 해당 없음(특례)
-        </span>
-        <span className="badge muted" title={pack.holdoutPolicy.note}>
-          홀드아웃: 해당 없음(스켈레톤)
-        </span>
+        {jp.kind === "deterministic_only" ? (
+          <>
+            <span className="badge" title={jp.exemptions.pairwise}>
+              결정적 채점 전용
+            </span>
+            <span className="badge muted" title={jp.exemptions.examinerReport}>
+              검증 리포트: 해당 없음(특례)
+            </span>
+            <span className="badge muted" title={jp.exemptions.calibration}>
+              캘리브레이션: 해당 없음(특례)
+            </span>
+            <span className="badge muted" title={hp.note}>
+              홀드아웃: 해당 없음(스켈레톤)
+            </span>
+          </>
+        ) : (
+          <>
+            <span className="badge">케이스 실측 채점(저지: {jp.judge.model})</span>
+            <span className="badge" title={jp.notices.pairwise}>
+              채택: 스칼라 엄격 개선(제3 모드)
+            </span>
+            {hp.mode === "auto_tail" && (
+              <span className="badge" title={hp.note}>
+                홀드아웃 {hp.holdoutCaseIds.length}케이스(자동 꼬리)
+              </span>
+            )}
+            <span className="badge muted" title={jp.notices.examinerReport}>
+              검증 리포트: 미구현
+            </span>
+            <span className="badge muted" title={jp.notices.calibration}>
+              캘리브레이션: 미구현
+            </span>
+          </>
+        )}
       </div>
 
       <h2>기록</h2>

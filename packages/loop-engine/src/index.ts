@@ -1,4 +1,4 @@
-/** 브라우저 hill-climbing 루프 엔진 — 독립 배포 예정 부품 (SPEC §8).
+/** 브라우저 자율 개선 루프 엔진 — 독립 배포 예정 부품 (SPEC §8).
  *  계약 (SPEC §5.1·§5.1.1):
  *  - 첫 커밋부터 체크포인트·재개 가능한 상태 머신: 매 라운드 종료 시 store.save가 계약이다.
  *  - 채택: adoptionRule "scalar_strict" — 후보 스칼라 > 챔피언 스칼라일 때만 교체(동점 유지).
@@ -14,14 +14,23 @@ export interface CheckpointStore<A> {
   load(runId: string): Promise<LoopCheckpoint<A> | null>;
 }
 
+/** Generator에게 전달되는 피드백 — **가시 케이스 트레이스만** 담는다.
+ *  홀드아웃 점수·트레이스에서 파생된 어떤 신호도 여기로 흘러들 수 없다(SPEC §3 원칙 7 불변식).
+ *  "점수만 피드백하면 개선 없음"(실측 03·04에서 표본 9로 확정)이 violations 전달의 근거다. */
+export interface GeneratorFeedback {
+  round: number;
+  championScore: number;
+  championViolations: string[];
+}
+
 export interface LoopRunOptions<A> {
   runId: string;
   pack: EvaluationPack;
   spec: LoopSpec;
-  scorer: (artifact: A) => ScoreResult;
-  /** 후보 생성 — 스켈레톤은 로컬 변이기, 이후 LLM Generator가 같은 자리에 꽂힌다 */
-  generate: (champion: A, rng: () => number) => A;
-  initial: (rng: () => number) => A;
+  scorer: (artifact: A) => ScoreResult | Promise<ScoreResult>;
+  /** 후보 생성 — 결정적 변이기든 LLM Generator든 같은 자리에 꽂힌다 */
+  generate: (champion: A, rng: () => number, feedback: GeneratorFeedback) => A | Promise<A>;
+  initial: (rng: () => number) => A | Promise<A>;
   store: CheckpointStore<A>;
   /** 매 라운드(및 상태 전이) 후 최신 체크포인트 통지 — 관제실 라이브 뷰의 소스 */
   onEvent: (cp: LoopCheckpoint<A>) => void;

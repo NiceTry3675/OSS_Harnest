@@ -1,14 +1,32 @@
 /** 승인 화면 — 판정 절차 전체를 사용자 앞에 펼치고, 승인 순간 동결한다(SPEC §3 원칙 4).
- *  면제 세 항목의 그대로-노출은 미결 4 표기 규칙의 스켈레톤 구현. */
+ *  면제·미구현 항목의 그대로-노출은 미결 4 표기 규칙의 스켈레톤 구현 — 정직 표기가 계약이다.
+ *  pack만 보고 렌더하며 템플릿별 분기를 갖지 않는다(judgeProcedure union으로 분기). */
 
 import { Link, useNavigate } from "react-router-dom";
 import { useProject } from "../state";
 
-const EXEMPTION_LABEL = {
+const NOTICE_LABEL = {
   examinerReport: "검증 리포트",
   calibration: "캘리브레이션",
   pairwise: "쌍대 비교",
 } as const;
+
+const PROVIDER_LABEL: Record<"gemini" | "mock", string> = { gemini: "Gemini", mock: "모의" };
+
+function NoticeTable({ rows }: { rows: Record<keyof typeof NOTICE_LABEL, string> }) {
+  return (
+    <table className="grid">
+      <tbody>
+        {(Object.keys(NOTICE_LABEL) as Array<keyof typeof NOTICE_LABEL>).map((k) => (
+          <tr key={k}>
+            <th style={{ textAlign: "left", whiteSpace: "nowrap" }}>{NOTICE_LABEL[k]}</th>
+            <td style={{ textAlign: "left" }}>{rows[k]}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
 
 export function ApprovalPage() {
   const { compiled, approvedAt, approve } = useProject();
@@ -28,7 +46,8 @@ export function ApprovalPage() {
 
   const { pack } = compiled;
   const approved = approvedAt !== null;
-  const exemptions = pack.judgeProcedure.exemptions;
+  const jp = pack.judgeProcedure;
+  const hp = pack.holdoutPolicy;
 
   return (
     <div>
@@ -67,17 +86,33 @@ export function ApprovalPage() {
           ))}
         </ul>
 
-        <h2>검증·면제 표기</h2>
-        <table className="grid">
-          <tbody>
-            {(Object.keys(EXEMPTION_LABEL) as Array<keyof typeof EXEMPTION_LABEL>).map((k) => (
-              <tr key={k}>
-                <th style={{ textAlign: "left", whiteSpace: "nowrap" }}>{EXEMPTION_LABEL[k]}</th>
-                <td style={{ textAlign: "left" }}>{exemptions[k]}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {jp.kind === "case_answering" ? (
+          <>
+            <h2>채점 방식</h2>
+            <p style={{ fontSize: 14, margin: "0 0 4px" }}>
+              채점 모델: <strong>{PROVIDER_LABEL[jp.judge.provider]} · {jp.judge.model}</strong>
+            </p>
+            <p className="hint" style={{ margin: "0 0 10px" }}>
+              이 모델은 판정 절차의 일부로 승인 시 동결됩니다 — 교체하려면 다시 승인해야 합니다.
+            </p>
+            <NoticeTable rows={jp.notices} />
+          </>
+        ) : (
+          <>
+            <h2>검증·면제 표기</h2>
+            <NoticeTable rows={jp.exemptions} />
+          </>
+        )}
+
+        {hp.mode === "auto_tail" ? (
+          <>
+            <h2>숨김 검증</h2>
+            <p style={{ fontSize: 14, margin: 0 }}>
+              숨김 검증 케이스 {hp.holdoutCaseIds.length}개 — 실행 시작·종료 시에만 채점되며 AI
+              수정 과정에 노출되지 않습니다.
+            </p>
+          </>
+        ) : null}
 
         {approved ? (
           <div style={{ marginTop: 18 }}>

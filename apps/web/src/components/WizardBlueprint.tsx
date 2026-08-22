@@ -1,16 +1,27 @@
-/** 라이브 블루프린트(SPEC §4.3) — 답변이 바뀔 때마다 compile을 시도해
- *  다음 단계에서 승인할 채점 기준·관문을 미리 보여준다. 실패해도 크래시 없이 안내만. */
+/** 라이브 블루프린트(SPEC §4.3) — 답변이 바뀔 때마다 entry.compile을 시도해
+ *  다음 단계에서 승인할 채점 기준·관문·채점 모델·홀드아웃 안내를 미리 보여준다.
+ *  실패해도 크래시 없이 안내만. 템플릿별 분기 없이 등록소 인터페이스만 사용한다. */
 
 import { useEffect, useRef, useState } from "react";
 import type { EvaluationPack } from "@harnest/contracts";
-import { TEMPLATE_ID, compile } from "@harnest/template-timetable";
+import type { TemplateEntry } from "../templates";
 
 type BlueprintState =
   | { kind: "pending" }
   | { kind: "ok"; pack: EvaluationPack }
   | { kind: "fail"; reason: string | null };
 
-export function WizardBlueprint({ answers }: { answers: Record<string, unknown> }) {
+const PROVIDER_LABEL: Record<"gemini" | "mock", string> = { gemini: "Gemini", mock: "모의" };
+
+export function WizardBlueprint({
+  entry,
+  answers,
+  judge,
+}: {
+  entry: TemplateEntry;
+  answers: Record<string, unknown>;
+  judge: { provider: "gemini" | "mock"; model: string };
+}) {
   const [state, setState] = useState<BlueprintState>({ kind: "pending" });
   // 디바운스 + 최신 요청만 반영(늦게 끝난 이전 compile 결과 무시)
   const seq = useRef(0);
@@ -18,7 +29,8 @@ export function WizardBlueprint({ answers }: { answers: Record<string, unknown> 
   useEffect(() => {
     const id = ++seq.current;
     const timer = setTimeout(() => {
-      void compile({ schemaVersion: "skeleton-1", templateId: TEMPLATE_ID, answers })
+      void entry
+        .compile({ schemaVersion: "skeleton-1", templateId: entry.id, answers }, judge)
         .then((c) => {
           if (seq.current === id) setState({ kind: "ok", pack: c.pack });
         })
@@ -29,7 +41,10 @@ export function WizardBlueprint({ answers }: { answers: Record<string, unknown> 
         });
     }, 300);
     return () => clearTimeout(timer);
-  }, [answers]);
+  }, [entry, answers, judge]);
+
+  const jp = state.kind === "ok" ? state.pack.judgeProcedure : null;
+  const hp = state.kind === "ok" ? state.pack.holdoutPolicy : null;
 
   return (
     <div className="card" style={{ width: 380, flexShrink: 0 }}>
@@ -69,6 +84,14 @@ export function WizardBlueprint({ answers }: { answers: Record<string, unknown> 
               </li>
             ))}
           </ul>
+          {jp && jp.kind === "case_answering" ? (
+            <div style={{ marginTop: 12, fontSize: 13 }}>
+              <strong>채점 모델</strong> — {PROVIDER_LABEL[jp.judge.provider]} · {jp.judge.model}
+            </div>
+          ) : null}
+          {hp && hp.mode === "auto_tail" ? (
+            <div className="hint" style={{ marginTop: 8 }}>{hp.note}</div>
+          ) : null}
           <p className="hint" style={{ marginTop: 12 }}>
             이 기준은 다음 단계에서 당신이 직접 승인합니다.
           </p>
