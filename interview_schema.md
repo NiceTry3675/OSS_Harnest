@@ -206,7 +206,7 @@
 ```
 
 ### "llm_judge 포함"의 판정식 — 단일 정의 (v0.3)
-- **criteria ∪ gates에 kind가 `"llm_judge"` 또는 `"case_answering"`인 항목이 하나라도 있으면 "llm_judge 포함"**(= LLM 판정이 존재), 하나도 없으면 "결정적 전용". examinerReport·캘리브레이션 요건, pairwise 허용 여부, 채택 규칙(SPEC §5.1.1)이 전부 이 판정식 하나를 따른다 — 조항마다 따로 세지 않는다.
+- **criteria ∪ gates에 kind가 `"llm_judge"` 또는 `"case_answering"`인 항목이 하나라도 있으면 "llm_judge 포함"**(= LLM 판정이 존재), 하나도 없으면 "결정적 전용". examinerReport·캘리브레이션 요건, pairwise 허용 여부, 채택 규칙(SPEC §5.1.1)이 전부 이 판정식 하나를 따른다 — 조항마다 따로 세지 않는다. (2026-08-22 단서: 채택 규칙에는 판정식과 별개의 예외가 하나 생겼다 — **케이스 실측 중심 루프의 제3 채택 모드**(pairwise 부적용, SPEC §5.1.1). 발동 조건은 SPEC 미결 4에서 확정 예정이며, 확정 시 `pairwise.enabled` 검증 규칙과 함께 v0.4에 반영한다. 이 판정식 자체 — llm_judge 포함/결정적 전용 — 는 변하지 않는다.)
 - 유일한 예외는 `panel`: 판정식과 별개로 **kind `"llm_judge"`인 항목이 있을 때만** 필수다. case_answering의 grader는 단일 check 판정(정답 대조 — 결정적에 가깝게 신뢰됨, PHILOSOPHY §4 가족 2)이라 패널을 적용하지 않는다.
 - gates에만 llm_judge가 있는 경우(예: §3의 grounding 게이트)도 "llm_judge 포함"이다: panel 필수, 리포트·캘리브레이션 필요, pairwise 허용.
 
@@ -415,3 +415,4 @@
 6. ~~케이스 기반 채점 kind~~ — **해결(2026-08-22)**: `case_answering` kind + `judge.responder`로 §5에 정의. 동작 전부 고정(정답 대조 0/0.5/1, 가시 케이스 평균), responder는 산출물+케이스 질문만 보는 불변식 포함.
 7. 정식 `interview.schema.json`(기계 검증용 JSON Schema) 발행 — 이 문서는 해설로 강등
 8. v0.4 백로그: 빈 `cases`/전량 홀드아웃 금지 규칙과 최소·최대 케이스 수, `judge.model` 허용값 검증 규칙, **panel 패널원 배열**(이질 패널 — 패널원별 모델·프롬프트 변형, PHILOSOPHY §2 "관점이 다른 judge 패널"의 온전한 표현), case_answering 세분화(케이스별 가중치, 부분 점수 척도 확장, grader 패널 적용 여부 재검토), semver 호환성 정책·템플릿 버전 업그레이드 경로(예시-schemaVersion 동기화 규칙 포함), `origin: "generated"`에 `role: "material"` 답변 1개 이상 요구 규칙
+9. v0.4 백로그 추가 (2026-08-22, 템플릿 재편 — SPEC v1.3 §12 미결 1): **`case_answering` → `case_execution`·`judge.responder` → `judge.executor` 개명** — 의미 일반화: "산출물을 규칙·참조로 사용해 케이스 하나를 처리한다". 요약본×기출, 인수인계 문서×질문 로그, 매뉴얼×문의가 같은 kind가 된다. §5의 동작·불변식(executor는 산출물 + 해당 케이스 입력만 본다)·판정식 편입은 이름만 바꿔 그대로 이식. **`expectedAnswer` 문자열 → 구조화 `expected`** — `mustMention`(필수 포함)·`mustNotClaim`(금지 주장) 등 필드화로 grader LLM 콜의 상당 부분을 결정적 검사로 대체(비용 구조는 SPEC §12 미결 2). **원시 로그 → 케이스 추출 플로우** — 사용자가 메신저·이슈 로그를 붙여넣으면 위저드가 질문·정답 쌍 후보를 추출하고 사용자가 확인·수정(caseList의 입력 UX — 캘리브레이션의 "사용자 판단 = ground truth 공급" 원칙과 결합). 케이스 실측 중심 루프의 제3 채택 모드는 이 스키마가 아니라 SPEC §5.1.1·미결 4 소관.
