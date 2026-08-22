@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response suggests a generic workaround instead of addressing the actual bug fix in PR #47235 and the updated fallback resolution logic described in the reference answer.\"}\n```", "tag": "grade:case-44894", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately answers that this is not normal and correctly identifies that both Matrix (via m.file) and Email gateways support outbound file transfers.\"}\n```", "tag": "grade:case-5537", "model": "gemini-3.7-flash"}

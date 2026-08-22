@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately identifies that ARM64 architectures and multi-arch Docker images are supported for running on devices like the Raspberry Pi.\"}\n```", "tag": "grade:case-5554", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0, \"why\": \"The response explains user-facing workarounds for the log message rather than capturing the reference answer's explanation of codebase fixes, commits, and updated session preservation behavior.\"}", "tag": "grade:case-8381", "model": "gemini-3.7-flash"}

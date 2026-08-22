@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0, \"why\": \"The response fails to mention using the '\u7f16\u8f91\u6a21\u578b\u2026' (Edit Models) option in the UI to toggle off model visibility, instead guessing CLI configuration file edits.\"}\n```", "tag": "grade:case-57632", "model": "gemini-3.7-flash"}

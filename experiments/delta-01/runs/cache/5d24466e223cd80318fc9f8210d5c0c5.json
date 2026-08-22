@@ -1,0 +1,1 @@
+{"text": "Yes, Hermes Agent does have a Web UI and does not need to be operated solely through the command line.\n\nYou can launch the local web interface and chat directly in your browser by running:\n\n```bash\nhermes dashboard\n```\n\nOnce started, access the chat interface at:  \n`http://127.0.0.1:9119`", "tag": "resp:case-4420", "model": "gemini-3.7-flash"}

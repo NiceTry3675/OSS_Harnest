@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response states it does not know the answer based on the docs and provides generic workarounds instead of explaining that a code fix on main resolves stream_options and extra_body propagation.\"}\n```", "tag": "grade:case-31559", "model": "gemini-3.7-flash"}

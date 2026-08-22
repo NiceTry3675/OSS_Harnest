@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response suggests switching to standard API keys which is the correct alternative, but it only guesses this and fails to explain that Gemini CLI OAuth was officially removed due to Google banning that flow.\"}\n```", "tag": "grade:case-25055", "model": "gemini-3.7-flash"}

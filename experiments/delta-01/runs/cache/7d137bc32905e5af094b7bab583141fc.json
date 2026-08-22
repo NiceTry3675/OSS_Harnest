@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly mentions standalone plugins in `~/.hermes/plugins/`, but incorrectly claims there is no explicit policy and fails to identify the dedicated platform adapter developer guide.\"}\n```", "tag": "grade:case-42473", "model": "gemini-3.7-flash"}

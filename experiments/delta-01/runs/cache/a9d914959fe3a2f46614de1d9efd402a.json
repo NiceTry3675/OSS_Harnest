@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly states that this metric is unavailable via the Gateway API and suggests filing a feature request, whereas the reference confirms it is implemented and accessible via Gateway endpoints.\"}\n```", "tag": "grade:case-74489", "model": "gemini-3.7-flash"}

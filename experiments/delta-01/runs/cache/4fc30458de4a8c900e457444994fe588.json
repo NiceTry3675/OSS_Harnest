@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately conveys the key facts: native Windows 10/11 is a Tier 1 supported platform via install.ps1, and the primary known limitation is the embedded POSIX terminal (/chat) in the web dashboard.\"}\n```", "tag": "grade:case-9196", "model": "gemini-3.7-flash"}

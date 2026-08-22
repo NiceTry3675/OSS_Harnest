@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0, \"why\": \"The response incorrectly states that there is no built-in font size adjustment feature, missing the fact that UI scale settings and zoom controls are already implemented in the desktop app.\"}\n```", "tag": "grade:case-53411", "model": "gemini-3.7-flash"}

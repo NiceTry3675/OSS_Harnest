@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly states that font customization is not supported and suggests browser extension workarounds, missing the reference answer's key point that a font picker feature has already been merged.\"}\n```", "tag": "grade:case-54393", "model": "gemini-3.7-flash"}

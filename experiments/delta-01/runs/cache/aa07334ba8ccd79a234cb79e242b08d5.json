@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately identifies the key solution: setting `supports_vision: true` in the model configuration to enable vision support for custom provider endpoints.\"}\n```", "tag": "grade:case-20376", "model": "gemini-3.7-flash"}

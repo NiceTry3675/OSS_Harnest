@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately identifies the key configuration elements (`channel_prompts` and `allowed_chats` vs `allow_from`) needed to solve both the mention restriction and group authorization issues.\"}\n```", "tag": "grade:case-47644", "model": "gemini-3.7-flash"}

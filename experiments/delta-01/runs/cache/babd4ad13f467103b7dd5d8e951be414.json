@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately states that in-tree memory plugins are closed and directs the user to implement it as a standalone plugin in ~/.hermes/plugins/.\"}\n```", "tag": "grade:case-9975", "model": "gemini-3.7-flash"}

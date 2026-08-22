@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly claims Hermes lacks built-in support for this context management and suggests building a plugin, whereas the reference answer explains it is already implemented natively in Hermes.\"}\n```", "tag": "grade:case-21567", "model": "gemini-3.7-flash"}

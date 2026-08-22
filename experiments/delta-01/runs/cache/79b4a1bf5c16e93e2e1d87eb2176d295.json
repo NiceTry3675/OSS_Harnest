@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response correctly identifies that Team OAuth may not support subscription token routing and suggests using a standard Anthropic API key as a workaround.\"}\n```", "tag": "grade:case-37363", "model": "gemini-3.7-flash"}

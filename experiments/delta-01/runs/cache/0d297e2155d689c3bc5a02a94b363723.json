@@ -1,0 +1,1 @@
+{"text": "Anthropic bills standard API keys per token. To use your Claude Pro/Max subscription allowances instead of paying per API token, you must **authenticate using Claude OAuth instead of an API key**.", "tag": "resp:case-29539", "model": "gemini-3.7-flash"}

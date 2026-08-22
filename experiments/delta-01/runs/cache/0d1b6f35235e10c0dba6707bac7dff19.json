@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0, \"why\": \"The response attempts to explain and propose the adapter fix rather than conveying the maintainer's review decision and policy against repairing raw text tool calls.\"}", "tag": "grade:case-38376", "model": "gemini-3.7-flash"}

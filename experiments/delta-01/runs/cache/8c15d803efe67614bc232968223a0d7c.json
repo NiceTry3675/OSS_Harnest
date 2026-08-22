@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately explains the default 90-turn limit (`agent.max_turns`), clarifies that it will not resume automatically, and provides the `/goal` and `/goal resume` commands for handling long autonomous tasks.\"}\n```", "tag": "grade:case-6997", "model": "gemini-3.7-flash"}

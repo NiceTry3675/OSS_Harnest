@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly states that per-platform tool configuration is not supported, whereas the reference confirms it is implemented and explains that the user needed to remove 'browser' from their configuration.\"}\n```", "tag": "grade:case-52597", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response correctly identifies that skill execution tracking and stats are already available via `/insights` and `hermes insights`.\"}\n```", "tag": "grade:case-21625", "model": "gemini-3.7-flash"}

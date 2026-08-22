@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately identifies the root cause (provider: auto scanning remote keys) and provides the correct fix of setting provider: custom with base_url in config.yaml.\"}\n```", "tag": "grade:case-3846", "model": "gemini-3.7-flash"}
