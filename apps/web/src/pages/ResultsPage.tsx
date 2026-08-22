@@ -34,8 +34,11 @@ function deltaColor(delta: number): string {
   return delta > 0 ? "var(--good)" : delta < 0 ? "var(--bad)" : "var(--ink-3)";
 }
 
+const VERDICT_LABEL = { pass: "통과", warn: "주의", fail: "실패" } as const;
+
 export function ResultsPage() {
-  const { compiled, approvedAt, answers, runId, checkpoint, holdout } = useProject();
+  const { compiled, approvedAt, answers, runId, checkpoint, holdout, examinerRun, calibration } =
+    useProject();
   const navigate = useNavigate();
   const [saved, setSaved] = useState<"idle" | "saving" | "ok" | "fail">("idle");
   const entry = compiled ? getTemplate(compiled.pack.templateId) : null;
@@ -200,7 +203,7 @@ export function ResultsPage() {
         ) : (
           <>
             <span className="badge">케이스 실측 채점(저지: {jp.judge.model})</span>
-            <span className="badge" title={jp.notices.pairwise}>
+            <span className="badge" title={jp.pairwiseNotice}>
               채택: 스칼라 엄격 개선(제3 모드)
             </span>
             {hp.mode === "auto_tail" && (
@@ -208,12 +211,29 @@ export function ResultsPage() {
                 홀드아웃 {hp.holdoutCaseIds.length}케이스(자동 꼬리)
               </span>
             )}
-            <span className="badge muted" title={jp.notices.examinerReport}>
-              검증 리포트: 미구현
-            </span>
-            <span className="badge muted" title={jp.notices.calibration}>
-              캘리브레이션: 미구현
-            </span>
+            {examinerRun !== null && examinerRun.report.forDigest === pack.definitionDigest ? (
+              <span
+                className="badge"
+                title={examinerRun.report.checks
+                  .map((c) => `${c.id}: ${VERDICT_LABEL[c.verdict]} — ${c.note}`)
+                  .join("\n")}
+              >
+                검증 리포트: {VERDICT_LABEL[examinerRun.report.overall]}
+              </span>
+            ) : (
+              <span className="badge muted">검증 리포트: 기록 없음</span>
+            )}
+            {calibration !== null && calibration.forDigest === pack.definitionDigest ? (
+              <span
+                className="badge"
+                title={`판정 ${VERDICT_LABEL[calibration.verdict]} — 알려진 꼼수 쌍 포함 블라인드 A/B`}
+              >
+                캘리브레이션: {calibration.pairs.filter((p) => p.agreed).length}/
+                {calibration.pairs.length} 일치
+              </span>
+            ) : (
+              <span className="badge muted">캘리브레이션: 기록 없음</span>
+            )}
           </>
         )}
       </div>

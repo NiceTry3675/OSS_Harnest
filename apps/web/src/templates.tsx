@@ -3,11 +3,17 @@
  *  템플릿마다 엔진에 분기가 생기면 경고). */
 
 import type { ComponentType } from "react";
-import type { InterviewSubmission, Question, ScoreResult } from "@harnest/contracts";
+import type {
+  CalibrationPairSpec,
+  EvaluationPack,
+  InterviewSubmission,
+  Question,
+  ScoreResult,
+} from "@harnest/contracts";
 import type { GeneratorFeedback } from "@harnest/loop-engine";
 import * as timetable from "@harnest/template-timetable";
 import * as handover from "@harnest/template-handover";
-import type { CompiledGeneric } from "./state";
+import type { CompiledGeneric, ExaminerRunGeneric } from "./state";
 import type { LlmClient } from "@harnest/template-handover";
 import { TimetableGrid } from "./components/TimetableGrid";
 import { HandoverDocView } from "./components/HandoverDocView";
@@ -42,6 +48,16 @@ export interface TemplateEntry {
   /** 승인·동결된 팩의 저지 선언에 맞는 클라이언트 구성 — 불일치면 throw(재승인 원칙) */
   createLlm(compiled: CompiledGeneric): LlmClient | null;
   createRuntime(compiled: CompiledGeneric, llm: LlmClient | null): TemplateRuntime;
+  /** llm_judge 포함 템플릿의 승인 전 요건 — 검증 배터리와 캘리브레이션 쌍(SPEC §3 원칙 2).
+   *  결정적 전용 템플릿은 undefined(§10 특례 ① 면제). */
+  examiner?: {
+    runBattery(
+      compiled: CompiledGeneric,
+      llm: LlmClient,
+      onProgress?: (message: string) => void,
+    ): Promise<ExaminerRunGeneric>;
+    buildPairs(run: ExaminerRunGeneric, pack: EvaluationPack): CalibrationPairSpec[];
+  };
   ArtifactView: ComponentType<{ problem: unknown; artifact: unknown }>;
 }
 
@@ -96,6 +112,17 @@ const handoverEntry: TemplateEntry = {
       );
     }
     return createGeminiClient(key, jp.judge.model);
+  },
+  examiner: {
+    runBattery: (compiled, llm, onProgress) =>
+      handover.runExaminerBattery(
+        compiled.problem as handover.HandoverProblem,
+        compiled.pack,
+        llm,
+        onProgress,
+      ),
+    buildPairs: (run, pack) =>
+      handover.buildCalibrationPairs(run as handover.ExaminerRun, pack),
   },
   createRuntime(compiled, llm) {
     if (!llm) throw new Error("채점 모델이 준비되지 않았습니다 — 키를 입력하거나 모의 모델을 선택하세요.");

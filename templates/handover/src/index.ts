@@ -128,11 +128,9 @@ export async function compile(
     judgeProcedure: {
       kind: "case_answering",
       judge: { provider: opts.judgeProvider, model: opts.judgeModel },
-      notices: {
-        examinerReport: "미구현 — 정식 요건(SPEC §4.1 검증 리포트), 다음 단계에서 추가",
-        calibration: "미구현 — llm_judge 포함 루프의 필수 요건(SPEC §3 원칙 2), 다음 단계에서 추가",
-        pairwise: "미적용 — 케이스 실측 중심 루프의 제3 채택 모드(SPEC §5.1.1, 실측 02b~05 검증)",
-      },
+      // 검증 리포트·캘리브레이션은 승인 전 요건으로 구현됨(./examiner.ts) — forDigest 결속이라 팩 필드가 아니다
+      pairwiseNotice:
+        "미적용 — 케이스 실측 중심 루프의 제3 채택 모드(SPEC §5.1.1, 실측 02b~05 검증)",
     },
     holdoutPolicy: {
       mode: "auto_tail",
@@ -157,3 +155,5 @@ export async function compile(
 
 export * from "./prompts";
 export * from "./runtime";
+export * from "./probes";
+export * from "./examiner";

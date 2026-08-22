@@ -28,7 +28,11 @@ export interface JudgeDeterministicOnly {
 }
 
 /** 케이스 실측 채점 — responder는 산출물+케이스 질문만 본다(불변식, 스키마 §5).
- *  채택은 제3 모드(케이스 집계 스칼라 엄격 개선 — SPEC §5.1.1, 실측 02b~05로 검증). */
+ *  채택은 제3 모드(케이스 집계 스칼라 엄격 개선 — SPEC §5.1.1, 실측 02b~05로 검증).
+ *  검증 리포트·캘리브레이션은 이 절차의 승인 전 요건이며 forDigest로 결속된다(./examiner.ts).
+ *  컴파일 이후·승인 이전에 생성되므로 이 스켈레톤에서는 팩 필드가 아니라 별도 상태다 —
+ *  digestScope에는 어차피 못 들어가고(리포트가 다이제스트를 참조), 스코프 밖 팩 필드로
+ *  실을지(SPEC §5.1의 팩 구성은 검증 리포트를 포함한다)는 미결 4 Evaluation Pack 명세에서 확정. */
 export interface JudgeCaseAnswering {
   kind: "case_answering";
   judge: {
@@ -36,8 +40,8 @@ export interface JudgeCaseAnswering {
     provider: "gemini" | "mock";
     model: string;
   };
-  /** 미구현 요건의 정직 표기 — 숨기지 않고 승인 화면에 노출한다 */
-  notices: { examinerReport: string; calibration: string; pairwise: string };
+  /** 제3 채택 모드의 pairwise 미적용 정직 표기 (SPEC §5.1.1, 미결 4 표기 규칙) */
+  pairwiseNotice: string;
 }
 
 export interface EvaluationPack {

@@ -1,7 +1,16 @@
-/** 모의 모델 회귀 테스트 — 관통 시나리오: 원샷은 부분 커버, 변이가 실패 케이스를 흡수해 등반. */
+/** 모의 모델 회귀 테스트 — 관통 시나리오: 원샷은 부분 커버, 변이가 실패 케이스를 흡수해 등반.
+ *  승인 전 요건(검증 배터리 → 캘리브레이션 → 차단 해제)도 같은 모의 모델로 관통한다. */
 import { describe, expect, it } from "vitest";
-import type { CaseDef } from "@harnest/contracts";
-import { createGenerator, createInitial, createScorer, scoreHoldout } from "@harnest/template-handover";
+import { approvalBlockers, judgeCalibration, type CaseDef } from "@harnest/contracts";
+import {
+  buildCalibrationPairs,
+  compile,
+  createGenerator,
+  createInitial,
+  createScorer,
+  runExaminerBattery,
+  scoreHoldout,
+} from "@harnest/template-handover";
 import type { HandoverProblem } from "@harnest/template-handover";
 import { createMockClient } from "./llm";
 
@@ -49,5 +58,61 @@ describe("모의 모델 관통", () => {
     const h = await scoreHoldout(problem, doc0, llm);
     expect(h.score).toBe(0);
     expect(h.perCase).toHaveLength(1);
+  });
+
+  it("승인 전 요건 관통: 검증 배터리 → 캘리브레이션(꼼수 쌍 포함) → 승인 차단 해제", async () => {
+    // 같은 케이스로 compile해 다이제스트가 결속된 팩을 얻는다 (5케이스 → 가시 4 / 홀드아웃 1)
+    const { problem: p, pack } = await compile(
+      {
+        schemaVersion: "skeleton-1",
+        templateId: "handover",
+        answers: {
+          material: problem.material,
+          cases: [...problem.visibleCases, ...problem.holdoutCases].map(
+            ({ question, expectedAnswer }) => ({ question, expectedAnswer }),
+          ),
+          lengthCap: problem.lengthCap,
+        },
+      },
+      { judgeProvider: "mock", judgeModel: "모의 모델" },
+    );
+    const llm = createMockClient(p);
+
+    const run = await runExaminerBattery(p, pack, llm);
+    expect(run.report.forDigest).toBe(pack.definitionDigest);
+    // 종합 "주의"의 출처까지 고정: 순서(절단본 0 = 빈 문서 0 동점)와 꼼수 내성(모의 grader가
+    // 오염 응답에 부분 점수) — 정직 표기가 그대로 판정에 남는다
+    expect(run.report.checks.map((c) => `${c.id}:${c.verdict}`)).toEqual([
+      "ordering:warn",
+      "discrimination:pass",
+      "stability:pass",
+      "hack_resistance:warn",
+    ]);
+    expect(run.report.overall).toBe("warn");
+
+    const pairs = buildCalibrationPairs(run, pack);
+    expect(pairs.length).toBeGreaterThanOrEqual(2);
+    expect(pairs[0].kind).toBe("hack_probe");
+
+    // 승인 요건: 리포트만으로는 부족하고, 사용자 판정이 모두 모여야 차단이 풀린다
+    expect(approvalBlockers(pack, run.report, null)).toHaveLength(1);
+    const calibration = judgeCalibration(
+      pairs,
+      pairs.map((s) => s.examinerChoice),
+      pack,
+      run.report,
+    );
+    expect(calibration.verdict).toBe("pass");
+    expect(approvalBlockers(pack, run.report, calibration)).toEqual([]);
+
+    // 검증을 다시 실행하면(새 리포트 인스턴스) 이전 캘리브레이션은 자동 무효
+    // (리포트 인스턴스 결속 규칙 자체는 contracts/examiner.test.ts가 결정적으로 검증)
+    expect(
+      approvalBlockers(
+        pack,
+        { ...run.report, ranAt: "2026-08-23T23:59:59.000Z" },
+        calibration,
+      ).some((b) => b.includes("검증이 다시 실행")),
+    ).toBe(true);
   });
 });

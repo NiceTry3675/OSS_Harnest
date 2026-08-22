@@ -30,6 +30,19 @@ function parseGrade(raw: string): { score: number; why: string } {
   return { score: m ? Number(m[1]) : 0, why: w ? w[1] : "채점 응답 해석 불가" };
 }
 
+/** grader 단독 호출 — 시험관 배터리의 오염 응답 프로브(날조·아첨)가 재사용한다.
+ *  채점 의미(프롬프트·파싱)는 이 파일 한 곳에만 존재해야 한다. */
+export async function gradeResponse(
+  llm: LlmClient,
+  question: string,
+  expected: string,
+  response: string,
+): Promise<{ score: number; why: string }> {
+  return parseGrade(
+    await llm.complete(graderPrompt(question, expected, response), { temperature: 0 }),
+  );
+}
+
 async function gradeCases(
   llm: LlmClient,
   doc: HandoverDoc,
@@ -74,9 +87,9 @@ export function createScorer(problem: HandoverProblem, llm: LlmClient) {
   };
 }
 
-/** 원샷 생성 — 루프의 라운드 0 기준선 */
+/** 원샷 생성 — 루프의 라운드 0 기준선. 엔진 슬롯(initial(rng))에 맞춰 rng를 받되 쓰지 않는다 */
 export function createInitial(problem: HandoverProblem, llm: LlmClient) {
-  return async (): Promise<HandoverDoc> =>
+  return async (_rng?: () => number): Promise<HandoverDoc> =>
     (await llm.complete(oneshotPrompt(problem), { temperature: 0.7 })).trim();
 }
 

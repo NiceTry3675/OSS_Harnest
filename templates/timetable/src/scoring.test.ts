@@ -177,3 +177,17 @@ describe("score — 가중 합산", () => {
     expect(r.violations).toContain("연속 근무 초과: 나래 — 4일 연속(허용 3일)");
   });
 });
+
+describe("결정적 전용 면제 (SPEC §10 특례 ①)", () => {
+  it("실제 timetable 팩은 리포트·캘리브레이션 없이도 승인 차단이 없다", async () => {
+    const { approvalBlockers } = await import("@harnest/contracts");
+    const { compile } = await import("./index");
+    const { pack } = await compile({
+      schemaVersion: "skeleton-1",
+      templateId: "timetable",
+      answers: { staff: "가람, 나래, 다온", period: 7, maxConsecutive: 3 },
+    });
+    expect(pack.judgeProcedure.kind).toBe("deterministic_only");
+    expect(approvalBlockers(pack, null, null)).toEqual([]);
+  });
+});
