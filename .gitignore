@@ -1,1 +1,5 @@
 .claude/
+
+# 자격증명 — 절대 커밋 금지
+gemini0614-*.json
+*.key.json
