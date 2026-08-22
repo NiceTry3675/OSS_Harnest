@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately captures the key policy that in-tree additions to plugins/memory/ are closed and explains how to publish it as an external plugin in ~/.hermes/plugins/.\"}\n```", "tag": "grade:case-9975", "model": "gemini-3.7-flash"}

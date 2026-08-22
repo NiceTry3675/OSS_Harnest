@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately explains that legacy CLI OAuth flows are unsupported and provides the correct alternative method using `GOOGLE_API_KEY` or `GEMINI_API_KEY` via Google AI Studio.\"}\n```", "tag": "grade:case-25055", "model": "gemini-3.7-flash"}

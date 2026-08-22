@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly claims the user is using the wrong installer and that macOS is natively supported, failing to convey that Intel (x86) macOS is unsupported as documented.\"}\n```", "tag": "grade:case-38919", "model": "gemini-3.7-flash"}

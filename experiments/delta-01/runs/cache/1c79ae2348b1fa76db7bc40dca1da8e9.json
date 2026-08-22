@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0.5, \"why\": \"The response correctly identifies that Hermes automatically passes `stream_options: {\\\"include_usage\\\": true}`, but attributes the issue to configuration settings rather than a known bug that was resolved on the `main` branch.\"}", "tag": "grade:case-31559", "model": "gemini-3.7-flash"}

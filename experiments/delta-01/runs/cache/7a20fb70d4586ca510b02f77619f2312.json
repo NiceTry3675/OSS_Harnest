@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1, \"why\": \"The response correctly identifies that this feature already exists via the bundled Langfuse observability plugin and provides the command to enable it.\"}\n```", "tag": "grade:case-12871", "model": "gemini-3.7-flash"}

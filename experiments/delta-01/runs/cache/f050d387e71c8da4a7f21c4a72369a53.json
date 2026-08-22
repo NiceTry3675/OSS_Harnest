@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately explains that custom tools should be created via plugins rather than editing core files, and correctly outlines the plugin registration and enablement process.\"}\n```", "tag": "grade:case-29351", "model": "gemini-3.7-flash"}

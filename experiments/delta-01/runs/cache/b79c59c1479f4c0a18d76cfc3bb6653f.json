@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0, \"why\": \"The response treats the issue as an open feature request to be implemented, missing the key fact that this was already addressed and merged in a prior PR.\"}\n```", "tag": "grade:case-55537", "model": "gemini-3.7-flash"}

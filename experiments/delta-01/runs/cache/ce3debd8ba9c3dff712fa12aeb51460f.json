@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1, \"why\": \"The response accurately identifies that the feature is already built-in via context compression in `agent/context_compressor.py` to prune verbose tool results.\"}\n```", "tag": "grade:case-21567", "model": "gemini-3.7-flash"}

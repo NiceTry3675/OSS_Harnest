@@ -1,0 +1,1 @@
+{"text": "No, Hermes Agent is not limited to the command line. A web interface is available.\n\nYou can start the Web Dashboard by running:\n\n```bash\nhermes dashboard\n```\n\nThis launches a local web interface at `http://127.0.0.1:9119`, which includes a browser-based chat interface.", "tag": "resp:case-4420", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately explains the authorization issue and configuration keys for Telegram, and correctly identifies that bootstrap.py/port 8787 is not the standard dashboard.\"}\n```", "tag": "grade:case-34751", "model": "gemini-3.7-flash"}

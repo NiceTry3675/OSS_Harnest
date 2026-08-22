@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0.5, \"why\": \"The response identifies the relevant Termux install script and dependency group `.[termux-all]`, but frames the solution as speculative troubleshooting rather than confirming the upstream fix in main/v2026.7.1.\"}", "tag": "grade:case-17009", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly states that intermediate tool calls are not streamed by design and misses the actual bug and fix regarding the `_on_tool_progress` signature mismatch.\"}\n```", "tag": "grade:case-5352", "model": "gemini-3.7-flash"}

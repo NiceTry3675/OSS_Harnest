@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies the root cause and suggests the valid dummy API key workaround, but misses the official fix and version upgrade details from the reference answer.\"}\n```", "tag": "grade:case-3555", "model": "gemini-3.7-flash"}

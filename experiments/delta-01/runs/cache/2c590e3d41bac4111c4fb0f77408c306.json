@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies the endpoint issue and the proper `/v1` URL, but misses mentioning that this is a known bug resolved by updating Hermes to v0.15.0/v2026.5.28.\"}\n```", "tag": "grade:case-33811", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies that image forwarding to Telegram is already supported via MEDIA tags, but incorrectly states the MCP server must output the MEDIA tag instead of Hermes automatically converting standard MCP ImageContent blocks.\"}\n```", "tag": "grade:case-6138", "model": "gemini-3.7-flash"}

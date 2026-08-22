@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0, \"why\": \"The response fails to mention Hermes' existing context compression and ContextEngine mechanisms that already address tool output context management.\"}", "tag": "grade:case-21567", "model": "gemini-3.7-flash"}

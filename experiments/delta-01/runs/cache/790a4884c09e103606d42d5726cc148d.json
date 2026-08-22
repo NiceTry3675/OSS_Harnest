@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response incorrectly states that no custom installation flags are documented, but partially hits on `-InstallDir` as a guess without providing the complete scriptblock command and `-HermesHome` parameter.\"}\n```", "tag": "grade:case-38935", "model": "gemini-3.7-flash"}

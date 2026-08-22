@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies that `.hermes.md` is the recommended mechanism for inherited rules and `AGENTS.md` remains cwd-only, but misses the key factual details regarding the documentation resolution and references.\"}\n```", "tag": "grade:case-46775", "model": "gemini-3.7-flash"}

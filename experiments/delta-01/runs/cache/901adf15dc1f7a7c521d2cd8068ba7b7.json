@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly affirms the proposed fix instead of conveying the maintainer policy decision to reject model-output-repair and require configuring vLLM's tool-call parser.\"}\n```", "tag": "grade:case-38376", "model": "gemini-3.7-flash"}

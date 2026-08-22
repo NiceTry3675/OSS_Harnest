@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately confirms that multi-profile gateways are supported and explains that independent WeChat/messaging accounts can be multiplexed while keeping credentials and data isolated.\"}\n```", "tag": "grade:case-10030", "model": "gemini-3.7-flash"}

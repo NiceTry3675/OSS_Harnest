@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately explains the reset behavior, mentions the `/resume` command and `mode: none` config setting, and highlights the v2026.5.7+ `resume_pending` update.\"}\n```", "tag": "grade:case-8381", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately identifies the key resolution details regarding Termux detection, `ANDROID_API_LEVEL`, `termux-all` dependencies, and configuring writable `TMPDIR` paths.\"}\n```", "tag": "grade:case-17009", "model": "gemini-3.7-flash"}

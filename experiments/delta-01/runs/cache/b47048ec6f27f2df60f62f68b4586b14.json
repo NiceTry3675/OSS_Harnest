@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response fails to recognize that the feature is already implemented on main/shipped in a recent release, instead stating there is no documentation and treating it as an open feature request.\"}\n```", "tag": "grade:case-42239", "model": "gemini-3.7-flash"}

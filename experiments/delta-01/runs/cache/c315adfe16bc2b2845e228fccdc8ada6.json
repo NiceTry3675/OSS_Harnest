@@ -1,0 +1,1 @@
+{"text": "This is expected behavior when using an API key. \n\nProviding a Claude API key always bills requests under standard API usage. To use your Claude Pro/Max subscription allowance instead of paying for API tokens, you need to **authenticate via OAuth** rather than entering an API key.", "tag": "resp:case-29539", "model": "gemini-3.7-flash"}

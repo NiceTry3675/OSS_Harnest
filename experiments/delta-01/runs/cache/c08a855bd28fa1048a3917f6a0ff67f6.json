@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0, \"why\": \"The response fails to state that the feature is supported and misses the essential solution of using the `X-Hermes-Session-Key` header.\"}", "tag": "grade:case-52397", "model": "gemini-3.7-flash"}

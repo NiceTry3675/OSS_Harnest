@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response correctly explains that file delivery is supported via Matrix (m.file) and email (SMTP attachments), confirming that this is not normal behavior.\"}\n```", "tag": "grade:case-5537", "model": "gemini-3.7-flash"}

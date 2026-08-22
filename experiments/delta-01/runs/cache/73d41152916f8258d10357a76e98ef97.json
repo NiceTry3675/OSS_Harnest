@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response correctly identifies that skill execution tracking is already implemented via the `/insights` command and the local `~/.hermes/skills/.usage.json` file.\"}\n```", "tag": "grade:case-21625", "model": "gemini-3.7-flash"}

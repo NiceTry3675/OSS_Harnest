@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response fails to confirm that the feature is supported and does not mention the required `X-Hermes-Session-Key` header.\"}\n```", "tag": "grade:case-52397", "model": "gemini-3.7-flash"}

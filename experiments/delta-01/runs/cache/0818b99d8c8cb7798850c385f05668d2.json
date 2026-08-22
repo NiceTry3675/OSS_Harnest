@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately covers the `agent.max_turns` limit (default 90), how to adjust it via config/CLI, and how to use `/goal` and `/goal resume` for long-running autonomous execution.\"}\n```", "tag": "grade:case-6997", "model": "gemini-3.7-flash"}

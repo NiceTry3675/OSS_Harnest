@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0, \"why\": \"The response incorrectly assumes intermediate tool calls are not meant to be streamed and fails to identify the actual bug and fix described in the reference answer.\"}\n```", "tag": "grade:case-5352", "model": "gemini-3.7-flash"}

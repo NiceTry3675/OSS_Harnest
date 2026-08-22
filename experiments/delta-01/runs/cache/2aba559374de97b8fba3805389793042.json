@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response correctly captures the key direction to implement the integration as a standalone plugin in ~/.hermes/plugins/ rather than an in-tree addition.\"}\n```", "tag": "grade:case-53407", "model": "gemini-3.7-flash"}

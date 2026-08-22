@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response fails to identify that the user downloaded an unofficial/fake installer (likely malware) and does not provide the official download link.\"}\n```", "tag": "grade:case-39532", "model": "gemini-3.7-flash"}

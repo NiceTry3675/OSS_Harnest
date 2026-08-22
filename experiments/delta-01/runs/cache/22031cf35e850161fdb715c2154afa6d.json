@@ -1,0 +1,1 @@
+{"text": "{\"score\": 1.0, \"why\": \"The response correctly identifies that multi-arch Docker images support linux/arm64 for Raspberry Pi.\"}", "tag": "grade:case-5554", "model": "gemini-3.7-flash"}

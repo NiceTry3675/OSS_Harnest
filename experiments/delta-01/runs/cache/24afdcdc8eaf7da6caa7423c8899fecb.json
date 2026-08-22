@@ -1,0 +1,1 @@
+{"text": "Yes, this is expected behavior. \n\nDuring the `Updating Node.js dependencies...` step, **Camofox** quietly downloads browser binaries in the background, which can take significantly longer and make the process appear stuck or slow.", "tag": "resp:case-22237", "model": "gemini-3.7-flash"}

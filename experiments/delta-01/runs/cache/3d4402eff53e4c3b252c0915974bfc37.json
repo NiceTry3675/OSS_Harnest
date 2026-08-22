@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0, \"why\": \"The response incorrectly claims that per-platform toolset configuration is unsupported, whereas the reference answer confirms it is implemented and supported.\"}", "tag": "grade:case-52597", "model": "gemini-3.7-flash"}

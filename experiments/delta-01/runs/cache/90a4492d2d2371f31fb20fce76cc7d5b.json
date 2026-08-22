@@ -1,0 +1,1 @@
+{"text": "Legacy CLI OAuth flows are **not supported** for Google Gemini in Hermes Agent. \n\nTo use Google Gemini, authenticate via Google AI Studio by setting an API key instead:\n- Set the `GOOGLE_API_KEY` or `GEMINI_API_KEY` environment variable.", "tag": "resp:case-25055", "model": "gemini-3.7-flash"}

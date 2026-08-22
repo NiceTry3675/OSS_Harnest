@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately diagnoses why allowed_chats failed for Telegram authorization, provides the correct configuration fixes, and correctly identifies that the user is running the wrong Web UI script/port.\"}\n```", "tag": "grade:case-34751", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response treats the prompt as a user support inquiry rather than conveying the essential facts from the reference answer regarding the codebase fixes and changed session preservation behavior.\"}\n```", "tag": "grade:case-8381", "model": "gemini-3.7-flash"}

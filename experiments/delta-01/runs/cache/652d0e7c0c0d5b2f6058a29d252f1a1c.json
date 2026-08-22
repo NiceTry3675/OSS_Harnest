@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately identifies that the requested interactive CLI setup wizard is already implemented via `hermes gateway setup`.\"}\n```", "tag": "grade:case-29534", "model": "gemini-3.7-flash"}

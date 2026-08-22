@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately identifies the endpoint routing issue and instructs the user to update to version 0.15.0 (v2026.5.28) or newer to use the correct `/v1` endpoint.\"}\n```", "tag": "grade:case-33811", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "{\"score\": 1, \"why\": \"The response correctly identifies that this is not normal behavior and accurately explains that Matrix (`m.file`) and Email (SMTP attachments) natively support outbound file delivery via the gateway.\"}", "tag": "grade:case-5537", "model": "gemini-3.7-flash"}

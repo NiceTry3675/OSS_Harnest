@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0, \"why\": \"The response fails to mention the GUI 'Edit models...' (\u7f16\u8f91\u6a21\u578b\u2026) toggle option shown in the UI and instead provides incorrect instructions about editing config files or running terminal commands.\"}\n```", "tag": "grade:case-57632", "model": "gemini-3.7-flash"}

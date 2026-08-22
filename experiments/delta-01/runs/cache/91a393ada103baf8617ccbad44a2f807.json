@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response states that there is no documented way to obtain this information via the Gateway API, directly contradicting the reference answer which details the Gateway session persistence and endpoints.\"}\n```", "tag": "grade:case-74489", "model": "gemini-3.7-flash"}

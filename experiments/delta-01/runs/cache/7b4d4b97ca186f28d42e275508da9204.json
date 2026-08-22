@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response correctly confirms that uploading Python scripts is already an implemented feature and explains that file contents are injected into the context prompt.\"}\n```", "tag": "grade:case-5047", "model": "gemini-3.7-flash"}

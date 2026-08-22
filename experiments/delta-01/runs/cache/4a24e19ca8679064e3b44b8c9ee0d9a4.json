@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response accurately explains the difference between MEMORY.md, USER.md, and target='user', but misses that the empty SOUL.md scaffold was a bug fixed in a later release (v2026.7.1).\"}\n```", "tag": "grade:case-29476", "model": "gemini-3.7-flash"}

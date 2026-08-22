@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately covers all key points, including auto-detection via `hermes setup`, manual configuration with `provider: azure-foundry`, and clarifying that Claude Code-specific variables are not used.\"}\n```", "tag": "grade:case-9580", "model": "gemini-3.7-flash"}

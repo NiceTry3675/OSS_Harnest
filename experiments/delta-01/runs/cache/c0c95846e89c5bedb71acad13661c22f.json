@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response fails to mention the actual feature/solution (the UI font picker introduced in the dashboard) and instead incorrectly claims there is no support and suggests browser extensions.\"}\n```", "tag": "grade:case-54393", "model": "gemini-3.7-flash"}

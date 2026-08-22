@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies that the `.exe` installer is not official, but misses the crucial malware warning and the official desktop download link.\"}\n```", "tag": "grade:case-39532", "model": "gemini-3.7-flash"}

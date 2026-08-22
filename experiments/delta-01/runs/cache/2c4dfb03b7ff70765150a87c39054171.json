@@ -1,0 +1,1 @@
+{"text": "{\"score\": 1, \"why\": \"The response accurately explains that the delay is expected due to Camofox silently downloading browser binaries during its postinstall phase without progress output.\"}", "tag": "grade:case-22237", "model": "gemini-3.7-flash"}

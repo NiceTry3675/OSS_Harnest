@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately explains that skill execution/usage logging is already implemented via the usage sidecar file and the `/insights` and `hermes insights` commands.\"}\n```", "tag": "grade:case-21625", "model": "gemini-3.7-flash"}

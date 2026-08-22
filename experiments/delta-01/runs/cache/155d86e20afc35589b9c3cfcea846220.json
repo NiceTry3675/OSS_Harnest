@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately covers Hermes's support for Azure AI Foundry, auto-detection via `ANTHROPIC_FOUNDRY_BASE_URL`, how Claude Code-specific vars are treated, and configuration options using `hermes setup` or `provider: azure-foundry`.\"}\n```", "tag": "grade:case-9580", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately captures all key elements from the reference answer, including the `delegate_task` tool for multi-agent delegation and `channel_prompts` for per-channel persona configuration across supported platforms.\"}\n```", "tag": "grade:case-11922", "model": "gemini-3.7-flash"}

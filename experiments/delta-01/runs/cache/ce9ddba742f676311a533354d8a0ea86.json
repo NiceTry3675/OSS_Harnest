@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately identifies that configuring `supports_vision: true` in the model configuration enables native image payloads for custom endpoints.\"}\n```", "tag": "grade:case-20376", "model": "gemini-3.7-flash"}

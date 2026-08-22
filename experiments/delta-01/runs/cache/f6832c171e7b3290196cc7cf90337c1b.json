@@ -1,0 +1,1 @@
+{"text": "{\"score\": 1, \"why\": \"The response correctly identifies that this is not normal behavior and accurately states that file delivery is natively supported via Matrix m.file uploads and email attachments.\"}", "tag": "grade:case-5537", "model": "gemini-3.7-flash"}

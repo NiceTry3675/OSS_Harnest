@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies that the adapter should be a standalone plugin in `~/.hermes/plugins/` or via pip entry point, but frames it as a guess and misses the definitive policy rejection of in-tree additions.\"}\n```", "tag": "grade:case-53407", "model": "gemini-3.7-flash"}

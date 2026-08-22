@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately identifies the cause (auto-routing/fallback to external providers) and provides the exact config fix (`provider: custom` and `fallback_providers: []`).\"}\n```", "tag": "grade:case-3846", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies that `.hermes.md` is the intended vehicle for hierarchical discovery, but misses the fact that the question was already resolved on `main` via specific documentation updates.\"}\n```", "tag": "grade:case-46775", "model": "gemini-3.7-flash"}

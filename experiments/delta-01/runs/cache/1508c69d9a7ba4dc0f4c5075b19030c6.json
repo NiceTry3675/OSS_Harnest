@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response fails to recognize that the issue has already been resolved and addressed in merged PRs, instead suggesting to submit a feature request.\"}\n```", "tag": "grade:case-55537", "model": "gemini-3.7-flash"}

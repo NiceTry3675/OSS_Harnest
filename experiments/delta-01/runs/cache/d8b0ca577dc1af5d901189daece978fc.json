@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response does not state the outcome (that the feature was implemented in PR #70457) and instead offers an ungrounded guess based on missing documentation.\"}\n```", "tag": "grade:case-52995", "model": "gemini-3.7-flash"}

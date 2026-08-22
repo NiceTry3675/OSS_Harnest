@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response accurately explains how the memory files and `target=\\\"user\\\"` work conceptually, but misses the core resolution in the reference answer stating this was an installer template bug resolved in a specific software update.\"}\n```", "tag": "grade:case-29476", "model": "gemini-3.7-flash"}

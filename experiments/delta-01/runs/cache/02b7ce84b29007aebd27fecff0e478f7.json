@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly claims there is no documented parameter for a custom installation path and only offers speculative workarounds instead of the actual `-HermesHome` and `-InstallDir` parameters.\"}\n```", "tag": "grade:case-38935", "model": "gemini-3.7-flash"}

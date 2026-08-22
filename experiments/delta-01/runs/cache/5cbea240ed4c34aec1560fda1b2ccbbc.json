@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1, \"why\": \"The response accurately explains the OAuth limitation with Team plans and correctly suggests the primary workaround of using an Anthropic API key.\"}\n```", "tag": "grade:case-37363", "model": "gemini-3.7-flash"}

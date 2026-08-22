@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0.5, \"why\": \"The response accurately explains the memory system architecture and the role of target='user' / USER.md vs MEMORY.md, but misses that the empty SOUL.md template issue was a known bug resolved in a specific release.\"}", "tag": "grade:case-29476", "model": "gemini-3.7-flash"}

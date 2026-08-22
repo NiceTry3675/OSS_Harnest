@@ -1,0 +1,1 @@
+{"text": "{\"score\": 1, \"why\": \"The response accurately explains that DingTalk supports image delivery via Markdown image URL syntax and notes that local file uploads are not supported, matching the reference answer.\"}", "tag": "grade:case-21462", "model": "gemini-3.7-flash"}

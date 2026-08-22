@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly states that the feature is not documented and suggests using a web browser workaround instead of recognizing that UI scale controls are already implemented in the desktop settings.\"}\n```", "tag": "grade:case-53411", "model": "gemini-3.7-flash"}

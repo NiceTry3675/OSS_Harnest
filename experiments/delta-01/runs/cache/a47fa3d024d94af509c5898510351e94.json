@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0, \"why\": \"The response suggests modifying config files rather than using the 'Edit Models...' (\u7f16\u8f91\u6a21\u578b) option in the UI to toggle model visibility as described in the reference answer.\"}\n```", "tag": "grade:case-57632", "model": "gemini-3.7-flash"}

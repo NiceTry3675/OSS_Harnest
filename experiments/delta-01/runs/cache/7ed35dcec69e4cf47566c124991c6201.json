@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response fails to identify the actual root cause, which is Hermes force-normalizing 'deepseek-v4-flash' to 'deepseek-chat' in model_normalize.py.\"}\n```", "tag": "grade:case-26105", "model": "gemini-3.7-flash"}

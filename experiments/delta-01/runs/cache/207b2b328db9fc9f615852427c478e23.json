@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response correctly identifies that Hermes already addresses this problem natively via the built-in ContextCompressor and pluggable ContextEngine interface to deduplicate tool outputs.\"}\n```", "tag": "grade:case-21567", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response endorses adding a text-parsing adapter to Hermes, which contradicts the reference answer's core decision to reject model-output repair adapters per project policy.\"}\n```", "tag": "grade:case-38376", "model": "gemini-3.7-flash"}

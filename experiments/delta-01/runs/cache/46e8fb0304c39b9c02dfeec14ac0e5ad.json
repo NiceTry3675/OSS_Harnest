@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately identifies subagent delegation for multi-agent capabilities and the `channel_prompts` configuration across supported platforms for per-channel personas.\"}\n```", "tag": "grade:case-11922", "model": "gemini-3.7-flash"}

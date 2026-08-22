@@ -1,0 +1,1 @@
+{"text": "Yes, Hermes Agent is not limited to the command line; it has a built-in Web interface. \n\nYou can launch it by running:\n```bash\nhermes dashboard\n```\n\nThis starts a local web server at **`http://127.0.0.1:9119`**, which features full browser-based chat along with an embedded terminal.", "tag": "resp:case-4420", "model": "gemini-3.7-flash"}

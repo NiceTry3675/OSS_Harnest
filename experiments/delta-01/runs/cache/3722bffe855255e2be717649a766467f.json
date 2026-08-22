@@ -1,0 +1,1 @@
+{"text": "{\"score\": 1.0, \"why\": \"The response accurately conveys the key fact from the reference answer that DingTalk image sending is supported via Markdown syntax `![image](url)`.\"}", "tag": "grade:case-21462", "model": "gemini-3.7-flash"}

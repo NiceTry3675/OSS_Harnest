@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response correctly identifies that allowed_chats is only for group chats, provides the correct configuration options for Telegram authorization, and clarifies the proper command and port for the Hermes Web UI.\"}\n```", "tag": "grade:case-34751", "model": "gemini-3.7-flash"}

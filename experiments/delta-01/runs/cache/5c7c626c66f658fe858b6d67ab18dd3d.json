@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response fails to identify the issue as a known bug fixed in a newer version and instead offers generic troubleshooting steps.\"}\n```", "tag": "grade:case-3555", "model": "gemini-3.7-flash"}

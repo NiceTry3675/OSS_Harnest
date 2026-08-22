@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately identifies the core resolution: implementing the integration as a standalone custom plugin in `~/.hermes/plugins/` rather than modifying the core codebase.\"}\n```", "tag": "grade:case-53407", "model": "gemini-3.7-flash"}

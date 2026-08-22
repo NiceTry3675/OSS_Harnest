@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately confirms that uploading Python scripts is already a supported feature that caches and injects code files into the agent context, and provides helpful troubleshooting steps.\"}\n```", "tag": "grade:case-5047", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0.5, \"why\": \"The response identifies the internal `MEDIA:<path>` mechanism used by Hermes for Telegram delivery, but incorrectly suggests manually returning that string from the MCP tool rather than explaining that standard MCP ImageContent blocks are already automatically supported.\"}", "tag": "grade:case-6138", "model": "gemini-3.7-flash"}

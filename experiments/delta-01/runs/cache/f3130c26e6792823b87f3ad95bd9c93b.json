@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately explains the max_turns setting, the behavior upon exhaustion, and how to use the /goal system and /goal resume command for long autonomous tasks.\"}\n```", "tag": "grade:case-6997", "model": "gemini-3.7-flash"}

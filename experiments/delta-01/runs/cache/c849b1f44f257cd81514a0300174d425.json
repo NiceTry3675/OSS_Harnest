@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0, \"why\": \"The response incorrectly claims per-platform toolset configuration is not supported, whereas the reference confirms it is supported and explains why the user's config still included web tools.\"}", "tag": "grade:case-52597", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0.5, \"why\": \"The response correctly recommends the standalone plugin path in ~/.hermes/plugins/, but incorrectly claims there is no documented policy for platform adapters.\"}", "tag": "grade:case-42473", "model": "gemini-3.7-flash"}

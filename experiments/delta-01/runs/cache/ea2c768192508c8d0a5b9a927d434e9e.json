@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly claims the configuration is not documented and makes generic guesses rather than providing the actual codebase resolution and variable details from the reference answer.\"}\n```", "tag": "grade:case-44194", "model": "gemini-3.7-flash"}

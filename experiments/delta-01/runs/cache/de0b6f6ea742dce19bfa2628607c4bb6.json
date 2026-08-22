@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response incorrectly states there is no specific guideline for platform adapters, but correctly identifies the plugin-first path in `~/.hermes/plugins/`.\"}\n```", "tag": "grade:case-42473", "model": "gemini-3.7-flash"}

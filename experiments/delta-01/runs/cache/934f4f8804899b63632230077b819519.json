@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0, \"why\": \"The response suggests adding an adapter layer in Hermes instead of conveying the maintainer's decision to reject text repair per project policy and configure vLLM/chat templates directly.\"}", "tag": "grade:case-38376", "model": "gemini-3.7-flash"}

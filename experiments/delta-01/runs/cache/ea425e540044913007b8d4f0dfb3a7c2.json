@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response correctly identifies the root cause as the incorrect endpoint URL and provides the exact fix by pointing it to https://ollama.com/v1.\"}\n```", "tag": "grade:case-33811", "model": "gemini-3.7-flash"}

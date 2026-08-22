@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately explains the message and includes the essential facts from the reference answer regarding session restoration via `/resume` (`resume_pending`) and configuration defaults (`mode: none`).\"}\n```", "tag": "grade:case-8381", "model": "gemini-3.7-flash"}

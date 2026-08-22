@@ -1,0 +1,1 @@
+{"text": "Based on the documentation, an Anthropic API key inherently bills usage per token. \n\nTo use your Claude Pro/Max subscription allowance instead of paying for API credits, you need to authenticate via OAuth rather than using an API key:\n\n```bash\nhermes login\n```", "tag": "resp:case-29539", "model": "gemini-3.7-flash"}

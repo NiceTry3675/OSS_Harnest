@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response correctly identifies the cause and provides the exact config fix (`provider: custom`, `base_url`, and empty `fallback_providers`) matching the reference answer.\"}\n```", "tag": "grade:case-3846", "model": "gemini-3.7-flash"}

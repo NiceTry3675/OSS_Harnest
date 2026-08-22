@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately identifies that the requested tracing functionality is already available via the bundled Langfuse observability plugin and provides the command to enable it.\"}\n```", "tag": "grade:case-12871", "model": "gemini-3.7-flash"}

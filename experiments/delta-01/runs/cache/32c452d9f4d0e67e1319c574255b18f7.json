@@ -1,0 +1,1 @@
+{"text": "Yes, this is **expected behavior**.\n\nDuring the `hermes update` process, if the Node.js step appears slow or paused, it is typically downloading **browser binaries (Camofox)** in the background.", "tag": "resp:case-22237", "model": "gemini-3.7-flash"}

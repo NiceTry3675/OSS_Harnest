@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately identifies the key root causes and fixes: using the `.[termux-all]` dependency bundle and relying on `$TMPDIR` instead of default paths for filesystem operations in Termux.\"}\n```", "tag": "grade:case-17009", "model": "gemini-3.7-flash"}

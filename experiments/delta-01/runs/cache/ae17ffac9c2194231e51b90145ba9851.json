@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately identifies that custom tools should be created as plugins, registered with `ctx.register_tool`, and enabled via `hermes plugins enable`.\"}\n```", "tag": "grade:case-29351", "model": "gemini-3.7-flash"}

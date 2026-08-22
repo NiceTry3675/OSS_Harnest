@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately explains the maintainer policy against automatic complexity-based model routing and clearly lists the supported alternatives (delegation config and manual model switching).\"}\n```", "tag": "grade:case-33223", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately identifies the plugin route for custom tools, including directory location, registration via ctx.register_tool, enabling with the CLI, and toolset assignment.\"}\n```", "tag": "grade:case-29351", "model": "gemini-3.7-flash"}

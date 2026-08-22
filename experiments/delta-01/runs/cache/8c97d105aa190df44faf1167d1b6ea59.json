@@ -1,0 +1,1 @@
+{"text": "{\"score\": 1.0, \"why\": \"The response accurately identifies that Hermes already addresses this issue with built-in context pruning via ContextCompressor and the pluggable ContextEngine interface.\"}", "tag": "grade:case-21567", "model": "gemini-3.7-flash"}

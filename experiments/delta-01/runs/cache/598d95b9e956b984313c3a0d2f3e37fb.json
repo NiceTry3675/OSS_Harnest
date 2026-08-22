@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies the CPU architecture mismatch causing the error, but fails to convey the reference answer's conclusion that macOS on Intel is explicitly unsupported and documented as such.\"}\n```", "tag": "grade:case-38919", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies the `-InstallDir` parameter as a possibility, but fails to provide the full documented command including the `-HermesHome` parameter.\"}\n```", "tag": "grade:case-38935", "model": "gemini-3.7-flash"}

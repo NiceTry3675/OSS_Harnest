@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies the expected behavior (tool progress should be streamed via SSE chunks), but misses the specific root cause and fix details present in the reference answer.\"}\n```", "tag": "grade:case-5352", "model": "gemini-3.7-flash"}

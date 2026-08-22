@@ -1,0 +1,1 @@
+{"text": "{\"score\": 1, \"why\": \"The response correctly identifies that setting `supports_vision: true` in the configuration is the solution to enable native vision payloads for custom models.\"}", "tag": "grade:case-20376", "model": "gemini-3.7-flash"}

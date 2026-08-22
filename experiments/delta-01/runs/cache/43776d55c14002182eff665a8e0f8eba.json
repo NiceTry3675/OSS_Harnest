@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately covers the max_turns setting, explains why tools stopped working, and details how to use `/goal` and `/goal resume` for long autonomous tasks.\"}\n```", "tag": "grade:case-6997", "model": "gemini-3.7-flash"}

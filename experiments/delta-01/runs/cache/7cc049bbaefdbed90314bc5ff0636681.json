@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response fails to provide the factual answer (that the feature was accepted and implemented via PR #70457) and instead treats the prompt as an unanswerable question with speculative assessment.\"}\n```", "tag": "grade:case-52995", "model": "gemini-3.7-flash"}

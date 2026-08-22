@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1, \"why\": \"The response accurately identifies the solution by advising the user to pass PUID/PGID or HERMES_UID/HERMES_GID environment variables to match host permissions.\"}\n```", "tag": "grade:case-15290", "model": "gemini-3.7-flash"}
