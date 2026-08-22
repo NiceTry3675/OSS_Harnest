@@ -102,6 +102,33 @@ Revise the document to fix the reported failures without breaking what already w
 Output the full revised document only."""
 
 
+P_RETRY = """Your previous attempt at the onboarding FAQ document for "Hermes Agent" was DISQUALIFIED by the evaluator:
+document length {n} characters exceeds the HARD LIMIT of {cap} characters (score 0). No other feedback is available.
+Rewrite the document to comply.
+{limit}
+
+## Q&A logs
+{material}
+
+## Your previous (disqualified) document
+{doc}
+
+Output the full rewritten document only."""
+
+P_MUTATE_SCORE = """Below is an onboarding FAQ document for "Hermes Agent", plus the Q&A logs it was built from.
+A frozen evaluator scored it {score:.1f}/100 on how well a reader could answer real user questions using ONLY the document. No further detail about the failures is available.
+Revise the document to improve that score. Trade-offs are real: the length limit means adding coverage may require compressing elsewhere.
+{limit}
+
+## Q&A logs
+{material}
+
+## Current document (score: {score:.1f}/100)
+{doc}
+
+Output the full revised document only."""
+
+
 def limit_block(cap):
     return P_LIMIT.format(cap=cap, target=int(cap * 0.8), words=int(cap * 0.8 / 6.5))
 
@@ -261,6 +288,36 @@ def run_harnest(material, cap, visible):
     return champ
 
 
+def run_retry(material, cap, visible):
+    """⑤ 실격 재시도 (§9.2): 실격 사실+길이만 통지, 준수 문서가 나오면 정지."""
+    doc = llm(P_ONESHOT.format(limit=limit_block(cap), material=material), tag="oneshot")
+    used = 1
+    while len(doc) > cap and used < ROUNDS:
+        doc = llm(P_RETRY.format(n=len(doc), cap=cap, limit=limit_block(cap),
+                                 material=material, doc=doc), tag=f"r{used}")
+        used += 1
+    vis, traces, gate = evaluate(doc, visible, cap)
+    save("cond5_retry", {"doc": doc, "visible": vis, "gate_violation": gate,
+                         "rounds_used": used})
+    return doc
+
+
+def run_scoreloop(material, cap, visible):
+    """⑥ 점수-온리 루프 (§9.2): 스칼라 점수만 피드백, 채택 규칙은 ③과 동일."""
+    champ = llm(P_ONESHOT.format(limit=limit_block(cap), material=material), tag="oneshot")
+    champ_score, _, _ = evaluate(champ, visible, cap)
+    curve = [champ_score]
+    for i in range(1, ROUNDS):
+        cand = llm(P_MUTATE_SCORE.format(limit=limit_block(cap), material=material,
+                                         doc=champ, score=champ_score), tag=f"s{i}")
+        s, _, gate = evaluate(cand, visible, cap)
+        if not gate and s > champ_score:
+            champ, champ_score = cand, s
+        curve.append(champ_score)
+    save("cond6_scoreloop", {"doc": champ, "visible": champ_score, "curve": curve})
+    return champ
+
+
 def run_bestof(material, cap, visible):
     best, best_score = None, -1
     for i in range(ROUNDS):
@@ -295,7 +352,8 @@ def main():
         verdict = run_probe(visible, holdout)
         if verdict == "부적합-중단" and args.cond == "all":
             sys.exit("프로브 게이트 실패 — 중단 (PROTOCOL §5, 폴백 없음)")
-    runners = {"1": run_oneshot, "2": run_iterate, "3": run_harnest, "4": run_bestof}
+    runners = {"1": run_oneshot, "2": run_iterate, "3": run_harnest, "4": run_bestof,
+               "5": run_retry, "6": run_scoreloop}
     finals = {}
     for k, fn in runners.items():
         if args.cond in (k, "all"):
@@ -307,7 +365,9 @@ def main():
             continue
         h, _, _ = evaluate(doc, holdout, cap)
         mem = ngram_overlap(doc, visible)
-        path = os.path.join(RUNS, f"cond{k}_{'oneshot' if k=='1' else 'iterate' if k=='2' else 'harnest' if k=='3' else 'bestof'}.json")
+        fname = {"1": "oneshot", "2": "iterate", "3": "harnest", "4": "bestof",
+                 "5": "retry", "6": "scoreloop"}[k]
+        path = os.path.join(RUNS, f"cond{k}_{fname}.json")
         obj = json.load(open(path))
         obj["holdout"], obj["memorization_13gram"] = h, mem
         json.dump(obj, open(path, "w"), ensure_ascii=False, indent=1)
@@ -315,8 +375,9 @@ def main():
 
 
 def report(visible, holdout, cap):
-    rows, names = [], {"0": "무문서 프로브", "1": "원샷", "2": "반복 첨삭", "3": "Harnest 루프", "4": "best-of-10"}
-    for k in "01234":
+    rows, names = [], {"0": "무문서 프로브", "1": "원샷", "2": "반복 첨삭", "3": "Harnest 루프",
+                       "4": "best-of-10", "5": "실격 재시도", "6": "점수-온리 루프"}
+    for k in "0123456":
         for f in os.listdir(RUNS) if os.path.isdir(RUNS) else []:
             if f.startswith(f"cond{k}") and f.endswith(".json"):
                 d = json.load(open(os.path.join(RUNS, f)))
