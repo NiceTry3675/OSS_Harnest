@@ -41,12 +41,76 @@ def _load_frozen_prompt() -> str:
 FROZEN_TEMPLATE = _load_frozen_prompt()
 
 
-def grade(client, model: str, artifact: str, questions: list[dict]) -> dict:
+def check_gates(artifact: str, gates: list[dict] | None) -> list[dict]:
+    """Hard gate 평가 — 가중치로 상쇄될 수 없는 규칙 (SPEC §3 원칙 4).
+
+    **결정적으로만 검사한다.** 분량 같은 건 LLM 판단이 필요 없고, LLM에게 맡기면
+    그 자체가 노이즈원이 된다. 저지 프롬프트에 문장으로 넣는 것으로는 못 막는다는 걸
+    실측으로 확인했다 (generation-engine-and-verbosity-hack.md §4 — 장황함 인플레).
+
+    onFail: "reject"(실격, 채택 불가) / "cap"(점수 상한, capScore 필수)
+    """
+    results = []
+    for gate in gates or []:
+        scorer = gate.get("scorer")
+        params = gate.get("params", {})
+
+        if scorer == "length_within":
+            limit = params.get("max", 0)
+            actual = len(artifact)
+            passed = actual <= limit
+            detail = f"{actual}자 / 제한 {limit}자"
+        else:
+            # 모르는 scorer는 통과시키지 않고 명시적으로 실패 처리한다 —
+            # 조용히 통과시키면 게이트가 있다고 착각하게 된다.
+            passed = False
+            detail = f"알 수 없는 scorer: {scorer}"
+
+        results.append(
+            {
+                "id": gate.get("id", scorer),
+                "scorer": scorer,
+                "onFail": gate.get("onFail", "reject"),
+                "capScore": gate.get("capScore"),
+                "passed": passed,
+                "detail": detail,
+            }
+        )
+    return results
+
+
+def grade(client, model: str, artifact: str, questions: list[dict], gates: list[dict] | None = None) -> dict:
     """산출물 하나를 문항 전체 한 번의 호출로 채점한다 (호출 수를 아끼기 위해 배치).
 
     문항마다 따로 부르던 이전 방식보다 API 호출을 N배 아낀다 — 대신 프롬프트가
     "문제끼리는 서로 독립적으로 채점하라"고 명시해서 서로 영향 안 주게 방어한다.
+
+    gates가 있으면 hard gate를 먼저 평가한다. reject 게이트를 어기면 LLM 채점을
+    아예 하지 않는다 — 호출도 아끼고, "실격인데 점수는 높다"는 혼란도 없앤다.
     """
+    gate_results = check_gates(artifact, gates)
+    rejected = [g for g in gate_results if not g["passed"] and g["onFail"] == "reject"]
+
+    if rejected:
+        reason = "; ".join(f"{g['id']}({g['detail']})" for g in rejected)
+        return {
+            "percent": 0,
+            "raw_total": 0.0,
+            "max_total": len(questions),
+            "detail": [
+                {
+                    "id": q["id"],
+                    "prompt": q["prompt"],
+                    "verdict": "실격",
+                    "reason": f"hard gate 위반: {reason}",
+                    "score": 0.0,
+                }
+                for q in questions
+            ],
+            "gates": gate_results,
+            "disqualified": True,
+        }
+
     questions_block = "\n".join(
         f"{q['id']}. {q['prompt']}\n   정답 키: {q['answer_key']}" for q in questions
     )
@@ -66,7 +130,24 @@ def grade(client, model: str, artifact: str, questions: list[dict]) -> dict:
 
     max_total = len(questions) or 1
     percent = round((total / max_total) * 100)
-    return {"percent": percent, "raw_total": total, "max_total": len(questions), "detail": detail}
+
+    # cap 게이트: 실격은 아니지만 점수 상한을 씌운다.
+    capped_by = None
+    for g in gate_results:
+        if not g["passed"] and g["onFail"] == "cap" and g.get("capScore") is not None:
+            if percent > g["capScore"]:
+                percent = g["capScore"]
+                capped_by = g["id"]
+
+    return {
+        "percent": percent,
+        "raw_total": total,
+        "max_total": len(questions),
+        "detail": detail,
+        "gates": gate_results,
+        "disqualified": False,
+        "cappedBy": capped_by,
+    }
 
 
 def _parse_batch(raw: str) -> dict[str, tuple[str, str]]:

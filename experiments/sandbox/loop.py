@@ -17,6 +17,17 @@ def run_loop(client, config: dict) -> dict:
     source_material = config["source_material"]
     length_limit = config["length_limit_chars"]
     questions = config["rubric"]["questions"]
+    # hard gate (SPEC §3 원칙 4 / 스키마 v0.3 evaluation.gates).
+    # 설정에 없으면 분량 제한을 기본 게이트로 깐다 — 장황함 인플레는 이 도메인의
+    # 알려진 꼼수이고(PHILOSOPHY §7 문헌 시딩), 실제로 뚫린 걸 관측했다.
+    gates = config.get("gates") or [
+        {
+            "id": "hard-length",
+            "scorer": "length_within",
+            "params": {"max": length_limit},
+            "onFail": "reject",
+        }
+    ]
     gen_model = config["model"]["generator"]
     judge_model = config["model"]["judge"]
     max_rounds = config["loop"]["max_rounds"]
@@ -29,7 +40,7 @@ def run_loop(client, config: dict) -> dict:
     seed_artifact = generator.generate_seed(
         client, gen_model, goal, source_material, length_limit, style=seed_style
     )
-    seed_grade = judge.grade(client, judge_model, seed_artifact, questions)
+    seed_grade = judge.grade(client, judge_model, seed_artifact, questions, gates)
     rounds.append(
         {
             "round": 0,
@@ -47,7 +58,7 @@ def run_loop(client, config: dict) -> dict:
     for round_index in range(1, max_rounds + 1):
         feedback = _format_feedback(rounds[-1]["grade"])
         candidate = generator.revise(client, gen_model, champion_artifact, feedback, length_limit)
-        candidate_grade = judge.grade(client, judge_model, candidate, questions)
+        candidate_grade = judge.grade(client, judge_model, candidate, questions, gates)
 
         if candidate_grade["percent"] > champion_score:
             champion_artifact = candidate
@@ -83,11 +94,22 @@ def run_loop(client, config: dict) -> dict:
 
 
 def _format_feedback(grade_result: dict) -> str:
-    lines = [
+    lines = []
+
+    # hard gate 위반은 맨 위에 따로 알린다 — 왜 0점인지 모르면 같은 실수를 반복한다.
+    for gate in grade_result.get("gates", []):
+        if not gate["passed"]:
+            lines.append(
+                f"- [필수 제약 위반 — 이걸 못 지키면 다른 항목을 아무리 잘해도 실격입니다] "
+                f"{gate['id']}: {gate['detail']}"
+            )
+
+    lines += [
         f"- {item['id']} ({item['prompt']}): {item['verdict']} — {item['reason']}"
         for item in grade_result["detail"]
-        if item["verdict"] != "정답"
+        if item["verdict"] not in ("정답", "실격")
     ]
+
     if not lines:
         return "모든 문제를 맞혔습니다. 더 다듬을 부분이 있다면 다듬어주세요."
     return "\n".join(lines)
