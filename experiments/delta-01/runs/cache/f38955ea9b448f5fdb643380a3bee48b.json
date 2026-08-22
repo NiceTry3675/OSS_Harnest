@@ -1,0 +1,1 @@
+{"text": "{\"score\": 1.0, \"why\": \"The response accurately conveys the key fact that ARM64/Raspberry Pi is supported directly via `scripts/install.sh` without requiring special pre-built binaries or separate compilation.\"}", "tag": "grade:case-10218", "model": "gemini-3.7-flash"}

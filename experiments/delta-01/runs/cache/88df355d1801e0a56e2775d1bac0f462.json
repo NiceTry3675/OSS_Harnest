@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0, \"why\": \"The response states that the feature is not documented/unknown and fails to mention that it is supported via the `X-Hermes-Session-Key` header.\"}", "tag": "grade:case-52397", "model": "gemini-3.7-flash"}

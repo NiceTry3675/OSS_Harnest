@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately presents both supported methods for isolating Hermes instances (built-in profiles and custom HERMES_HOME directories/volumes) matching the reference answer.\"}\n```", "tag": "grade:case-30673", "model": "gemini-3.7-flash"}

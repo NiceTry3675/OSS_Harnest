@@ -1,0 +1,1 @@
+{"text": "{\"score\": 1.0, \"why\": \"The response accurately identifies the missing `api-version` query parameter as the root cause and provides the correct configuration workaround.\"}", "tag": "grade:case-25378", "model": "gemini-3.7-flash"}

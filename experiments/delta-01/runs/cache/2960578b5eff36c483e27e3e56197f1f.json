@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately conveys that Hermes supports Azure Foundry, explains how to configure it via `hermes setup` or `provider: azure-foundry`, and clarifies that Claude Code-specific env vars are ignored.\"}\n```", "tag": "grade:case-9580", "model": "gemini-3.7-flash"}

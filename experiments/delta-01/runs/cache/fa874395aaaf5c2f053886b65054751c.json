@@ -1,0 +1,1 @@
+{"text": "{\"score\": 1.0, \"why\": \"The response accurately captures the key facts that ARM64 is supported via `scripts/install.sh` with automatic architecture detection and compatible wheels.\"}", "tag": "grade:case-10218", "model": "gemini-3.7-flash"}

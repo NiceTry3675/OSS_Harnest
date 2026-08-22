@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0.5, \"why\": \"The response correctly mentions the `~/.hermes/plugins` local plugin approach, but misses the specific developer guide documentation and exact platform registration details from the reference answer.\"}", "tag": "grade:case-42473", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "Yes, this is expected behavior. \n\nWhen `hermes update` pauses or takes longer during the Node.js dependency update step, it is silently downloading browser binaries in the background (via the Camofox postinstall script).", "tag": "resp:case-22237", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly explains how SOUL.md, USER.md, and MEMORY.md (with target='user') work, but misses that this was a bug resolved in an updated release.\"}\n```", "tag": "grade:case-29476", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response incorrectly claims there are no documented flags for changing the installation directory, but correctly guesses the relevant `-InstallDir` and `HERMES_HOME` parameters.\"}\n```", "tag": "grade:case-38935", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1, \"why\": \"The response accurately covers support for Azure AI Foundry, auto-detection of ANTHROPIC_FOUNDRY_BASE_URL, that Claude Code-specific vars are not used, and the recommended setup methods.\"}\n```", "tag": "grade:case-9580", "model": "gemini-3.7-flash"}

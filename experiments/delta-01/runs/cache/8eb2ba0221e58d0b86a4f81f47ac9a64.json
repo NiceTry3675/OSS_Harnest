@@ -1,0 +1,1 @@
+{"text": "Using an Anthropic API key will always bill as API usage. \n\nTo route your usage through your Claude Pro or Claude Max subscription allowance instead of being billed for API tokens, you must authenticate using **OAuth**.", "tag": "resp:case-29539", "model": "gemini-3.7-flash"}

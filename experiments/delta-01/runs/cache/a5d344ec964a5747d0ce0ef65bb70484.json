@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response provides general troubleshooting steps addressing both issues, but misses the specific configuration settings documented in the reference answer such as `TELEGRAM_GROUP_ALLOWED_CHATS` and `require_mention`.\"}\n```", "tag": "grade:case-47644", "model": "gemini-3.7-flash"}

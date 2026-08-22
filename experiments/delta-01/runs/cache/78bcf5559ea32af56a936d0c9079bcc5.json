@@ -1,0 +1,1 @@
+{"text": "{\"score\": 1, \"why\": \"The response correctly confirms that Python script uploads are already a supported feature and explains how readable text/code files like .py are injected into the prompt.\"}", "tag": "grade:case-5047", "model": "gemini-3.7-flash"}

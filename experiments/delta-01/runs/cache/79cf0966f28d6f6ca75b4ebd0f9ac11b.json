@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0.5, \"why\": \"The response incorrectly claims there are no installer flags to change the installation path, but partially captures the use of HERMES_HOME.\"}", "tag": "grade:case-38935", "model": "gemini-3.7-flash"}

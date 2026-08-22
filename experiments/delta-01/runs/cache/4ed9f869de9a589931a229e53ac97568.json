@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response correctly identifies that ARM64 is supported via `scripts/install.sh` auto-detection and that dependencies provide ARM64 wheels or pure Python.\"}\n```", "tag": "grade:case-10218", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "Entering an Anthropic API key will always result in per-token API billing. \n\nTo use your **Claude Pro or Claude Max** subscription allowance instead of paying for API tokens, you must authenticate via **Claude OAuth** rather than entering an API key.", "tag": "resp:case-29539", "model": "gemini-3.7-flash"}

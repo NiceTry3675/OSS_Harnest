@@ -1,0 +1,1 @@
+{"text": "Yes, there is a web interface available. You do not have to operate it exclusively through the command line.\n\nYou can launch the local web dashboard and chat in your browser by running:\n\n```bash\nhermes dashboard\n```\n\nThis starts a local web server at `http://127.0.0.1:9119` with an embedded TUI chat.", "tag": "resp:case-4420", "model": "gemini-3.7-flash"}

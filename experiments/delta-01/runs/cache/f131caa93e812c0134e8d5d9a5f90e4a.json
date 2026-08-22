@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately explains that Gemini CLI OAuth was deprecated and provides the supported alternatives (Google AI Studio with API keys and Vertex AI).\"}\n```", "tag": "grade:case-25055", "model": "gemini-3.7-flash"}

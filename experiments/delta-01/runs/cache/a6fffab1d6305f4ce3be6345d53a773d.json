@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0, \"why\": \"The response fails to identify the model normalization bug in Hermes that rewrites 'deepseek-v4-flash' to 'deepseek-chat' (mapping to 'deepseek-v4-pro') and instead gives generic background process troubleshooting.\"}\n```", "tag": "grade:case-26105", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response suggests the right conceptual direction (bootstrap tier and local plugins) but misses key Hermes features from the reference, including `memory.write_approval`, native Mem0 support, and the `MemoryProvider` extension contract.\"}\n```", "tag": "grade:case-51062", "model": "gemini-3.7-flash"}

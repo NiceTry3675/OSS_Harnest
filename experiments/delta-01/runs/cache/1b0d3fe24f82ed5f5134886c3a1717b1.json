@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately explains the max-turns limit, the continuation/resume mechanism, and the use of /goal for long-running autonomous tasks as detailed in the reference answer.\"}\n```", "tag": "grade:case-6997", "model": "gemini-3.7-flash"}

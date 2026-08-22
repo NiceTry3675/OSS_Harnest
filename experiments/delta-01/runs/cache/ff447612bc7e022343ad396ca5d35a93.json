@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies that `bootstrap.py` is not the official Hermes dashboard and recommends `hermes dashboard`, but fails to provide the correct Telegram authorization configuration (`allow_from`).\"}\n```", "tag": "grade:case-34751", "model": "gemini-3.7-flash"}

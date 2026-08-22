@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately identifies model normalization as the root cause, explaining how deepseek-v4-flash normalizes to deepseek-chat and routes to deepseek-v4-pro at Pro rates.\"}\n```", "tag": "grade:case-26105", "model": "gemini-3.7-flash"}

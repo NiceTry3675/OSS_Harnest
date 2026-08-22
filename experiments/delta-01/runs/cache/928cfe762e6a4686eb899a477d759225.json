@@ -1,0 +1,1 @@
+{"text": "Based on the onboarding guide, this occurs because of model normalization:\n\nEnsure model normalization handles **`deepseek-v4-flash`** directly. If it is not handled directly, it will default or normalize to **`deepseek-chat`**, which routes to **`deepseek-v4-pro`** and bills at Pro rates.", "tag": "resp:case-26105", "model": "gemini-3.7-flash"}

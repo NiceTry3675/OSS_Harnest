@@ -1,0 +1,1 @@
+{"text": "{\"score\": 1, \"why\": \"The response accurately identifies that the Azure endpoint requires the `api-version` query parameter and provides the correct URL format to resolve the issue.\"}", "tag": "grade:case-25378", "model": "gemini-3.7-flash"}

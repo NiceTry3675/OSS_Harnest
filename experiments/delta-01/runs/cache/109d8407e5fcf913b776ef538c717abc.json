@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately covers the `agent.max_turns` setting, how to increase it, the use of `/goal` for long autonomous tasks, and how resumption works.\"}\n```", "tag": "grade:case-6997", "model": "gemini-3.7-flash"}

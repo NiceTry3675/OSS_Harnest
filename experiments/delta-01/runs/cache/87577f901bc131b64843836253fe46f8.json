@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly states that contribution guidelines and platform adapter conventions are absent, missing the dedicated developer guide and specific platform plugin contract referenced in the ground truth.\"}\n```", "tag": "grade:case-42473", "model": "gemini-3.7-flash"}

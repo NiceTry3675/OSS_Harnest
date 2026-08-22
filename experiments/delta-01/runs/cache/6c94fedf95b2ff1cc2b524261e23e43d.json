@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately covers both key capabilities (`delegate_task` and `channel_prompts`/`pre_llm_call` hooks) matching the reference answer.\"}\n```", "tag": "grade:case-11922", "model": "gemini-3.7-flash"}

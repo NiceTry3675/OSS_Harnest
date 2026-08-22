@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response addresses both issues (channel prompts/session persistence and group authorization) but misses the specific configuration settings (`require_mention` and `TELEGRAM_GROUP_ALLOWED_CHATS`) identified in the reference answer.\"}\n```", "tag": "grade:case-47644", "model": "gemini-3.7-flash"}

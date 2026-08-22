@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies that canonical model normalization for DeepSeek causes unintended model routing and costs, but misses the specific root cause mechanism in `model_normalize.py` and the patch/workaround.\"}\n```", "tag": "grade:case-26105", "model": "gemini-3.7-flash"}

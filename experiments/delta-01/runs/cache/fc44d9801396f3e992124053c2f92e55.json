@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response treats the input as a user support query instead of providing the code triage and bug-fix explanation contained in the reference answer.\"}\n```", "tag": "grade:case-8381", "model": "gemini-3.7-flash"}

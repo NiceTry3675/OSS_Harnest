@@ -1,0 +1,1 @@
+{"text": "Yes, this is expected behavior. \n\nDuring the Node.js dependency update (`npm install`), the installer is downloading the Camofox browser binary in the background silently without displaying a progress bar, which causes this step to appear paused or take longer than the others.", "tag": "resp:case-22237", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies that the official interface is `hermes dashboard` rather than the external `bootstrap.py`, but gives incorrect advice regarding the Telegram configuration by suggesting list formatting for `allowed_chats` instead of using `allow_from`.\"}\n```", "tag": "grade:case-34751", "model": "gemini-3.7-flash"}

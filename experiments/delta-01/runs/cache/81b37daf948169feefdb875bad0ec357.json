@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately explains that API keys bill as API usage and correctly identifies OAuth as the required authentication method to use Pro/Max subscription allowances.\"}\n```", "tag": "grade:case-29539", "model": "gemini-3.7-flash"}

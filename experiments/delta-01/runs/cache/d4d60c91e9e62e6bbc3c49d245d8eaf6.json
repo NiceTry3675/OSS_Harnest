@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1, \"why\": \"The response accurately explains that the delay is expected because Camofox is downloading a browser binary silently in the background without progress output.\"}\n```", "tag": "grade:case-22237", "model": "gemini-3.7-flash"}
