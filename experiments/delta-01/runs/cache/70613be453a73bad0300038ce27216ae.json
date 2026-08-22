@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately explains how to increase Ollama's server-side context using a Modelfile with num_ctx and how to configure the matching context_length in Hermes.\"}\n```", "tag": "grade:case-53359", "model": "gemini-3.7-flash"}

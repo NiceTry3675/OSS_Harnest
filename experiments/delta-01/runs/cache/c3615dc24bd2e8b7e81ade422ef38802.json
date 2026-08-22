@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response suggests generic installation workarounds rather than the official `-HermesHome` and `-InstallDir` script parameters documented in the reference.\"}\n```", "tag": "grade:case-38935", "model": "gemini-3.7-flash"}

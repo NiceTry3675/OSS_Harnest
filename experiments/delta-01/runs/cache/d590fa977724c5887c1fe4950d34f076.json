@@ -1,0 +1,1 @@
+{"text": "{\"score\": 1, \"why\": \"The response accurately explains how to install packages without sudo by creating a derived Docker image or executing as root.\"}", "tag": "grade:case-1947", "model": "gemini-3.7-flash"}

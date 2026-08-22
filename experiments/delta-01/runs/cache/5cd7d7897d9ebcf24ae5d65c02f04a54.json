@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly claims that there is no built-in web interface, whereas Hermes does have a first-party web dashboard with browser chat.\"}\n```", "tag": "grade:case-4420", "model": "gemini-3.7-flash"}

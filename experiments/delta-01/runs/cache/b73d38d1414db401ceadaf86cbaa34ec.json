@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0, \"why\": \"The response provides generic troubleshooting steps instead of explaining the actual Hermes tool architecture, such as using the plugin system for custom tools or using the correct file paths (`tools/` and `toolsets.py`).\"}\n```", "tag": "grade:case-29351", "model": "gemini-3.7-flash"}

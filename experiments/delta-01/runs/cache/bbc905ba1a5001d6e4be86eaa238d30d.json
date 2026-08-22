@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response suggests the correct working alternative (Google AI Studio API key), but misses that the Gemini CLI OAuth provider was completely removed and mistakenly suggests re-authenticating with OAuth.\"}\n```", "tag": "grade:case-25055", "model": "gemini-3.7-flash"}

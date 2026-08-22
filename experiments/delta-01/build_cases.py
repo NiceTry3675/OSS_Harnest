@@ -90,6 +90,14 @@ def main():
             "weak": weak,
         })
 
+    # 프로브 기반 drop (PROTOCOL §5 — probe_drops.json이 있으면 적용, 재산정 1회)
+    pd_path = os.path.join(BASE, "probe_drops.json")
+    if os.path.exists(pd_path):
+        dropped_ids = set(json.load(open(pd_path))["drops"])
+        before = len(cases)
+        cases = [c for c in cases if c["id"] not in dropped_ids]
+        print(f"프로브 drop 적용: {before} → {len(cases)} (사유는 probe_drops.json)")
+
     cases.sort(key=lambda c: c["created_at"])
     n_visible = min(VISIBLE_CAP, (len(cases) * 2) // 3)
     out = {

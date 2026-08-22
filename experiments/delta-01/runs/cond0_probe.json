@@ -1,0 +1,136 @@
+{
+ "contamination_rate": 19.230769230769234,
+ "verdict": "통과",
+ "cases": [
+  {
+   "id": "case-4420",
+   "score": 0.0,
+   "why": "The response incorrectly claims that there is no built-in web interface, whereas Hermes does have a first-party web dashboard with browser chat."
+  },
+  {
+   "id": "case-5047",
+   "score": 0.0,
+   "why": "The response incorrectly states that file attachments are not supported and suggests requesting the feature, whereas the reference answer confirms it is already implemented in current main."
+  },
+  {
+   "id": "case-6997",
+   "score": 0.5,
+   "why": "The response accurately explains the general concepts of iteration limits and turn-based continuation, but it misses the specific Hermes features and configuration commands mentioned in the reference answer, notably `/goal` and `agent.max_turns`."
+  },
+  {
+   "id": "case-8381",
+   "score": 0.0,
+   "why": "The response explains the CLI message text rather than addressing the codebase fix and updated session preservation behavior described in the reference answer."
+  },
+  {
+   "id": "case-9196",
+   "score": 0.0,
+   "why": "The response incorrectly states that native Windows is unsupported and experimental, directly contradicting the reference answer which confirms it is now officially Tier 1 supported."
+  },
+  {
+   "id": "case-9580",
+   "score": 0.0,
+   "why": "The response incorrectly states that Hermes does not support ANTHROPIC_FOUNDRY_BASE_URL and fails to mention native Azure Foundry provider auto-detection support."
+  },
+  {
+   "id": "case-10030",
+   "score": 0.0,
+   "why": "The response incorrectly claims the feature is not supported natively, directly contradicting the reference answer which confirms it is supported."
+  },
+  {
+   "id": "case-10218",
+   "score": 0.0,
+   "why": "The response incorrectly claims ARM64 is not natively supported with dedicated scripts, contradicting the reference answer which notes ARM64 is already supported out-of-the-box via scripts/install.sh and ARM64 wheels."
+  },
+  {
+   "id": "case-11922",
+   "score": 0.5,
+   "why": "The response incorrectly states that multi-agent delegation is not built-in, but conceptually describes the correct patterns (tool-based delegation and channel-to-prompt mapping) without citing the specific native features (`delegate_task` and `channel_prompts`)."
+  },
+  {
+   "id": "case-22237",
+   "score": 0.5,
+   "why": "The response correctly identifies post-install lifecycle scripts and browser tools as a primary cause of the delay, but misses the specific known issue regarding the Camofox postinstall silent browser download."
+  },
+  {
+   "id": "case-25055",
+   "score": 0.5,
+   "why": "The response suggests the correct working alternative (Google AI Studio API key), but misses that the Gemini CLI OAuth provider was completely removed and mistakenly suggests re-authenticating with OAuth."
+  },
+  {
+   "id": "case-25378",
+   "score": 0.5,
+   "why": "The response correctly identifies the missing `api-version` parameter as the root cause, but misses that this was a bug fixed in Hermes where query parameters were being dropped."
+  },
+  {
+   "id": "case-26105",
+   "score": 0.0,
+   "why": "The response provides generic troubleshooting steps instead of identifying the actual root cause: model normalization in model_normalize.py rewriting the flash model to a more expensive pro model."
+  },
+  {
+   "id": "case-29351",
+   "score": 0.0,
+   "why": "The response provides generic troubleshooting steps instead of explaining the actual Hermes tool architecture, such as using the plugin system for custom tools or using the correct file paths (`tools/` and `toolsets.py`)."
+  },
+  {
+   "id": "case-29476",
+   "score": 0.0,
+   "why": "The response fails to identify that this is a known bug resolved in version v2026.7.1 and gives inaccurate explanations regarding memory tooling support for USER.md."
+  },
+  {
+   "id": "case-29539",
+   "score": 0.5,
+   "why": "The response correctly identifies that API keys bill per-token rather than using Pro/Max subscription allowances, but misses the key solution that OAuth authentication allows using the Pro/Max subscription in Hermes Agent."
+  },
+  {
+   "id": "case-30673",
+   "score": 0.5,
+   "why": "The response accurately diagnoses the filesystem isolation issue and offers generic solutions, but misses Hermes's native built-in mechanisms (profiles and HERMES_HOME) provided in the reference answer."
+  },
+  {
+   "id": "case-33223",
+   "score": 0.0,
+   "why": "The response guesses hypothetical technical reasons rather than explaining the project's actual standing maintainer policy against automatic complexity-based model routing."
+  },
+  {
+   "id": "case-34751",
+   "score": 0.0,
+   "why": "The response incorrectly assumes 'allowed_chats' is for user DM auth and hallucinates that 'bootstrap.py' and 'HERMES_WEBUI_PASSWORD' are official Hermes components instead of explaining that Hermes uses 'hermes dashboard' with host-based authentication."
+  },
+  {
+   "id": "case-38935",
+   "score": 0.5,
+   "why": "The response suggests generic installation workarounds rather than the official `-HermesHome` and `-InstallDir` script parameters documented in the reference."
+  },
+  {
+   "id": "case-42473",
+   "score": 0.0,
+   "why": "The response recommends submitting a core PR under the platform subsystem, failing to capture the key instruction from the reference answer that community adapters should be standalone plugins in ~/.hermes/plugins/."
+  },
+  {
+   "id": "case-47644",
+   "score": 0.0,
+   "why": "The response suggests generic memory and BotFather troubleshooting rather than addressing the actual configuration settings (such as require_mention and TELEGRAM_GROUP_ALLOWED_CHATS) identified in the reference answer."
+  },
+  {
+   "id": "case-51062",
+   "score": 0.5,
+   "why": "The response provides sensible general architectural advice but misses Hermes-specific mechanisms documented in the reference, such as the `MemoryProvider` plugin contract and the `memory.write_approval` setting."
+  },
+  {
+   "id": "case-52397",
+   "score": 0.5,
+   "why": "The response correctly identifies that this is achievable, but incorrectly claims it is done via the JSON `user` field rather than the `X-Hermes-Session-Key` HTTP header."
+  },
+  {
+   "id": "case-54393",
+   "score": 0.0,
+   "why": "The response suggests manual YAML configuration adjustments rather than mentioning the font picker feature recently added to the dashboard."
+  },
+  {
+   "id": "case-57632",
+   "score": 0.0,
+   "why": "The response incorrectly instructs editing backend configuration files instead of using the built-in '编辑模型…' UI toggle in the model picker."
+  }
+ ]
+}

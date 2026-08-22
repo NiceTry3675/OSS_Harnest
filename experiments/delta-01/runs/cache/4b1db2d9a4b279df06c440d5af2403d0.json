@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly states that file attachments are not supported and suggests requesting the feature, whereas the reference answer confirms it is already implemented in current main.\"}\n```", "tag": "grade:case-5047", "model": "gemini-3.7-flash"}

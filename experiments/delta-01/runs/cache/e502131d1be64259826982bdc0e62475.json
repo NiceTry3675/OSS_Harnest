@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response correctly explains that in-chat changes are session-specific and guides the user to set a global persona/system prompt (including mentioning SOUL.md).\"}\n```", "tag": "grade:case-34662", "model": "gemini-3.7-flash"}

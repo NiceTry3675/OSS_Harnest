@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately answers both questions by stating that standard Claude subscriptions cannot be used (requiring API billing instead) and that Hermes does not run the official harness under the hood.\"}\n```", "tag": "grade:case-43880", "model": "gemini-3.7-flash"}

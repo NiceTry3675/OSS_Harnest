@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response correctly identifies that the issue is the agent's tool-call iteration budget rather than a yt-dlp limit and explains how to increase max_turns in the configuration.\"}\n```", "tag": "grade:case-53760", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response incorrectly states that multi-agent delegation is not built-in, but conceptually describes the correct patterns (tool-based delegation and channel-to-prompt mapping) without citing the specific native features (`delegate_task` and `channel_prompts`).\"}\n```", "tag": "grade:case-11922", "model": "gemini-3.7-flash"}

@@ -114,7 +114,7 @@ def llm(prompt, tag="", temp=0.7):
             text = '{"score": 0.5, "why": "mock"}'
         json.dump({"text": text, "tag": tag, "model": MODEL}, open(path, "w"))
         return text
-    body = json.dumps({"contents": [{"parts": [{"text": prompt}]}],
+    body = json.dumps({"contents": [{"role": "user", "parts": [{"text": prompt}]}],
                        "generationConfig": {"temperature": temp, "maxOutputTokens": 8192}}).encode()
     if PROVIDER == "gemini":
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent"

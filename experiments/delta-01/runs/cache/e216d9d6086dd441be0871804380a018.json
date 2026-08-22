@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0.5, \"why\": \"The response accurately explains the general concepts of iteration limits and turn-based continuation, but it misses the specific Hermes features and configuration commands mentioned in the reference answer, notably `/goal` and `agent.max_turns`.\"}", "tag": "grade:case-6997", "model": "gemini-3.7-flash"}

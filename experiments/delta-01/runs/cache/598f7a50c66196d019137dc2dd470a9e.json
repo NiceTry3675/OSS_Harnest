@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly claims ARM64 is not natively supported with dedicated scripts, contradicting the reference answer which notes ARM64 is already supported out-of-the-box via scripts/install.sh and ARM64 wheels.\"}\n```", "tag": "grade:case-10218", "model": "gemini-3.7-flash"}

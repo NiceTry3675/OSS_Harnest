@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response explains the CLI message text rather than addressing the codebase fix and updated session preservation behavior described in the reference answer.\"}\n```", "tag": "grade:case-8381", "model": "gemini-3.7-flash"}

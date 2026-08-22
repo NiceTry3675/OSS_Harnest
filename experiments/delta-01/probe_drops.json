@@ -1,0 +1,21 @@
+{
+ "rule": "PROTOCOL §5 — 무문서 만점 케이스는 문서 기여 측정 불가(오염 또는 일반지식 답변 가능)로 drop. 재산정 1회.",
+ "date": "2026-08-22",
+ "drops": {
+  "case-1947": "The response accurately explains how to install packages without sudo by creating a derived Docker image or executing as",
+  "case-8445": "The response accurately confirms the connection to Hermes from Greek mythology via Nous Research's model series and expl",
+  "case-9129": "The response accurately explains that one gateway can run multiple platforms simultaneously and also provides the altern",
+  "case-10387": "The response accurately identifies that the user is running a different 'hermes' package (the Helmholtz research tool) r",
+  "case-15694": "The response accurately confirms stdio MCP support, details the configuration and process lifecycle, and addresses macOS",
+  "case-17690": "The response accurately explains the cause of the warning and provides the exact two solutions outlined in the reference",
+  "case-19752": "The response accurately and clearly answers all parts of the question in complete alignment with the reference documenta",
+  "case-31559": "The response accurately identifies the underlying issue (missing stream_options in the completion call and extra_body no",
+  "case-32757": "The response accurately explains that provider_routing is OpenRouter-specific and not passed through the Nous Portal inf",
+  "case-33811": "The response accurately identifies the root cause (using /api instead of /v1 for the OpenAI-compatible endpoint) and pro",
+  "case-34662": "The response correctly explains that in-chat changes are session-specific and guides the user to set a global persona/sy",
+  "case-38360": "The response accurately explains that visible assistant output must be in `content`, confirms the behavior around separa",
+  "case-43880": "The response accurately answers both questions by stating that standard Claude subscriptions cannot be used (requiring A",
+  "case-53359": "The response accurately explains how to increase Ollama's server-side context using a Modelfile with num_ctx and how to ",
+  "case-53760": "The response correctly identifies that the issue is the agent's tool-call iteration budget rather than a yt-dlp limit an"
+ }
+}

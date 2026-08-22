@@ -1,0 +1,1 @@
+{"text": "{\"score\": 1.0, \"why\": \"The response accurately identifies the root cause (using /api instead of /v1 for the OpenAI-compatible endpoint) and provides the correct fix to update the base URL to https://ollama.com/v1.\"}", "tag": "grade:case-33811", "model": "gemini-3.7-flash"}

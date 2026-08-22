@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0, \"why\": \"The response incorrectly instructs editing backend configuration files instead of using the built-in '\u7f16\u8f91\u6a21\u578b\u2026' UI toggle in the model picker.\"}", "tag": "grade:case-57632", "model": "gemini-3.7-flash"}

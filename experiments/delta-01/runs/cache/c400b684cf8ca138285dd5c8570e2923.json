@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately identifies that the user is running a different 'hermes' package (the Helmholtz research tool) rather than NousResearch/hermes-agent, and provides steps to resolve the conflict.\"}\n```", "tag": "grade:case-10387", "model": "gemini-3.7-flash"}

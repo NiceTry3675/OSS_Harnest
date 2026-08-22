@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly assumes 'allowed_chats' is for user DM auth and hallucinates that 'bootstrap.py' and 'HERMES_WEBUI_PASSWORD' are official Hermes components instead of explaining that Hermes uses 'hermes dashboard' with host-based authentication.\"}\n```", "tag": "grade:case-34751", "model": "gemini-3.7-flash"}

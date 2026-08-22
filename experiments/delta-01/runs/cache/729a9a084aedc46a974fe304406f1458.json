@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response recommends submitting a core PR under the platform subsystem, failing to capture the key instruction from the reference answer that community adapters should be standalone plugins in ~/.hermes/plugins/.\"}\n```", "tag": "grade:case-42473", "model": "gemini-3.7-flash"}

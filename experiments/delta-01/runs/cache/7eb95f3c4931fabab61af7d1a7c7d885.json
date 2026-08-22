@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response provides sensible general architectural advice but misses Hermes-specific mechanisms documented in the reference, such as the `MemoryProvider` plugin contract and the `memory.write_approval` setting.\"}\n```", "tag": "grade:case-51062", "model": "gemini-3.7-flash"}

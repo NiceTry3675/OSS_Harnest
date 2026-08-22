@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0.5, \"why\": \"The response correctly identifies post-install lifecycle scripts and browser tools as a primary cause of the delay, but misses the specific known issue regarding the Camofox postinstall silent browser download.\"}", "tag": "grade:case-22237", "model": "gemini-3.7-flash"}

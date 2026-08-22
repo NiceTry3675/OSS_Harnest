@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0.5, \"why\": \"The response correctly identifies the missing `api-version` parameter as the root cause, but misses that this was a bug fixed in Hermes where query parameters were being dropped.\"}", "tag": "grade:case-25378", "model": "gemini-3.7-flash"}

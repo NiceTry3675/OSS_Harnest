@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies that this is achievable, but incorrectly claims it is done via the JSON `user` field rather than the `X-Hermes-Session-Key` HTTP header.\"}\n```", "tag": "grade:case-52397", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response suggests generic memory and BotFather troubleshooting rather than addressing the actual configuration settings (such as require_mention and TELEGRAM_GROUP_ALLOWED_CHATS) identified in the reference answer.\"}\n```", "tag": "grade:case-47644", "model": "gemini-3.7-flash"}

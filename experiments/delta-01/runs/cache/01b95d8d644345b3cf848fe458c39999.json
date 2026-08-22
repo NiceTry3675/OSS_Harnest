@@ -1,0 +1,1 @@
+{"text": "{\"score\": 1, \"why\": \"The response accurately explains that visible assistant output must be in `content`, confirms the behavior around separated reasoning fields, and provides the correct configuration workarounds.\"}", "tag": "grade:case-38360", "model": "gemini-3.7-flash"}
