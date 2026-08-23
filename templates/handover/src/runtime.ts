@@ -5,10 +5,16 @@
  *    Generator 입력으로 흘리지 않는다.
  *  - responder는 문서+질문만 본다(prompts.responderPrompt가 그 형태를 강제). */
 
-import type { CaseDef, ScoreResult } from "@harnest/contracts";
+import { GradeFormatError, type CaseDef, type ScoreResult } from "@harnest/contracts";
 import type { GeneratorFeedback } from "@harnest/loop-engine";
 import type { HandoverDoc, HandoverProblem } from "./index";
-import { graderPrompt, mutatePrompt, oneshotPrompt, responderPrompt } from "./prompts";
+import {
+  graderPrompt,
+  graderRetryPrompt,
+  mutatePrompt,
+  oneshotPrompt,
+  responderPrompt,
+} from "./prompts";
 
 /** LLM 클라이언트 계약 — 웹이 BYO Gemini 또는 모의 모델을 구현해 주입한다 */
 export interface LlmClient {
@@ -24,10 +30,51 @@ export interface CaseGrade {
   why: string;
 }
 
+export interface HoldoutCaseGrade extends CaseGrade {
+  /** 반복은 같은 질문이 가시 세트에도 있다는 뜻이며, 차단하지 않고 결과에서 구분한다. */
+  caseType: "repeated" | "new";
+}
+
+export type HoldoutScoreResult =
+  | {
+      gateRejected: true;
+      score: null;
+      perCase: [];
+      violations: string[];
+    }
+  | {
+      gateRejected: false;
+      score: number;
+      perCase: HoldoutCaseGrade[];
+      violations: string[];
+    };
+
+export { GradeFormatError };
+
+function withoutCodeFence(raw: string): string {
+  const trimmed = raw.trim();
+  const fenced = trimmed.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i);
+  return (fenced?.[1] ?? trimmed).trim();
+}
+
 function parseGrade(raw: string): { score: number; why: string } {
-  const m = raw.match(/"score"\s*:\s*(1(?:\.0)?|0\.5|0(?:\.0)?)/);
-  const w = raw.match(/"why"\s*:\s*"([^"]*)"/);
-  return { score: m ? Number(m[1]) : 0, why: w ? w[1] : "채점 응답 해석 불가" };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(withoutCodeFence(raw));
+  } catch {
+    throw new GradeFormatError("채점 출력 형식 오류 — 유효한 JSON 객체가 아닙니다.");
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new GradeFormatError("채점 출력 형식 오류 — JSON 객체가 필요합니다.");
+  }
+  const value = parsed as Record<string, unknown>;
+  if (value.score !== 0 && value.score !== 0.5 && value.score !== 1) {
+    throw new GradeFormatError("채점 출력 형식 오류 — score는 0, 0.5, 1 중 하나여야 합니다.");
+  }
+  if (typeof value.why !== "string" || value.why.trim().length === 0) {
+    throw new GradeFormatError("채점 출력 형식 오류 — why는 비어 있지 않은 문자열이어야 합니다.");
+  }
+  return { score: value.score, why: value.why.trim() };
 }
 
 /** grader 단독 호출 — 시험관 배터리의 오염 응답 프로브(날조·아첨)가 재사용한다.
@@ -38,9 +85,27 @@ export async function gradeResponse(
   expected: string,
   response: string,
 ): Promise<{ score: number; why: string }> {
-  return parseGrade(
-    await llm.complete(graderPrompt(question, expected, response), { temperature: 0 }),
+  const first = await llm.complete(graderPrompt(question, expected, response), { temperature: 0 });
+  try {
+    return parseGrade(first);
+  } catch (error) {
+    if (!(error instanceof GradeFormatError)) throw error;
+  }
+
+  const retried = await llm.complete(
+    graderRetryPrompt(question, expected, response, first),
+    { temperature: 0 },
   );
+  try {
+    return parseGrade(retried);
+  } catch (error) {
+    if (error instanceof GradeFormatError) {
+      throw new GradeFormatError(
+        `채점 출력 형식 오류 — 형식 수정 요청 1회 후에도 해석할 수 없습니다. ${error.message}`,
+      );
+    }
+    throw error;
+  }
 }
 
 async function gradeCases(
@@ -51,10 +116,7 @@ async function gradeCases(
   const out: CaseGrade[] = [];
   for (const c of cases) {
     const resp = await llm.complete(responderPrompt(doc, c.question), { temperature: 0 });
-    const raw = await llm.complete(graderPrompt(c.question, c.expectedAnswer, resp), {
-      temperature: 0,
-    });
-    const { score, why } = parseGrade(raw);
+    const { score, why } = await gradeResponse(llm, c.question, c.expectedAnswer, resp);
     out.push({ caseId: c.id, question: c.question, score, why });
   }
   return out;
@@ -64,13 +126,20 @@ const summarize = (g: CaseGrade): string =>
   `${g.caseId} (${g.question.slice(0, 30)}${g.question.length > 30 ? "…" : ""}): ` +
   `${g.score === 0.5 ? "부분 정답" : "오답"} — ${g.why}`;
 
+function lengthGateViolation(problem: HandoverProblem, doc: HandoverDoc): string | null {
+  return doc.length > problem.lengthCap
+    ? `분량 초과 실격: ${doc.length}자 > ${problem.lengthCap}자`
+    : null;
+}
+
 /** 동결 평가자 — 게이트(분량) → 가시 케이스 실측 평균 ×100 */
 export function createScorer(problem: HandoverProblem, llm: LlmClient) {
   return async (doc: HandoverDoc): Promise<ScoreResult> => {
-    if (doc.length > problem.lengthCap) {
+    const gateViolation = lengthGateViolation(problem, doc);
+    if (gateViolation !== null) {
       return {
         total: 0,
-        violations: [`분량 초과 실격: ${doc.length}자 > ${problem.lengthCap}자`],
+        violations: [gateViolation],
         parts: {},
         gateRejected: true,
       };
@@ -119,11 +188,32 @@ export async function scoreHoldout(
   problem: HandoverProblem,
   doc: HandoverDoc,
   llm: LlmClient,
-): Promise<{ score: number; perCase: CaseGrade[] }> {
+): Promise<HoldoutScoreResult> {
+  const gateViolation = lengthGateViolation(problem, doc);
+  if (gateViolation !== null) {
+    return {
+      gateRejected: true,
+      score: null,
+      perCase: [],
+      violations: [gateViolation],
+    };
+  }
   const grades = await gradeCases(llm, doc, problem.holdoutCases);
   const score =
     Math.round((grades.reduce((a, g) => a + g.score, 0) / grades.length) * 1000) / 10;
-  return { score, perCase: grades };
+  const visibleQuestions = new Set(
+    problem.visibleCases.map((c) => normalizeQuestion(c.question)),
+  );
+  const perCase: HoldoutCaseGrade[] = grades.map((grade) => ({
+    ...grade,
+    caseType: visibleQuestions.has(normalizeQuestion(grade.question)) ? "repeated" : "new",
+  }));
+  return { gateRejected: false, score, perCase, violations: [] };
+}
+
+/** 반복 여부는 결과 해석용으로만 정규화한다. 중복 입력을 거부하거나 분할을 바꾸지 않는다. */
+function normalizeQuestion(question: string): string {
+  return question.normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase("ko-KR");
 }
 
 /** 라운드당 예상 LLM 콜 수 — 관제실 비용 안내용 */

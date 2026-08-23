@@ -5,6 +5,15 @@ import type { CaseDef } from "@harnest/contracts";
 import type { HandoverProblem, LlmClient } from "@harnest/template-handover";
 
 const KEY_STORAGE = "harnest.byo.gemini";
+const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_MAX_ATTEMPTS = 3;
+const DEFAULT_RETRY_BASE_MS = 1_500;
+
+export interface GeminiClientOptions {
+  requestTimeoutMs?: number;
+  maxAttempts?: number;
+  retryBaseMs?: number;
+}
 
 export function getByoKey(): string | null {
   return localStorage.getItem(KEY_STORAGE);
@@ -15,7 +24,27 @@ export function setByoKey(key: string | null): void {
   else localStorage.removeItem(KEY_STORAGE);
 }
 
-export function createGeminiClient(apiKey: string, model = "gemini-3.7-flash"): LlmClient {
+async function responseExcerpt(response: Response): Promise<string> {
+  try {
+    return (await response.text()).replace(/\s+/g, " ").trim().slice(0, 300);
+  } catch {
+    return "";
+  }
+}
+
+function wait(ms: number): Promise<void> {
+  return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
+}
+
+export function createGeminiClient(
+  apiKey: string,
+  model = "gemini-3.7-flash",
+  options: GeminiClientOptions = {},
+): LlmClient {
+  const timeoutMs = Math.max(1, options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const maxAttempts = Math.max(1, Math.floor(options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS));
+  const retryBaseMs = Math.max(0, options.retryBaseMs ?? DEFAULT_RETRY_BASE_MS);
+
   return {
     providerId: "gemini",
     model,
@@ -27,26 +56,62 @@ export function createGeminiClient(apiKey: string, model = "gemini-3.7-flash"): 
           maxOutputTokens: opts?.maxOutputTokens ?? 8192,
         },
       });
-      let lastError: unknown = null;
-      for (let attempt = 0; attempt < 3; attempt++) {
+      let lastError: Error = new Error("LLM 호출 실패");
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+        let res: Response;
         try {
-          const res = await fetch(
+          res = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-            { method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey }, body },
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+              body,
+              signal: controller.signal,
+            },
           );
-          if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`);
-          const data = (await res.json()) as {
-            candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-          };
-          const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (typeof text !== "string") throw new Error("Gemini 응답에 텍스트 없음");
-          return text;
         } catch (e) {
-          lastError = e;
-          await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+          lastError = controller.signal.aborted
+            ? new Error(`Gemini 요청 시간 초과 (${timeoutMs}ms)`)
+            : new Error(`Gemini 네트워크 오류: ${e instanceof Error ? e.message : String(e)}`);
+          clearTimeout(timeout);
+          if (attempt + 1 >= maxAttempts) throw lastError;
+          await wait(retryBaseMs * (attempt + 1));
+          continue;
         }
+
+        if (!res.ok) {
+          const excerpt = await responseExcerpt(res);
+          clearTimeout(timeout);
+          lastError = new Error(`Gemini HTTP ${res.status}${excerpt ? `: ${excerpt}` : ""}`);
+          const retryable = res.status === 429 || (res.status >= 500 && res.status <= 599);
+          if (!retryable || attempt + 1 >= maxAttempts) throw lastError;
+          await wait(retryBaseMs * (attempt + 1));
+          continue;
+        }
+
+        let data: {
+          candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+        };
+        try {
+          data = (await res.json()) as typeof data;
+        } catch {
+          clearTimeout(timeout);
+          if (controller.signal.aborted) {
+            lastError = new Error(`Gemini 요청 시간 초과 (${timeoutMs}ms)`);
+            if (attempt + 1 >= maxAttempts) throw lastError;
+            await wait(retryBaseMs * (attempt + 1));
+            continue;
+          }
+          throw new Error("Gemini 응답 JSON을 해석할 수 없습니다.");
+        }
+        clearTimeout(timeout);
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (typeof text !== "string") throw new Error("Gemini 응답에 텍스트 없음");
+        return text;
       }
-      throw lastError instanceof Error ? lastError : new Error("LLM 호출 실패");
+      throw lastError;
     },
   };
 }

@@ -3,9 +3,15 @@
  *  템플릿 패키지는 웹(apps/web)에 의존하지 않는다 — import 금지. */
 
 import { describe, expect, it } from "vitest";
-import type { CaseDef, InterviewSubmission } from "@harnest/contracts";
+import { GradeFormatError, type CaseDef, type InterviewSubmission } from "@harnest/contracts";
 import { compile, MAX_CASES, MIN_CASES, TEMPLATE_ID, type CompileOptions } from "./index";
-import { createGenerator, createScorer, scoreHoldout, type LlmClient } from "./runtime";
+import {
+  createGenerator,
+  createScorer,
+  gradeResponse,
+  scoreHoldout,
+  type LlmClient,
+} from "./runtime";
 
 const mockJudge: CompileOptions = { judgeProvider: "mock", judgeModel: "테스트-모의" };
 
@@ -170,6 +176,55 @@ describe("createScorer", () => {
   });
 });
 
+describe("gradeResponse — 형식 오류", () => {
+  const sequenceLlm = (outputs: string[]): LlmClient & { prompts: string[] } => {
+    const prompts: string[] = [];
+    return {
+      providerId: "mock",
+      model: "형식-테스트",
+      prompts,
+      async complete(prompt) {
+        prompts.push(prompt);
+        return outputs.shift() ?? "";
+      },
+    };
+  };
+
+  it("JSON 코드 펜스는 제거하되 score 집합과 비어 있지 않은 why를 엄격 검증한다", async () => {
+    const llm = sequenceLlm(['```json\n{"score": 0.5, "why": "핵심 일부 누락"}\n```']);
+    await expect(gradeResponse(llm, "질문", "정답", "응답")).resolves.toEqual({
+      score: 0.5,
+      why: "핵심 일부 누락",
+    });
+    expect(llm.prompts).toHaveLength(1);
+  });
+
+  it("첫 형식 오류는 형식 수정 요청으로 한 번만 재시도한다", async () => {
+    const llm = sequenceLlm([
+      '{"score": 0.7, "why": "허용되지 않은 점수"}',
+      '{"score": 1, "why": "핵심 포함"}',
+    ]);
+    await expect(gradeResponse(llm, "질문", "정답", "응답")).resolves.toEqual({
+      score: 1,
+      why: "핵심 포함",
+    });
+    expect(llm.prompts).toHaveLength(2);
+    expect(llm.prompts[1]).toContain("이전 출력은 JSON 형식 검증에 실패");
+  });
+
+  it("재시도도 잘리거나 why가 비어 있으면 가짜 0점 대신 명시적 오류를 던진다", async () => {
+    const llm = sequenceLlm(['{"score":', '{"score": 0, "why": ""}']);
+    // 계약 타입으로 던진다 — 페이지는 메시지가 아니라 이 타입으로 판별한다(경계 원칙)
+    const thrown = await gradeResponse(llm, "질문", "정답", "응답").then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(thrown).toBeInstanceOf(GradeFormatError);
+    expect(String(thrown)).toContain("채점 출력 형식 오류");
+    expect(llm.prompts).toHaveLength(2);
+  });
+});
+
 describe("scoreHoldout", () => {
   it("홀드아웃 케이스만 채점한다 — 가시 질문은 responder 프롬프트에 등장하지 않는다", async () => {
     const { problem } = await compile(makeSubmission(6), mockJudge);
@@ -179,6 +234,7 @@ describe("scoreHoldout", () => {
     const doc = "요약 문서. " + problem.holdoutCases[0].expectedAnswer;
     const result = await scoreHoldout(problem, doc, llm);
 
+    expect(result.gateRejected).toBe(false);
     expect(result.score).toBe(50);
     expect(result.perCase.map((g) => g.caseId)).toEqual(["case-5", "case-6"]);
     expect(result.perCase.map((g) => g.score)).toEqual([1, 0]);
@@ -193,6 +249,37 @@ describe("scoreHoldout", () => {
     for (const h of problem.holdoutCases) {
       expect(responderPrompts.some((p) => p.includes(h.question))).toBe(true);
     }
+  });
+
+  it("분량 게이트 실격은 0점이 아니라 score null이며 모델을 호출하지 않는다", async () => {
+    const { problem } = await compile(makeSubmission(6), mockJudge);
+    const llm = createRecordingLlm([...problem.visibleCases, ...problem.holdoutCases]);
+    const result = await scoreHoldout(problem, "가".repeat(problem.lengthCap + 1), llm);
+
+    expect(result).toEqual({
+      gateRejected: true,
+      score: null,
+      perCase: [],
+      violations: [`분량 초과 실격: ${problem.lengthCap + 1}자 > ${problem.lengthCap}자`],
+    });
+    expect(llm.prompts).toHaveLength(0);
+  });
+
+  it("홀드아웃 질문을 가시 질문과의 반복/신규로 구분하되 분할에서 제거하지 않는다", async () => {
+    const submission = makeSubmission(6);
+    const cases = submission.answers["cases"] as Array<{
+      question: string;
+      expectedAnswer: string;
+    }>;
+    cases[4].question = `  ${cases[0].question.toUpperCase()}  `;
+    const { problem } = await compile(submission, mockJudge);
+    const llm = createRecordingLlm([...problem.visibleCases, ...problem.holdoutCases]);
+    const result = await scoreHoldout(problem, "요약 문서", llm);
+
+    expect(result.gateRejected).toBe(false);
+    expect(result.perCase).toHaveLength(2);
+    expect(result.perCase.map((g) => g.caseType)).toEqual(["repeated", "new"]);
+    expect(problem.holdoutCases.map((c) => c.id)).toEqual(["case-5", "case-6"]);
   });
 });
 

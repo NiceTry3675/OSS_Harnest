@@ -97,3 +97,21 @@ ${response}
 
 JSON만 출력: {"score": 0 | 0.5 | 1, "why": "<한 문장>"}`;
 }
+
+/** 채점 내용은 바꾸지 않고 출력 형식만 한 번 고치게 한다. 클라이언트 호출은 대화 상태가
+ *  없으므로 원래 채점 문맥을 다시 싣는다. */
+export function graderRetryPrompt(
+  question: string,
+  expected: string,
+  response: string,
+  malformed: string,
+): string {
+  return `${graderPrompt(question, expected, response)}
+
+이전 출력은 JSON 형식 검증에 실패했습니다:
+<invalid-output>
+${malformed}
+</invalid-output>
+
+설명·코드 펜스 없이 위 스키마의 유효한 JSON 객체 하나만 다시 출력하세요.`;
+}

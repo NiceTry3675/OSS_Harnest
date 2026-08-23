@@ -13,7 +13,7 @@ import type {
 import type { GeneratorFeedback } from "@harnest/loop-engine";
 import * as timetable from "@harnest/template-timetable";
 import * as handover from "@harnest/template-handover";
-import type { CompiledGeneric, ExaminerRunGeneric } from "./state";
+import type { CompiledGeneric, ExaminerRunGeneric, HoldoutEvaluation } from "./state";
 import type { LlmClient } from "@harnest/template-handover";
 import { TimetableGrid } from "./components/TimetableGrid";
 import { HandoverDocView } from "./components/HandoverDocView";
@@ -28,7 +28,7 @@ export interface TemplateRuntime {
   ) => unknown | Promise<unknown>;
   initial: (rng: () => number) => unknown | Promise<unknown>;
   /** 라운드 0과 종료 시에만 호출할 것 — 결과는 루프 판단에 유입 금지(SPEC §3 원칙 7) */
-  scoreHoldout: ((artifact: unknown) => Promise<number>) | null;
+  scoreHoldout: ((artifact: unknown) => Promise<HoldoutEvaluation>) | null;
   callsPerRound: number;
   roundDelayMs: number;
 }
@@ -145,8 +145,8 @@ const handoverEntry: TemplateEntry = {
       generate: (champ, rng, feedback) =>
         generate(champ as handover.HandoverDoc, rng, feedback),
       initial: handover.createInitial(problem, llm),
-      scoreHoldout: async (artifact) =>
-        (await handover.scoreHoldout(problem, artifact as handover.HandoverDoc, llm)).score,
+      scoreHoldout: (artifact) =>
+        handover.scoreHoldout(problem, artifact as handover.HandoverDoc, llm),
       callsPerRound: handover.estimateCallsPerRound(problem),
       roundDelayMs: 0,
     };

@@ -1,6 +1,6 @@
 /** 모의 모델 회귀 테스트 — 관통 시나리오: 원샷은 부분 커버, 변이가 실패 케이스를 흡수해 등반.
  *  승인 전 요건(검증 배터리 → 캘리브레이션 → 차단 해제)도 같은 모의 모델로 관통한다. */
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { approvalBlockers, judgeCalibration, type CaseDef } from "@harnest/contracts";
 import {
   buildCalibrationPairs,
@@ -12,7 +12,7 @@ import {
   scoreHoldout,
 } from "@harnest/template-handover";
 import type { HandoverProblem } from "@harnest/template-handover";
-import { createMockClient } from "./llm";
+import { createGeminiClient, createMockClient } from "./llm";
 
 const c = (id: string, q: string, a: string): CaseDef => ({ id, question: q, expectedAnswer: a });
 
@@ -114,5 +114,100 @@ describe("모의 모델 관통", () => {
         calibration,
       ).some((b) => b.includes("검증이 다시 실행")),
     ).toBe(true);
+  });
+});
+
+const errorResponse = (status: number, body: string): Response =>
+  ({
+    ok: false,
+    status,
+    text: async () => body,
+  }) as Response;
+
+const successResponse = (text: string): Response =>
+  ({
+    ok: true,
+    status: 200,
+    json: async () => ({ candidates: [{ content: { parts: [{ text }] } }] }),
+  }) as Response;
+
+describe("Gemini 오류 분류", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("401은 응답 본문 앞 300자를 보여 주고 재시도 없이 즉시 실패한다", async () => {
+    const body = "키가 잘못되었습니다." + "x".repeat(400);
+    const fetchMock = vi.fn(async () => errorResponse(401, body));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = createGeminiClient("bad-key", "gemini-test", { retryBaseMs: 0 });
+
+    let caught: unknown;
+    try {
+      await client.complete("요청");
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toContain("Gemini HTTP 401");
+    expect((caught as Error).message).toContain(body.slice(0, 300));
+    expect((caught as Error).message).not.toContain(body.slice(0, 301));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([429, 503])("HTTP %s는 재시도해 다음 정상 응답을 반환한다", async (status) => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(errorResponse(status, "잠시 후 다시 시도"))
+      .mockResolvedValueOnce(successResponse("복구됨"));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = createGeminiClient("key", "gemini-test", { retryBaseMs: 0 });
+
+    await expect(client.complete("요청")).resolves.toBe("복구됨");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("네트워크 오류는 재시도하지만 응답 형식 오류는 즉시 실패한다", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(successResponse("네트워크 복구"));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = createGeminiClient("key", "gemini-test", { retryBaseMs: 0 });
+    await expect(client.complete("요청")).resolves.toBe("네트워크 복구");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const malformedFetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ candidates: [] }),
+    }) as Response);
+    vi.stubGlobal("fetch", malformedFetch);
+    await expect(client.complete("요청")).rejects.toThrow("텍스트 없음");
+    expect(malformedFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("요청 제한 시간을 넘기면 AbortController로 중단한다", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("중단됨", "AbortError"));
+          });
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = createGeminiClient("key", "gemini-test", {
+      requestTimeoutMs: 20,
+      maxAttempts: 1,
+      retryBaseMs: 0,
+    });
+
+    const assertion = expect(client.complete("요청")).rejects.toThrow("시간 초과 (20ms)");
+    await vi.advanceTimersByTimeAsync(20);
+    await assertion;
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

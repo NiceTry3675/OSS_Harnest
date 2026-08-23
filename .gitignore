@@ -4,3 +4,7 @@
 gemini0614-*.json
 *.key.json
 runs/cache/
+
+.env
+node_modules/
+GPT_PROP.md

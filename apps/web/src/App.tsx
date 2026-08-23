@@ -4,8 +4,11 @@ import { WizardPage } from "./pages/WizardPage";
 import { ApprovalPage } from "./pages/ApprovalPage";
 import { ConsolePage } from "./pages/ConsolePage";
 import { ResultsPage } from "./pages/ResultsPage";
+import { useProject } from "./state";
 
 export function App() {
+  const { hydrated } = useProject();
+
   return (
     <div className="app">
       <header className="topbar">
@@ -13,13 +16,19 @@ export function App() {
         <span className="tagline">당신이 승인한 기준으로, 될 때까지 스스로 고치는 AI</span>
       </header>
       <main>
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/wizard" element={<WizardPage />} />
-          <Route path="/approve" element={<ApprovalPage />} />
-          <Route path="/console" element={<ConsolePage />} />
-          <Route path="/results" element={<ResultsPage />} />
-        </Routes>
+        {hydrated ? (
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/wizard" element={<WizardPage />} />
+            <Route path="/approve" element={<ApprovalPage />} />
+            <Route path="/console" element={<ConsolePage />} />
+            <Route path="/results" element={<ResultsPage />} />
+          </Routes>
+        ) : (
+          <div className="card">
+            <p className="sub" style={{ margin: 0 }}>저장된 프로젝트를 불러오는 중…</p>
+          </div>
+        )}
       </main>
     </div>
   );

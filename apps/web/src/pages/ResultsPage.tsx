@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ProvenanceType } from "@harnest/contracts";
-import { useProject } from "../state";
+import { useProject, type HoldoutEvaluation } from "../state";
 import { getTemplate } from "../templates";
 import { saveProject, uploadResult } from "../lib/api";
 import { CurveChart } from "../components/CurveChart";
@@ -35,6 +35,18 @@ function deltaColor(delta: number): string {
 }
 
 const VERDICT_LABEL = { pass: "통과", warn: "주의", fail: "실패" } as const;
+
+function holdoutPhase(result: HoldoutEvaluation | null): string {
+  if (result === null) return "측정 없음";
+  return result.gateRejected
+    ? "분량 게이트 실격 — 점수 미계산"
+    : `${fmt(result.score)}점`;
+}
+
+function caseGrade(score: number | undefined): string {
+  if (score === undefined) return "—";
+  return score === 1 ? "정답" : score === 0.5 ? "부분 정답" : "오답";
+}
 
 export function ResultsPage() {
   const { compiled, approvedAt, answers, runId, checkpoint, holdout, examinerRun, calibration } =
@@ -88,7 +100,19 @@ export function ResultsPage() {
   const hp = pack.holdoutPolicy;
   const ArtifactView = entry.ArtifactView;
   const holdoutDelta =
-    holdout.baseline !== null && holdout.final !== null ? holdout.final - holdout.baseline : null;
+    holdout.baseline !== null &&
+    !holdout.baseline.gateRejected &&
+    holdout.final !== null &&
+    !holdout.final.gateRejected
+      ? holdout.final.score - holdout.baseline.score
+      : null;
+  const baselineCases =
+    holdout.baseline !== null && !holdout.baseline.gateRejected ? holdout.baseline.perCase : [];
+  const finalCases =
+    holdout.final !== null && !holdout.final.gateRejected ? holdout.final.perCase : [];
+  const holdoutCaseIds = Array.from(
+    new Set([...baselineCases.map((c) => c.caseId), ...finalCases.map((c) => c.caseId)]),
+  );
 
   return (
     <div>
@@ -134,9 +158,8 @@ export function ResultsPage() {
       {(holdout.baseline !== null || holdout.final !== null) && (
         <div className="card">
           <div style={{ fontSize: 16, fontWeight: 600 }}>
-            본 적 없는 질문에서 — 시작{" "}
-            {holdout.baseline !== null ? `${fmt(holdout.baseline)}점` : "측정 없음"} → 종료{" "}
-            {holdout.final !== null ? `${fmt(holdout.final)}점` : "측정 없음"}
+            루프에 숨긴 검증 케이스에서 — 시작 {holdoutPhase(holdout.baseline)} → 종료{" "}
+            {holdoutPhase(holdout.final)}
             {holdoutDelta !== null && (
               <span
                 style={{
@@ -155,9 +178,46 @@ export function ResultsPage() {
             )}
           </div>
           <p className="hint" style={{ marginBottom: 0 }}>
-            숨김 케이스는 실행 중 루프에 전혀 노출되지 않았습니다 — 시작과 종료 시에만 측정한
-            참고 지표입니다.
+            홀드아웃으로 배정된 케이스의 채점 결과는 실행 중 루프에 유입되지 않았습니다 — 시작과
+            종료 시에만 측정한 참고 지표입니다.
           </p>
+          {holdoutCaseIds.length > 0 ? (
+            <>
+              <table className="grid" style={{ marginTop: 12 }}>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: "left" }}>구분</th>
+                    <th style={{ textAlign: "left" }}>홀드아웃 질문</th>
+                    <th>시작</th>
+                    <th>종료</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {holdoutCaseIds.map((caseId) => {
+                    const atStart = baselineCases.find((c) => c.caseId === caseId);
+                    const atEnd = finalCases.find((c) => c.caseId === caseId);
+                    const sample = atEnd ?? atStart!;
+                    return (
+                      <tr key={caseId}>
+                        <td style={{ textAlign: "left", whiteSpace: "nowrap" }}>
+                          <span className={sample.caseType === "repeated" ? "badge" : "badge muted"}>
+                            {sample.caseType === "repeated" ? "반복" : "신규"}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: "left" }}>{sample.question}</td>
+                        <td title={atStart?.why}>{caseGrade(atStart?.score)}</td>
+                        <td title={atEnd?.why}>{caseGrade(atEnd?.score)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <p className="hint" style={{ marginBottom: 0 }}>
+                반복은 같은 질문이 가시 세트에도 등장했음을, 신규는 질문 문면이 가시 세트에 없었음을
+                뜻합니다. 질문 반복은 이 문서 유형의 측정 대상이므로 제거하지 않고 구분해 보고합니다.
+              </p>
+            </>
+          ) : null}
         </div>
       )}
 

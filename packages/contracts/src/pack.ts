@@ -58,7 +58,7 @@ export interface EvaluationPack {
         note: string;
         holdoutCaseIds: string[];
       };
-  /** 판정 절차 전체(criteria+gates+judgeProcedure+holdoutPolicy)의 SHA-256.
+  /** 판정 절차 전체(packVersion+templateId+criteria+gates+judgeProcedure+holdoutPolicy)의 SHA-256.
    *  승인 시 계산·동결 — 이후 어떤 필드가 바뀌어도 다이제스트가 어긋난다. */
   definitionDigest: string;
 }
@@ -66,6 +66,8 @@ export interface EvaluationPack {
 /** 다이제스트 결속 범위 — 이 함수가 곧 "동결의 단위는 판정 절차 전체"의 정의다 */
 export function digestScope(pack: Omit<EvaluationPack, "definitionDigest">): unknown {
   return {
+    packVersion: pack.packVersion,
+    templateId: pack.templateId,
     criteria: pack.criteria,
     gates: pack.gates,
     judgeProcedure: pack.judgeProcedure,
