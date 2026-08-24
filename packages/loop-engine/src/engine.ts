@@ -1,4 +1,4 @@
-/** 루프 엔진 구현 — 계약은 ./index.ts 문서 주석 (SPEC §5.1·§5.1.1).
+/** 루프 엔진 구현 — 계약은 ./index.ts 문서 주석 (SPEC §5.1.1).
  *  엔진은 scorer/pack을 수정할 어떤 경로도 갖지 않는다: 옵션으로 받은 함수를 호출만 한다. */
 
 import type { LoopCheckpoint, ProvenanceType } from "@harnest/contracts";

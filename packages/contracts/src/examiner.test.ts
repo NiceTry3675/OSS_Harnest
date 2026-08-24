@@ -101,7 +101,7 @@ describe("calibrationVerdict", () => {
     expect(calibrationVerdict([])).toBe("fail");
   });
 
-  it("꼼수 쌍이 하나도 없으면 전부 일치여도 fail — SPEC §3 원칙 2의 정의 요건을 계약이 강제", () => {
+  it("꼼수 쌍이 하나도 없으면 전부 일치여도 fail — SPEC §5.1의 정의 요건을 계약이 강제", () => {
     expect(calibrationVerdict([pair("quality", true), pair("quality", true)])).toBe("fail");
   });
 });
@@ -126,7 +126,7 @@ describe("judgeCalibration", () => {
 });
 
 describe("approvalBlockers", () => {
-  it("결정적 전용 루프는 면제 — 리포트·캘리브레이션 없이도 차단 없음(§10 특례 ①)", () => {
+  it("결정적 전용 루프는 면제 — 리포트·캘리브레이션 없이도 차단 없음(SPEC §10)", () => {
     expect(approvalBlockers(makePack("det"), null, null)).toEqual([]);
   });
 

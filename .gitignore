@@ -8,4 +8,3 @@ runs/cache/
 .env
 node_modules/
 dist/
-GPT_PROP.md

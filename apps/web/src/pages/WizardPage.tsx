@@ -1,6 +1,6 @@
 /** 인터뷰 위저드 — 챗봇이 아니라 스텝 폼 + 라이브 블루프린트(SPEC §4.3).
  *  질문 정의는 템플릿 등록소(entry.questions)가 소유하고, 이 화면은 검증·수집만 담당한다.
- *  채점 모델(저지)은 승인 전에 확정되어야 하므로 마지막 스텝에서 고른다(SPEC §12 미결 7). */
+ *  채점 모델(저지)은 승인 전에 확정되어야 하므로 마지막 스텝에서 고른다(SPEC §8). */
 
 import { useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";

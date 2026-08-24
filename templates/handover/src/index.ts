@@ -1,7 +1,7 @@
-/** 인수인계·온보딩 문서 템플릿 — 플래그십 (SPEC §6, 실측 go 2026-08-22).
+/** 인수인계·온보딩 문서 템플릿 — 플래그십 (SPEC §6).
  *  "원샷은 저자가 중요하다고 생각하는 것을 쓰고, 로그는 사람들이 실제로 묻는 것을 드러낸다."
  *  케이스(실제 질문·답 기록)가 원료이자 시험지다: responder가 문서만 보고 케이스를 풀고
- *  grader가 정답과 대조한다(case_answering — 스키마 §5). 채택은 제3 모드(SPEC §5.1.1). */
+ *  grader가 정답과 대조한다(case_answering). 채택은 strict scalar 모드(SPEC §5.1.1). */
 
 import type {
   CaseDef, EvaluationPack, InterviewSubmission, JudgeProvider, LoopSpec, Question,
@@ -11,7 +11,7 @@ import { digestScope, sha256Canonical } from "@harnest/contracts";
 export const TEMPLATE_ID = "handover";
 export const TEMPLATE_NAME = "인수인계·온보딩 문서";
 
-/** 스켈레톤 비용 상한 — 케이스당 라운드마다 2콜(responder+grader). SPEC §12 미결 2 */
+/** 현재 비용 상한 — 케이스당 라운드마다 2콜(responder+grader). */
 export const MAX_CASES = 9;
 export const MIN_CASES = 4;
 
@@ -63,7 +63,7 @@ export interface CompiledHandover {
 }
 
 export interface CompileOptions {
-  /** 저지 구동 모델 — 판정 절차의 일부로 동결된다. 승인 전에 확정(SPEC §12 미결 7 UX 제약) */
+  /** 저지 구동 모델 — 판정 절차의 일부로 동결되므로 승인 전에 확정한다(SPEC §8). */
   judgeProvider: JudgeProvider;
   judgeModel: string;
 }
@@ -130,7 +130,7 @@ export async function compile(
       judge: { provider: opts.judgeProvider, model: opts.judgeModel },
       // 검증 리포트·캘리브레이션은 승인 전 요건으로 구현됨(./examiner.ts) — forDigest 결속이라 팩 필드가 아니다
       pairwiseNotice:
-        "미적용 — 케이스 실측 중심 루프의 제3 채택 모드(SPEC §5.1.1, 실측 02b~05 검증)",
+        "미적용 — 케이스 집계 스칼라가 엄격히 개선될 때만 채택합니다(SPEC §5.1.1)",
     },
     holdoutPolicy: {
       mode: "auto_tail",

@@ -4,11 +4,11 @@
  *
  *  실패의 의미론(2026-08-23 적대 리뷰 반영):
  *  - 검증 리포트 fail → 캘리브레이션으로 진행하지 않는다(판정해도 승인 전에 폐기될 운명).
- *  - 캘리브레이션 fail → 같은 기준(다이제스트)에서는 재판정·재검증 불가. 판정이 공개된 뒤의
- *    재시도는 블라인드가 아니므로, 유일한 출구는 기준 수정(=다이제스트 변경)이다.
+ *  - 캘리브레이션 fail → 같은 판정 절차(다이제스트)에서는 재판정·재검증 불가. 판정이 공개된
+ *    뒤의 재시도는 블라인드가 아니므로, 판정 절차를 수정해 새 다이제스트로 다시 시작한다.
  *  - "다시 판정" 버튼은 없다 — 재판정 경로는 재검증(새 쌍)뿐이며, 옛 판정은 forReportAt
  *    불일치로 계약 계층에서 자동 무효화된다.
- *  결정적 전용 루프의 면제(§10 특례 ①)는 그대로 노출한다 — 정직 표기가 계약이다.
+ *  결정적 전용 루프의 면제(SPEC §10)는 그대로 노출한다 — 정직 표기가 계약이다.
  *  pack만 보고 렌더하며 템플릿별 분기를 갖지 않는다(judgeProcedure union + 등록소 examiner로 분기). */
 
 import { useMemo, useRef, useState } from "react";
@@ -138,7 +138,7 @@ export function ApprovalPage() {
 
   const calibForPack =
     calibration !== null && pack !== null && calibration.forDigest === pack.definitionDigest;
-  /** 실패 고착 — 같은 다이제스트에서는 재판정·재검증으로 씻을 수 없다. 출구는 기준 수정뿐 */
+  /** 실패 고착 — 같은 다이제스트에서는 재판정·재검증으로 씻을 수 없다 */
   const failedCalibration = calibForPack && calibration!.verdict === "fail";
   const validCalibration =
     calibForPack && validReport && calibration!.forReportAt === examinerRun!.report.ranAt;

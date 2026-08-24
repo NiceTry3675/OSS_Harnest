@@ -45,7 +45,7 @@ export interface TemplateEntry {
   name: string;
   description: string;
   badge?: string;
-  /** true면 BYO 키 또는 모의 모델 선택이 필요(저지 모델은 승인 전에 확정 — SPEC §12 미결 7) */
+  /** true면 BYO 키 또는 모의 모델 선택이 필요(저지 모델은 승인 전에 확정 — SPEC §8) */
   needsModel: boolean;
   questions: Question[];
   compile(
@@ -56,7 +56,7 @@ export interface TemplateEntry {
   createLlm(compiled: CompiledGeneric): LlmClient | null;
   createRuntime(compiled: CompiledGeneric, llm: LlmClient | null): TemplateRuntime;
   /** llm_judge 포함 템플릿의 승인 전 요건 — 검증 배터리와 캘리브레이션 쌍(SPEC §3 원칙 2).
-   *  결정적 전용 템플릿은 undefined(§10 특례 ① 면제). */
+   *  결정적 전용 템플릿은 undefined(SPEC §10 면제). */
   examiner?: {
     runBattery(
       compiled: CompiledGeneric,
@@ -142,7 +142,7 @@ const handoverEntry: TemplateEntry = {
       (jp.judge.provider !== llm.providerId ||
         (jp.judge.provider !== "mock" && jp.judge.model !== llm.model))
     ) {
-      // 승인 시 동결된 저지와 실행 모델이 다르면 실행 불가 — 재승인 원칙(SPEC §12 미결 7)
+      // 승인 시 동결된 저지와 실행 모델이 다르면 실행 불가 — 재승인 원칙(SPEC §8)
       throw new Error(
         `승인된 채점 모델(${jp.judge.provider}/${jp.judge.model})을 사용할 수 없습니다 — 기준을 다시 만들어 승인해 주세요.`,
       );

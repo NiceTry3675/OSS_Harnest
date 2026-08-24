@@ -1,79 +1,79 @@
 # AGENTS.md
 
-Guidance for coding agents working in this repository. `CLAUDE.md` is a symlink to this file, so Claude Code (claude.ai/code) reads it as well — keep the content tool-agnostic.
+Guidance for coding agents working in this repository. `CLAUDE.md` loads this file through `@AGENTS.md`; keep the guidance tool-agnostic.
 
-## Project
+## Project and sources of truth
 
-**Harnest** — a web service that builds autonomous improvement loops: the user approves an evaluation procedure (frozen, untouchable by the loop), and the AI revises its output against it until it passes. Open-source contest entry. All docs, code comments, and commit messages are in **Korean** — keep it that way.
+**Harnest** is a web control room that freezes a judging procedure after user validation and approval, then iteratively improves an artifact against that procedure.
 
-The single source of normative truth is **SPEC.md §3** (PHILOSOPHY.md holds rationale, interview_schema.md holds citations — neither restates definitions). Design decisions are recorded in SPEC with dates; open items live in SPEC §12 in priority order. Before touching anything invariant-related, check the relevant SPEC section.
+- Current product policy and invariants: `SPEC.md`
+- Exact fields, types, and execution contracts: `packages/contracts` and their tests
+- Design rationale: `PHILOSOPHY.md`
+- Unimplemented or deferred scope: `ROADMAP.md`
+- Empirical evidence: `experiments/`
+
+Drafts and archived documents are not current contracts. Before changing an invariant, inspect the relevant SPEC section and contract tests.
 
 ## Commands
 
-Requires Node 22+. From the repo root:
+Node 22 or later is required. Run these commands from the repository root.
 
 ```bash
 npm install
-npm run dev            # web SPA — http://localhost:5173
-npm run typecheck      # tsc --noEmit (root tsconfig covers all workspaces)
-npm test               # vitest run — all *.test.ts across workspaces
-npx vitest run packages/loop-engine/src/engine.test.ts   # single file
-npx vitest run -t "체크포인트"                             # filter by test name
+npm run dev            # Web SPA — http://localhost:5173
+npm run build          # Production web build
+npm run typecheck      # tsc --noEmit across all workspaces
+npm test               # All Vitest tests
+npx vitest run packages/loop-engine/src/engine.test.ts
+npx vitest run -t "체크포인트"
 ```
 
-Backend (optional — only for persisting results; the web app skips it when absent):
+The backend is optional and only persists projects and results.
 
 ```bash
 cd apps/api
 pip3 install -r requirements.txt
 python3 -m uvicorn main:app --port 8000
-python3 test_api.py    # API tests (round-trips every endpoint against a temp DB)
+python3 test_api.py
 ```
 
-There is no linter. The full check is `npm run typecheck && npm test` plus `python3 test_api.py`.
+There is no linter. Match verification to the scope of the change.
 
-## Architecture (npm workspaces monorepo)
+- TypeScript contract, engine, template, or web changes: `npm run typecheck` and relevant tests
+- Web behavior or build configuration changes: add `npm run build`
+- API changes: run `python3 test_api.py` from `apps/api`
+- Cross-layer changes or release checks: run the full suite
 
-```
-packages/contracts    Contract types — "the spec is types, not prose".
-                      pack.ts (EvaluationPack, digestScope), loop.ts (checkpoints),
-                      examiner.ts (validation report / calibration), digest.ts
-                      (canonical JSON → SHA-256)
-packages/loop-engine  Browser hill-climbing loop engine (planned standalone release).
-                      Seeded RNG (mulberry32, state preserved), checkpoint every
-                      round (IndexedDB), pause/resume, plateau early-stop
-templates/*           One folder = one template: questions, compile, scorer, mutator.
-                      timetable = fully deterministic (pipeline debugging),
-                      handover = flagship (LLM case_answering)
-apps/web              React SPA — wizard → approval (lock) → console → results.
-                      templates.tsx is the template registry, state.tsx the single
-                      cross-page context, lib/llm.ts the BYO Gemini/mock client
-apps/api              FastAPI + SQLite CRUD. Executes no arbitrary code — stores and
-                      returns approved procedures verbatim
-experiments/delta-01  One-shot-delta measurements (Python) — NOT app code. PROTOCOL.md
-                      is frozen before scoring; any later edit must land as a diff
-                      with an explicit reason
+## Structure
+
+```text
+packages/contracts    Evaluation Pack, examiner, checkpoint, and digest contracts
+packages/loop-engine  Browser improvement loop with checkpoint and resume support
+templates/handover    Handover questions, compilation, scoring, and generation
+templates/timetable   Deterministic template for development and testing
+apps/web              React SPA with OpenAI, Gemini, and mock model clients
+apps/api              Optional FastAPI + SQLite persistence API
+experiments           Frozen protocols, measurement code, and results
 ```
 
-Dependency direction: `contracts` ← `loop-engine` / `templates/*` ← `apps/web`. The backend talks to the web app only via contract JSON.
+The dependency direction is `contracts` ← `loop-engine` / `templates/*` ← `apps/web`. The web app composes template-specific behavior through the `TemplateEntry` boundary.
 
-## Core invariants (contracts the code enforces — do not break without revisiting SPEC)
+## Core guardrails
 
-- **The unit of freezing is the entire judging procedure**: `definitionDigest` = SHA-256 of `digestScope()` (criteria + gates + judgeProcedure + holdoutPolicy), computed and frozen at approval. Any field change breaks the digest. Editing criteria = recompile = **re-approval**.
-- **A checkpoint belongs to the procedure that produced it**: if `packDigest !== definitionDigest`, resume is refused (the digest guard in loop-engine).
-- **The loop engine has no code path to modify the scorer or the pack** — it only calls functions passed in as options.
-- **Adoption only on strict scalar improvement** (ties keep the champion). Gate-rejected candidates never enter the adoption decision. The improvement curve records only the post-adoption champion score — declines included, unedited.
-- **Holdout is scored only at round 0 and at the end**; no signal derived from holdout scores may flow into generation, adoption, or stopping. Holdout cases never enter Generator/Critic context.
-- **Validation report and calibration are bound via `forDigest`** (they cannot live inside digestScope — self-reference). They are NOT cleared on recompile: the mismatch itself drives the "edit → re-validate round-trip" UI. Approval blocking is decided by `approvalBlockers()`, with `approve()` as a second line of defense. A failed calibration is sticky — the only exit is editing the criteria, never retrying the judged pairs.
-- **Deterministic-only loops are exempt** (SPEC §10 special cases): no validation report/calibration, no pairwise — and the exemption is displayed on screen, never hidden.
-- **Hard gates are doors, not scales** — they carry no weight and cannot be bought back with style points.
-- **Boundary principle (SPEC §6)**: a template declares the range of trusted parts; engine and pages compose within that range. Pages must know only the `TemplateEntry` interface — per-template branches appearing in engine or page code are a red flag.
-- **BYO privacy**: API keys stay in browser localStorage and requests go straight to the vendor — neither keys nor payloads ever touch our server.
-- **Provenance records only events that affect the result** — the user's reading is free and never logged.
-- Credential files (`*.key.json` etc.) must never be committed (see .gitignore).
+- `definitionDigest` is the SHA-256 of `digestScope()`. Its scope includes all of `packVersion`, `templateId`, `criteria`, `gates`, `judgeProcedure`, and `holdoutPolicy`; changing any of them requires re-approval.
+- Do not resume a checkpoint when its `packDigest` differs from the current `definitionDigest`.
+- The engine does not mutate the supplied pack or scorer. Only candidates that pass the gates enter the adoption decision. The current adoption rule requires a **strict scalar score improvement**: ties keep the existing champion, so the champion curve never declines.
+- Score the holdout only at round 0 and at the end. Do not use holdout questions or scores for generation, adoption, or stopping decisions.
+- Examiner reports and calibration bind to the judging procedure through `forDigest`, not from inside the pack. A disclosed calibration failure cannot be retried against the same procedure; revise the procedure and validate a new digest. A failed validation report may be rerun, while transport and format errors are not judging outcomes.
+- Deterministic-only templates are exempt from examiner validation and calibration, and the UI must disclose that exemption.
+- Do not add template-specific branches to pages or the engine. Keep trust boundaries and composition responsibilities in the template registration interface.
+- Store BYO API keys only in browser `localStorage`. Send model request bodies directly from the browser to the selected vendor, never through the Harnest server. Project and result data that the user explicitly chooses to persist is the exception.
+- Never commit credential files such as `*.key.json` or raw API keys.
 
-## Conventions
+## Contribution conventions
 
-- File-header comments cite the governing SPEC section (e.g. `SPEC §5.1.1`). Do the same when writing new contract/invariant code.
-- Decisions and lessons are recorded in SPEC / experiment docs with absolute dates (never relative).
-- Never use the terms harness / autoresearch / hill-climbing in user-facing screens — the product identity is a "control room", not a chatbot.
+- Use Korean by default for user-facing UI, core project documentation, code comments, and commit messages. Keep this agent guidance in English. Do not force translations of identifiers, API or library names, standard technical terms, or externally established terminology; clarity takes priority.
+- Update SPEC only when policy or an invariant changes. Put future work in ROADMAP, empirical observations in `experiments`, and ordinary implementation history in Git. Avoid duplicating the same content across documents.
+- Cite SPEC sections only in code or tests that directly implement a non-obvious invariant. File-header citations are not mandatory everywhere.
+- Do not rewrite frozen experiment protocols or raw observations as part of cleanup. If a correction is necessary, append a correction record with a reason and an absolute date.
+- Keep the user-facing product framing centered on a control room. Explain internal algorithm terms only when they help the user understand the behavior.

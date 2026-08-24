@@ -152,7 +152,7 @@ function openAIOutputText(data: OpenAIResponse): string {
 
 /** OpenAI Responses API 브라우저 직행 어댑터 — 2026-08-24 Chrome CORS 실측 go.
  *  401 응답은 CORS 허용 Origin 없이 반환되어 브라우저가 상태·본문을 숨길 수 있으므로,
- *  fetch 실패는 인증·CORS·네트워크 가능성을 합쳐 안내한다(SPEC §12 미결 3·7). */
+ *  fetch 실패는 인증·CORS·네트워크 가능성을 합쳐 안내한다(SPEC §8). */
 export function createOpenAIClient(
   apiKey: string,
   model = "gpt-5.6-sol",
@@ -279,7 +279,7 @@ function connectionTestError(provider: ByoProvider, error: unknown): Error {
 }
 
 /** 승인 전 BYO fail-fast. 재시도 없이 정확히 한 번만 호출하며, 성공한 키만 저장 대상으로 삼는다.
- *  OpenAI 401의 상태가 CORS로 가려지는 경우에는 인증 실패로 단정하지 않는다(SPEC §12 미결 3·7). */
+ *  OpenAI 401의 상태가 CORS로 가려지는 경우에는 인증 실패로 단정하지 않는다(SPEC §8). */
 export async function testByoConnection(
   provider: ByoProvider,
   apiKey: string,

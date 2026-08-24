@@ -1,4 +1,4 @@
-/** 결과 — 산출물보다 측정이 먼저(PHILOSOPHY §5): 점수 헤드라인이 최상단.
+/** 결과 — 개선은 주장이 아니라 측정이다(PHILOSOPHY 원칙 1): 점수 헤드라인이 최상단.
  *  산출물 렌더는 등록소의 ArtifactView로 위임 — 이 파일은 템플릿을 모른다.
  *  홀드아웃 점수는 표시 전용 참고 지표(SPEC §3 원칙 7) — 루프에 관여하지 않았다.
  *  서버 기록은 있으면 남기고 없으면 조용히 넘어간다(오프라인 완결). */
@@ -257,14 +257,14 @@ export function ResultsPage() {
               캘리브레이션: 해당 없음(특례)
             </span>
             <span className="badge muted" title={hp.note}>
-              홀드아웃: 해당 없음(스켈레톤)
+              홀드아웃: 해당 없음
             </span>
           </>
         ) : (
           <>
             <span className="badge">케이스 실측 채점(저지: {jp.judge.model})</span>
             <span className="badge" title={jp.pairwiseNotice}>
-              채택: 스칼라 엄격 개선(제3 모드)
+              채택: 스칼라 엄격 개선
             </span>
             {hp.mode === "auto_tail" && (
               <span className="badge" title={hp.note}>

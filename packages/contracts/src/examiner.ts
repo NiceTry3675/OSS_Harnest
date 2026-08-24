@@ -1,11 +1,11 @@
-/** 시험관 검증 리포트·캘리브레이션 계약 — llm_judge 포함 루프의 승인 전 요건
- *  (SPEC §3 원칙 2, §5.1 검증 배터리, §12 미결 11). 결정적 전용 루프는 면제(§10 특례 ①).
+/** 시험관 검증 리포트·캘리브레이션 계약 — LLM 판정 루프의 승인 전 요건
+ *  (SPEC §3 원칙 2, §5.1 검증 배터리). 결정적 전용 루프는 면제(§10).
  *
  *  리포트·캘리브레이션은 digestScope 안에 들어갈 수 없다(자기 순환 — 리포트가 다이제스트를
  *  참조하므로 다이제스트 계산에 포함될 수 없다). 대신 forDigest로 판정 절차에 결속한다:
  *  기준 수정 → 재컴파일 → definitionDigest 변경 → 이전 리포트·캘리브레이션은 불일치로
  *  기계적 무효. "수정→재검증 왕복"(SPEC §4.1)의 구현이 이 필드 하나다.
- *  표시는 통과/주의/실패뿐 — 소표본 재채점으로 정밀 수치를 주장하지 않는다(§12 미결 2). */
+ *  표시는 통과/주의/실패뿐 — 소표본 재채점으로 정밀 수치를 주장하지 않는다. */
 
 import type { EvaluationPack, JudgeProvider } from "./pack";
 
@@ -77,7 +77,7 @@ export function worstVerdict(verdicts: ExaminerVerdict[]): ExaminerVerdict {
  *  기준이 사용자 가치와 어긋난 것이고, 시험관이 꼼수를 택했다면 방어가 뚫린 것이다.
  *  어느 쪽이든 이 기준은 동결할 수 없다. 불일치 과반도 실패, 품질 쌍 일부 불일치는 주의.
  *  꼼수 쌍이 아예 없는 캘리브레이션도 실패다 — "알려진 꼼수 예시 1개 이상 포함"은
- *  SPEC §3 원칙 2의 정의 요건이라 템플릿 선의가 아니라 계약이 강제한다. */
+ *  SPEC §5.1의 정의 요건이라 템플릿 선의가 아니라 계약이 강제한다. */
 export function calibrationVerdict(pairs: CalibrationPairResult[]): ExaminerVerdict {
   if (pairs.length === 0) return "fail";
   if (!pairs.some((p) => p.kind === "hack_probe")) return "fail";

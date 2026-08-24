@@ -178,7 +178,7 @@ describe("score — 가중 합산", () => {
   });
 });
 
-describe("결정적 전용 면제 (SPEC §10 특례 ①)", () => {
+describe("결정적 전용 면제 (SPEC §10)", () => {
   it("실제 timetable 팩은 리포트·캘리브레이션 없이도 승인 차단이 없다", async () => {
     const { approvalBlockers } = await import("@harnest/contracts");
     const { compile } = await import("./index");

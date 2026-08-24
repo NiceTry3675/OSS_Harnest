@@ -1,11 +1,12 @@
-/** 브라우저 자율 개선 루프 엔진 — 독립 배포 예정 부품 (SPEC §8).
- *  계약 (SPEC §5.1·§5.1.1):
+/** 브라우저 반복 개선 루프 엔진.
+ *  계약 (SPEC §5.1.1):
  *  - 첫 커밋부터 체크포인트·재개 가능한 상태 머신: 매 라운드 종료 시 store.save가 계약이다.
  *  - 채택: adoptionRule "scalar_strict" — 후보 스칼라 > 챔피언 스칼라일 때만 교체(동점 유지).
  *  - 게이트 reject 후보는 채택 판정에 진입하지 않는다(기각으로 기록).
  *  - 정체: 연속 plateauRounds 미채택 시 doneReason "plateau"로 종료.
  *  - 엔진은 평가자(scorer)를 수정할 어떤 경로도 갖지 않는다 — 호출만 한다.
- *  - RNG는 시드 기반이며 상태를 체크포인트에 보존한다(리플레이·재개 동일 수열). */
+ *  - RNG는 시드 기반이며 상태를 체크포인트에 보존한다(로컬 변이·재개 동일 수열).
+ *    비결정적 외부 모델 출력의 재현까지 보장하지 않는다. */
 
 import type { EvaluationPack, LoopCheckpoint, LoopSpec, ScoreResult } from "@harnest/contracts";
 
@@ -15,8 +16,8 @@ export interface CheckpointStore<A> {
 }
 
 /** Generator에게 전달되는 피드백 — **가시 케이스 트레이스만** 담는다.
- *  홀드아웃 점수·트레이스에서 파생된 어떤 신호도 여기로 흘러들 수 없다(SPEC §3 원칙 7 불변식).
- *  "점수만 피드백하면 개선 없음"(실측 03·04에서 표본 9로 확정)이 violations 전달의 근거다. */
+ *  홀드아웃 점수·트레이스에서 파생된 어떤 신호도 여기로 흘러들 수 없다(SPEC §3 원칙 7).
+ *  케이스별 판정 사유가 후보 수정에 유용했던 실측을 근거로 violations를 전달한다. */
 export interface GeneratorFeedback {
   round: number;
   championScore: number;

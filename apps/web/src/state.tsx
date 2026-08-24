@@ -39,7 +39,7 @@ export interface HoldoutCaseScore {
   question: string;
   score: number;
   why: string;
-  /** 반복 = 같은 질문이 가시 세트에도 등장. 차단 사유가 아니라 결과 해석용 표기다(SPEC §6). */
+  /** 반복 = 같은 질문이 가시 세트에도 등장. 차단 사유가 아니라 결과 해석용 표기다. */
   caseType: "repeated" | "new";
 }
 

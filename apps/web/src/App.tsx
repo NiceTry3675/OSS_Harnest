@@ -13,7 +13,7 @@ export function App() {
     <div className="app">
       <header className="topbar">
         <Link to="/" className="brand">Harnest</Link>
-        <span className="tagline">당신이 승인한 기준으로, 될 때까지 스스로 고치는 AI</span>
+        <span className="tagline">당신이 승인한 평가 절차로, 정해진 범위 안에서 개선을 측정하는 AI</span>
       </header>
       <main>
         {hydrated ? (

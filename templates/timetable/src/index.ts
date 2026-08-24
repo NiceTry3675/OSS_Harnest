@@ -1,4 +1,4 @@
-/** 시간표 템플릿 — 스켈레톤 고정 템플릿 (SPEC §10).
+/** 시간표 템플릿 — 결정적 개발용 테스트 템플릿 (SPEC §10).
  *  채점이 완전 결정적이라 LLM 저지 변수 없이 파이프라인을 디버깅한다.
  *  경계 원칙: 템플릿 = 신뢰 가능한 부품의 범위 선언(질문·채점기·파라미터 매핑),
  *  엔진 = 그 범위 안의 조합·검증 (SPEC §6). */
@@ -60,8 +60,7 @@ export interface CompiledProject {
   loopSpec: LoopSpec;
 }
 
-/** 인터뷰 답변 → 문제 + Evaluation Pack + 루프 스펙.
- *  스켈레톤에서는 결정적 컴파일이지만, 자리는 생성 엔진(서버)의 것이다 (SPEC §3 원칙 1). */
+/** 인터뷰 답변 → 문제 + Evaluation Pack + 루프 스펙. 브라우저에서 결정적으로 컴파일한다. */
 export async function compile(submission: InterviewSubmission): Promise<CompiledProject> {
   const staff = String(submission.answers["staff"] ?? "")
     .split(",")
@@ -127,14 +126,14 @@ export async function compile(submission: InterviewSubmission): Promise<Compiled
     judgeProcedure: {
       kind: "deterministic_only",
       exemptions: {
-        examinerReport: "해당 없음 — 결정적 채점 전용 (SPEC §10 특례 ①)",
-        calibration: "해당 없음 — 결정적 채점 전용 (SPEC §10 특례 ①)",
-        pairwise: "미적용 — 채택은 스칼라 엄격 개선 (SPEC §10 특례 ②)",
+        examinerReport: "해당 없음 — 결정적 채점 전용 (SPEC §10)",
+        calibration: "해당 없음 — 결정적 채점 전용 (SPEC §10)",
+        pairwise: "미적용 — 채택은 스칼라 엄격 개선 (SPEC §10)",
       },
     },
     holdoutPolicy: {
       mode: "none",
-      note: "스켈레톤 범위 제외 — 케이스 기반 템플릿에서 기본값 (SPEC §3 원칙 5)",
+      note: "해당 없음 — 이 결정적 개발용 템플릿에는 홀드아웃 케이스가 없습니다 (SPEC §10)",
     },
   };
 

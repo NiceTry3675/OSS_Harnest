@@ -1,5 +1,5 @@
-/** Evaluation Pack — 승인 순간 동결되는 판정 절차 전체 (SPEC §3 원칙 4, PHILOSOPHY §5).
- *  스켈레톤은 결정적 전용: examinerReport·캘리브레이션 면제, pairwise 금지 (SPEC §10 특례 ①·②). */
+/** Evaluation Pack — 승인 순간 동결되는 판정 절차 전체 (SPEC §3 원칙 4).
+ *  결정적 전용 절차는 examinerReport·캘리브레이션에서 면제된다(SPEC §10). */
 
 export interface CriterionDef {
   id: string;
@@ -16,7 +16,7 @@ export interface GateDef {
   kind: "deterministic";
   scorer: string;
   params: Record<string, number | string>;
-  /** 스켈레톤은 reject만 — cap의 채택 시 의미는 출력 명세(미결 4) 확정 후 */
+  /** 현재 지원하는 gate 효과는 reject뿐이다 */
   effect: "reject";
   label: string;
 }
@@ -24,18 +24,16 @@ export interface GateDef {
 /** 판정 절차에 동결할 수 있는 저지 프로바이더 — 모델 ID와 함께 다이제스트에 결속된다. */
 export type JudgeProvider = "gemini" | "openai" | "mock";
 
-/** 결정적 전용 — 면제의 방어 세트 표기 (SPEC §10 특례 ①·②) */
+/** 결정적 전용 — 면제 사유를 화면에 정직하게 표시한다(SPEC §10). */
 export interface JudgeDeterministicOnly {
   kind: "deterministic_only";
   exemptions: { examinerReport: string; calibration: string; pairwise: string };
 }
 
-/** 케이스 실측 채점 — responder는 산출물+케이스 질문만 본다(불변식, 스키마 §5).
- *  채택은 제3 모드(케이스 집계 스칼라 엄격 개선 — SPEC §5.1.1, 실측 02b~05로 검증).
+/** 케이스 실측 채점 — responder는 산출물+케이스 질문만 본다(불변식).
+ *  채택은 케이스 집계 스칼라 엄격 개선(SPEC §5.1.1).
  *  검증 리포트·캘리브레이션은 이 절차의 승인 전 요건이며 forDigest로 결속된다(./examiner.ts).
- *  컴파일 이후·승인 이전에 생성되므로 이 스켈레톤에서는 팩 필드가 아니라 별도 상태다 —
- *  digestScope에는 어차피 못 들어가고(리포트가 다이제스트를 참조), 스코프 밖 팩 필드로
- *  실을지(SPEC §5.1의 팩 구성은 검증 리포트를 포함한다)는 미결 4 Evaluation Pack 명세에서 확정. */
+ *  리포트가 다이제스트를 참조하므로 digestScope에는 들어갈 수 없고, 현재는 팩 밖 별도 상태다. */
 export interface JudgeCaseAnswering {
   kind: "case_answering";
   judge: {
@@ -43,7 +41,7 @@ export interface JudgeCaseAnswering {
     provider: JudgeProvider;
     model: string;
   };
-  /** 제3 채택 모드의 pairwise 미적용 정직 표기 (SPEC §5.1.1, 미결 4 표기 규칙) */
+  /** 현재 채택 모드에서 pairwise를 적용하지 않는 이유를 화면에 표시한다 */
   pairwiseNotice: string;
 }
 
