@@ -5,7 +5,12 @@
  *    Generator 입력으로 흘리지 않는다.
  *  - responder는 문서+질문만 본다(prompts.responderPrompt가 그 형태를 강제). */
 
-import { GradeFormatError, type CaseDef, type ScoreResult } from "@harnest/contracts";
+import {
+  GradeFormatError,
+  type CaseDef,
+  type JudgeProvider,
+  type ScoreResult,
+} from "@harnest/contracts";
 import type { GeneratorFeedback } from "@harnest/loop-engine";
 import type { HandoverDoc, HandoverProblem } from "./index";
 import {
@@ -16,9 +21,9 @@ import {
   responderPrompt,
 } from "./prompts";
 
-/** LLM 클라이언트 계약 — 웹이 BYO Gemini 또는 모의 모델을 구현해 주입한다 */
+/** LLM 클라이언트 계약 — 웹이 BYO 벤더 또는 모의 모델을 구현해 주입한다 */
 export interface LlmClient {
-  readonly providerId: "gemini" | "mock";
+  readonly providerId: JudgeProvider;
   readonly model: string;
   complete(prompt: string, opts?: { temperature?: number; maxOutputTokens?: number }): Promise<string>;
 }

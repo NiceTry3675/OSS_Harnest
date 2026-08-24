@@ -22,9 +22,7 @@ import {
 } from "@harnest/contracts";
 import { useProject } from "../state";
 import { getTemplate, type TemplateEntry } from "../templates";
-import { setByoKey } from "../lib/llm";
-
-const PROVIDER_LABEL: Record<"gemini" | "mock", string> = { gemini: "Gemini", mock: "모의" };
+import { PROVIDER_LABEL, setByoKey } from "../lib/llm";
 
 const VERDICT_LABEL: Record<ExaminerVerdict, string> = { pass: "통과", warn: "주의", fail: "실패" };
 const VERDICT_COLOR: Record<ExaminerVerdict, string> = {
@@ -199,7 +197,9 @@ export function ApprovalPage() {
 
   const saveKeyAndRetry = (): void => {
     const key = keyInput.trim();
-    if (key.length > 0) setByoKey(key);
+    if (key.length > 0 && jp.kind === "case_answering" && jp.judge.provider !== "mock") {
+      setByoKey(jp.judge.provider, key);
+    }
     void runBattery();
   };
 
@@ -207,7 +207,7 @@ export function ApprovalPage() {
     batteryError !== null && !running ? (
       <div style={{ marginTop: 10 }}>
         <p className="error" style={{ margin: "0 0 8px" }}>{batteryError}</p>
-        {jp.kind === "case_answering" && jp.judge.provider === "gemini" ? (
+        {jp.kind === "case_answering" && jp.judge.provider !== "mock" ? (
           <div style={{ display: "flex", gap: 8 }}>
             <input
               type="password"

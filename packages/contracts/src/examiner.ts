@@ -7,7 +7,7 @@
  *  기계적 무효. "수정→재검증 왕복"(SPEC §4.1)의 구현이 이 필드 하나다.
  *  표시는 통과/주의/실패뿐 — 소표본 재채점으로 정밀 수치를 주장하지 않는다(§12 미결 2). */
 
-import type { EvaluationPack } from "./pack";
+import type { EvaluationPack, JudgeProvider } from "./pack";
 
 export type ExaminerVerdict = "pass" | "warn" | "fail";
 
@@ -27,7 +27,7 @@ export interface ExaminerReport {
   /** 이 리포트가 검증한 판정 절차의 definitionDigest — 불일치 = 무효(재검증 필요) */
   forDigest: string;
   /** 배터리를 실제 구동한 저지 — 동결 선언과 다르면 이 절차를 인증하지 못한다 */
-  judge: { provider: "gemini" | "mock"; model: string };
+  judge: { provider: JudgeProvider; model: string };
   ranAt: string;
 }
 
@@ -133,7 +133,7 @@ export function approvalBlockers(
     blockers.push("기준이 수정되어 이전 검증 리포트가 무효화되었습니다 — 다시 검증해 주세요.");
   } else if (
     report.judge.provider !== jp.judge.provider ||
-    (jp.judge.provider === "gemini" && report.judge.model !== jp.judge.model)
+    (jp.judge.provider !== "mock" && report.judge.model !== jp.judge.model)
   ) {
     blockers.push("검증을 구동한 채점 모델이 동결 선언과 다릅니다 — 승인할 모델로 다시 검증해 주세요.");
   } else if (report.overall === "fail") {

@@ -75,7 +75,8 @@ Chrome의 로컬 Harnest Origin에서 OpenAI Responses API로 직접 호출할 �
 
 ## 4. 후속 작업
 
-1. `openai` provider와 Responses API 어댑터를 계약·웹 계층에 추가한다.
+1. **완료 (2026-08-24)** — `openai` provider와 Responses API 어댑터를 계약·웹 계층에
+   추가했다. provider별 키 저장을 분리하고 `gpt-5.6-sol` 선택·동결·오류 처리를 연결했다.
 2. 승인 전 1콜 연결 테스트는 성공을 확인하고, `Failed to fetch`일 때 CORS·인증·네트워크
    가능성을 함께 안내한다. OpenAI 401은 브라우저에서 개별 분류할 수 없다.
 3. 단위 테스트 후 인수인계 템플릿의 시험관 배터리→캘리브레이션→승인→1라운드를 관통한다.

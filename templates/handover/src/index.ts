@@ -4,7 +4,7 @@
  *  grader가 정답과 대조한다(case_answering — 스키마 §5). 채택은 제3 모드(SPEC §5.1.1). */
 
 import type {
-  CaseDef, EvaluationPack, InterviewSubmission, LoopSpec, Question,
+  CaseDef, EvaluationPack, InterviewSubmission, JudgeProvider, LoopSpec, Question,
 } from "@harnest/contracts";
 import { digestScope, sha256Canonical } from "@harnest/contracts";
 
@@ -64,7 +64,7 @@ export interface CompiledHandover {
 
 export interface CompileOptions {
   /** 저지 구동 모델 — 판정 절차의 일부로 동결된다. 승인 전에 확정(SPEC §12 미결 7 UX 제약) */
-  judgeProvider: "gemini" | "mock";
+  judgeProvider: JudgeProvider;
   judgeModel: string;
 }
 

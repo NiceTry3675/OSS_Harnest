@@ -8,7 +8,7 @@ import type { Question } from "@harnest/contracts";
 import { getTemplate } from "../templates";
 import { WizardBlueprint } from "../components/WizardBlueprint";
 import { WizardCaseList, textareaStyle, type CasePair } from "../components/WizardCaseList";
-import { getByoKey, setByoKey } from "../lib/llm";
+import { getByoKey, setByoKey, type ByoProvider } from "../lib/llm";
 import { useProject } from "../state";
 
 const ROLE_LABEL: Record<Question["role"], string> = {
@@ -22,7 +22,13 @@ const CASE_MIN_DEFAULT = 4;
 const CASE_MAX_DEFAULT = 9;
 
 type DraftValue = string | CasePair[];
-type JudgeChoice = "mock" | "gemini";
+type JudgeChoice = "mock" | ByoProvider;
+
+const JUDGE_MODEL: Record<JudgeChoice, string> = {
+  mock: "모의 모델",
+  gemini: "gemini-3.7-flash",
+  openai: "gpt-5.6-sol",
+};
 
 function validate(q: Question, value: DraftValue): string | null {
   if (q.type === "caseList") {
@@ -114,7 +120,10 @@ export function WizardPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [judgeChoice, setJudgeChoice] = useState<JudgeChoice>("mock");
-  const [keyDraft, setKeyDraft] = useState<string>(() => getByoKey() ?? "");
+  const [keyDrafts, setKeyDrafts] = useState<Record<ByoProvider, string>>(() => ({
+    gemini: getByoKey("gemini") ?? "",
+    openai: getByoKey("openai") ?? "",
+  }));
 
   const liveAnswers = useMemo(() => toAnswers(questions, draft), [questions, draft]);
 
@@ -122,9 +131,7 @@ export function WizardPage() {
   const judge = useMemo(
     () =>
       entry?.needsModel
-        ? judgeChoice === "gemini"
-          ? { provider: "gemini" as const, model: "gemini-3.7-flash" }
-          : { provider: "mock" as const, model: "모의 모델" }
+        ? { provider: judgeChoice, model: JUDGE_MODEL[judgeChoice] }
         : { provider: "mock" as const, model: "-" },
     [entry, judgeChoice],
   );
@@ -160,13 +167,13 @@ export function WizardPage() {
       setStep(step + 1);
       return;
     }
-    if (entry!.needsModel && judgeChoice === "gemini") {
-      const key = keyDraft.trim();
+    if (entry!.needsModel && judgeChoice !== "mock") {
+      const key = keyDrafts[judgeChoice].trim();
       if (!key) {
-        setError("Gemini API 키를 입력해 주세요.");
+        setError(`${judgeChoice === "openai" ? "OpenAI" : "Gemini"} API 키를 입력해 주세요.`);
         return;
       }
-      setByoKey(key);
+      setByoKey(judgeChoice, key);
     }
     setSubmitting(true);
     try {
@@ -268,22 +275,35 @@ export function WizardPage() {
                     />
                     Gemini (BYO 키 — 키는 이 브라우저에만 저장됩니다)
                   </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
+                    <input
+                      type="radio"
+                      name="judge-model"
+                      style={{ width: "auto" }}
+                      checked={judgeChoice === "openai"}
+                      onChange={() => {
+                        setJudgeChoice("openai");
+                        setError(null);
+                      }}
+                    />
+                    OpenAI · GPT-5.6 Sol (BYO 키 — 브라우저 직행)
+                  </label>
                 </div>
-                {judgeChoice === "gemini" ? (
+                {judgeChoice !== "mock" ? (
                   <div style={{ marginTop: 8 }}>
                     <input
                       type="password"
-                      value={keyDraft}
-                      placeholder="Gemini API 키"
+                      value={keyDrafts[judgeChoice]}
+                      placeholder={`${judgeChoice === "openai" ? "OpenAI" : "Gemini"} API 키`}
                       autoComplete="off"
                       onChange={(e) => {
-                        setKeyDraft(e.target.value);
+                        const value = e.target.value;
+                        setKeyDrafts((current) => ({ ...current, [judgeChoice]: value }));
                         setError(null);
                       }}
                     />
                     <div className="hint">
-                      키는 이 브라우저(localStorage)에만 저장되고, 요청은 Gemini API로 직접
-                      전송됩니다.
+                      키는 이 브라우저(localStorage)에만 저장되고, 요청은 {judgeChoice === "openai" ? "OpenAI" : "Gemini"} API로 직접 전송됩니다.
                     </div>
                   </div>
                 ) : null}

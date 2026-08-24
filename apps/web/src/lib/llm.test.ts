@@ -12,7 +12,13 @@ import {
   scoreHoldout,
 } from "@harnest/template-handover";
 import type { HandoverProblem } from "@harnest/template-handover";
-import { createGeminiClient, createMockClient } from "./llm";
+import {
+  createGeminiClient,
+  createMockClient,
+  createOpenAIClient,
+  getByoKey,
+  setByoKey,
+} from "./llm";
 
 const c = (id: string, q: string, a: string): CaseDef => ({ id, question: q, expectedAnswer: a });
 
@@ -29,6 +35,28 @@ const problem: HandoverProblem = {
   ],
   lengthCap: 2000,
 };
+
+describe("BYO 키 저장", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("Gemini와 OpenAI 키를 서로 다른 localStorage 슬롯에 보관한다", () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    });
+
+    setByoKey("gemini", "gemini-key");
+    setByoKey("openai", "openai-key");
+    expect(getByoKey("gemini")).toBe("gemini-key");
+    expect(getByoKey("openai")).toBe("openai-key");
+
+    setByoKey("openai", null);
+    expect(getByoKey("openai")).toBeNull();
+    expect(getByoKey("gemini")).toBe("gemini-key");
+  });
+});
 
 describe("모의 모델 관통", () => {
   it("원샷은 부분 커버(0 < 기준선 < 100), 변이가 실패 케이스를 흡수해 엄격 개선한다", async () => {
@@ -131,6 +159,22 @@ const successResponse = (text: string): Response =>
     json: async () => ({ candidates: [{ content: { parts: [{ text }] } }] }),
   }) as Response;
 
+const openAISuccessResponse = (...texts: string[]): Response =>
+  ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      status: "completed",
+      output: [
+        { type: "reasoning", content: [] },
+        {
+          type: "message",
+          content: texts.map((text) => ({ type: "output_text", text })),
+        },
+      ],
+    }),
+  }) as Response;
+
 describe("Gemini 오류 분류", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -209,5 +253,100 @@ describe("Gemini 오류 분류", () => {
     await vi.advanceTimersByTimeAsync(20);
     await assertion;
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("OpenAI Responses API 어댑터", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("실측한 브라우저 직행 요청 형식으로 호출하고 모든 output_text를 합친다", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        openAISuccessResponse("첫 문장", " + 둘째 문장"),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = createOpenAIClient("openai-key", "gpt-5.6-sol", { retryBaseMs: 0 });
+
+    await expect(
+      client.complete("요청 본문", { temperature: 0, maxOutputTokens: 64 }),
+    ).resolves.toBe("첫 문장 + 둘째 문장");
+
+    expect(client.providerId).toBe("openai");
+    expect(client.model).toBe("gpt-5.6-sol");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.openai.com/v1/responses");
+    expect(init?.method).toBe("POST");
+    expect(init?.headers).toEqual({
+      Authorization: "Bearer openai-key",
+      "Content-Type": "application/json",
+    });
+    expect(JSON.parse(String(init?.body))).toEqual({
+      model: "gpt-5.6-sol",
+      input: "요청 본문",
+      reasoning: { effort: "none" },
+      temperature: 0,
+      max_output_tokens: 64,
+      store: false,
+    });
+  });
+
+  it("401은 재시도하지 않고, 429는 재시도해 정상 응답을 반환한다", async () => {
+    const unauthorized = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        errorResponse(401, "인증 실패"),
+    );
+    vi.stubGlobal("fetch", unauthorized);
+    const client = createOpenAIClient("bad-key", "gpt-5.6-sol", { retryBaseMs: 0 });
+    await expect(client.complete("요청")).rejects.toThrow("OpenAI HTTP 401: 인증 실패");
+    expect(unauthorized).toHaveBeenCalledTimes(1);
+
+    const throttled = vi
+      .fn()
+      .mockResolvedValueOnce(errorResponse(429, "잠시 후 다시 시도"))
+      .mockResolvedValueOnce(openAISuccessResponse("복구됨"));
+    vi.stubGlobal("fetch", throttled);
+    const retrying = createOpenAIClient("key", "gpt-5.6-sol", { retryBaseMs: 0 });
+    await expect(retrying.complete("요청")).resolves.toBe("복구됨");
+    expect(throttled).toHaveBeenCalledTimes(2);
+  });
+
+  it("브라우저가 숨긴 401을 포함한 fetch 실패는 인증·CORS·네트워크 합성 오류로 안내한다", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = createOpenAIClient("bad-key", "gpt-5.6-sol", {
+      maxAttempts: 1,
+      retryBaseMs: 0,
+    });
+
+    await expect(client.complete("요청")).rejects.toThrow(
+      "OpenAI 네트워크/CORS 또는 인증 오류: Failed to fetch",
+    );
+  });
+
+  it("응답 JSON과 텍스트 형식을 검증한다", async () => {
+    const malformed = vi.fn(
+      async () =>
+        ({
+          ok: true,
+          status: 200,
+          json: async () => Promise.reject(new Error("bad json")),
+        }) as unknown as Response,
+    );
+    vi.stubGlobal("fetch", malformed);
+    const client = createOpenAIClient("key", "gpt-5.6-sol", { retryBaseMs: 0 });
+    await expect(client.complete("요청")).rejects.toThrow("응답 JSON을 해석");
+
+    const empty = vi.fn(
+      async () =>
+        ({ ok: true, status: 200, json: async () => ({ status: "completed", output: [] }) }) as Response,
+    );
+    vi.stubGlobal("fetch", empty);
+    await expect(client.complete("요청")).rejects.toThrow("응답에 텍스트 없음");
   });
 });

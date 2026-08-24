@@ -233,7 +233,10 @@ export function ConsolePage() {
   };
   const retrySetup = () => {
     const key = keyInput.trim();
-    if (key.length > 0) setByoKey(key);
+    const jp = compiled.pack.judgeProcedure;
+    if (key.length > 0 && jp.kind === "case_answering" && jp.judge.provider !== "mock") {
+      setByoKey(jp.judge.provider, key);
+    }
     setSetupError(null);
     setRetryTick((t) => t + 1);
   };

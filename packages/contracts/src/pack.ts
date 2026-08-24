@@ -21,6 +21,9 @@ export interface GateDef {
   label: string;
 }
 
+/** 판정 절차에 동결할 수 있는 저지 프로바이더 — 모델 ID와 함께 다이제스트에 결속된다. */
+export type JudgeProvider = "gemini" | "openai" | "mock";
+
 /** 결정적 전용 — 면제의 방어 세트 표기 (SPEC §10 특례 ①·②) */
 export interface JudgeDeterministicOnly {
   kind: "deterministic_only";
@@ -37,7 +40,7 @@ export interface JudgeCaseAnswering {
   kind: "case_answering";
   judge: {
     /** 저지·responder 구동 모델 — 판정 절차의 일부로 동결된다(교체=재승인) */
-    provider: "gemini" | "mock";
+    provider: JudgeProvider;
     model: string;
   };
   /** 제3 채택 모드의 pairwise 미적용 정직 표기 (SPEC §5.1.1, 미결 4 표기 규칙) */

@@ -119,6 +119,12 @@ describe("compile", () => {
       judgeModel: "gemini-3.7-flash",
     });
     expect(b.pack.definitionDigest).not.toBe(a.pack.definitionDigest);
+
+    const c = await compile(makeSubmission(6), {
+      judgeProvider: "openai",
+      judgeModel: "gpt-5.6-sol",
+    });
+    expect(c.pack.definitionDigest).not.toBe(b.pack.definitionDigest);
   });
 });
 

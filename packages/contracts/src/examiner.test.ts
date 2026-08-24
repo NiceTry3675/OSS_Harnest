@@ -12,6 +12,7 @@ import {
   type CalibrationResult,
   type EvaluationPack,
   type ExaminerReport,
+  type JudgeProvider,
 } from "./index";
 
 const DIGEST_A = "a".repeat(64);
@@ -20,7 +21,7 @@ const DIGEST_B = "b".repeat(64);
 function makePack(
   kind: "det" | "ca",
   digest: string = DIGEST_A,
-  judge: { provider: "gemini" | "mock"; model: string } = {
+  judge: { provider: JudgeProvider; model: string } = {
     provider: "gemini",
     model: "gemini-3.7-flash",
   },
@@ -149,6 +150,17 @@ describe("approvalBlockers", () => {
       approvalBlockers(
         geminiPack,
         makeReport({ judge: { provider: "mock", model: "모의" } }),
+        makeCalibration(),
+      ).some((b) => b.includes("채점 모델")),
+    ).toBe(true);
+    const openaiPack = makePack("ca", DIGEST_A, {
+      provider: "openai",
+      model: "gpt-5.6-sol",
+    });
+    expect(
+      approvalBlockers(
+        openaiPack,
+        makeReport({ judge: { provider: "openai", model: "다른-모델" } }),
         makeCalibration(),
       ).some((b) => b.includes("채점 모델")),
     ).toBe(true);
