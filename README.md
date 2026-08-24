@@ -61,3 +61,11 @@ API를 변경했다면 `apps/api`에서 `python3 test_api.py`도 실행합니다
 | 정확한 필드와 실행 계약은 무엇인가 | [`packages/contracts`](packages/contracts)와 테스트 |
 | 실제로 측정했는가 | [`experiments`](experiments) |
 | 저장소에서 어떻게 작업하는가 | [AGENTS.md](AGENTS.md) |
+| 어떻게 기여하는가 | [CONTRIBUTING.md](CONTRIBUTING.md) |
+
+## 기여와 라이선스
+
+이슈, 문서 개선, 새 템플릿 등 모든 형태의 기여를 환영합니다. 시작은
+[CONTRIBUTING.md](CONTRIBUTING.md)를 참고하세요.
+
+이 프로젝트는 [MIT 라이선스](LICENSE)로 배포됩니다.
