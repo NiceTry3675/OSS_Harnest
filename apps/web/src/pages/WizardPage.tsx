@@ -8,7 +8,7 @@ import type { Question } from "@harnest/contracts";
 import { getTemplate } from "../templates";
 import { WizardBlueprint } from "../components/WizardBlueprint";
 import { WizardCaseList, textareaStyle, type CasePair } from "../components/WizardCaseList";
-import { getByoKey, setByoKey, type ByoProvider } from "../lib/llm";
+import { getByoKey, setByoKey, testByoConnection, type ByoProvider } from "../lib/llm";
 import { useProject } from "../state";
 
 const ROLE_LABEL: Record<Question["role"], string> = {
@@ -173,10 +173,15 @@ export function WizardPage() {
         setError(`${judgeChoice === "openai" ? "OpenAI" : "Gemini"} API 키를 입력해 주세요.`);
         return;
       }
-      setByoKey(judgeChoice, key);
     }
     setSubmitting(true);
     try {
+      if (entry!.needsModel && judgeChoice !== "mock") {
+        const key = keyDrafts[judgeChoice].trim();
+        await testByoConnection(judgeChoice, key, JUDGE_MODEL[judgeChoice]);
+        // 실패한 키가 기존의 정상 키를 덮지 않도록 성공한 뒤에만 저장한다.
+        setByoKey(judgeChoice, key);
+      }
       const answers = toAnswers(questions, draft);
       const compiled = await entry!.compile(
         { schemaVersion: "skeleton-1", templateId: entry!.id, answers },
@@ -304,6 +309,7 @@ export function WizardPage() {
                     />
                     <div className="hint">
                       키는 이 브라우저(localStorage)에만 저장되고, 요청은 {judgeChoice === "openai" ? "OpenAI" : "Gemini"} API로 직접 전송됩니다.
+                      승인 화면으로 이동하기 전에 선택한 모델로 1회 연결을 확인합니다.
                     </div>
                   </div>
                 ) : null}
@@ -324,7 +330,13 @@ export function WizardPage() {
                 이전
               </button>
               <button type="submit" className="primary" disabled={submitting}>
-                {isLast ? (submitting ? "확인 중…" : "작성 완료 — 승인 화면으로") : "다음"}
+                {isLast
+                  ? submitting
+                    ? judgeChoice === "mock"
+                      ? "확인 중…"
+                      : "모델 연결 확인 중…"
+                    : "작성 완료 — 승인 화면으로"
+                  : "다음"}
               </button>
             </div>
           </form>

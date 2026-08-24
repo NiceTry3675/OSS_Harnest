@@ -19,6 +19,7 @@ const KEY_STORAGE: Record<ByoProvider, string> = {
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_RETRY_BASE_MS = 1_500;
+const CONNECTION_TEST_TIMEOUT_MS = 15_000;
 
 export interface LlmRequestOptions {
   requestTimeoutMs?: number;
@@ -28,6 +29,8 @@ export interface LlmRequestOptions {
 
 export type GeminiClientOptions = LlmRequestOptions;
 export type OpenAIClientOptions = LlmRequestOptions;
+
+const CONNECTION_TEST_PROMPT = "연결 확인 요청입니다. OK라고만 응답하세요.";
 
 export function getByoKey(provider: ByoProvider): string | null {
   return localStorage.getItem(KEY_STORAGE[provider]);
@@ -238,6 +241,65 @@ export function createOpenAIClient(
       throw lastError;
     },
   };
+}
+
+function connectionTestError(provider: ByoProvider, error: unknown): Error {
+  const label = PROVIDER_LABEL[provider];
+  const detail = error instanceof Error ? error.message : String(error);
+  const statusMatch = detail.match(/HTTP (\d{3})/);
+  const status = statusMatch ? Number(statusMatch[1]) : null;
+
+  if (status === 401) {
+    return new Error(`${label} API 키 인증 실패(HTTP 401). 키를 확인해 주세요.`);
+  }
+  if (status === 403) {
+    return new Error(`${label} 모델 접근 권한 없음(HTTP 403). 계정과 모델 권한을 확인해 주세요.`);
+  }
+  if (status === 404) {
+    return new Error(
+      `${label} 모델을 찾을 수 없거나 접근할 수 없습니다(HTTP 404). 모델 ID와 권한을 확인해 주세요.`,
+    );
+  }
+  if (status === 429) {
+    return new Error(`${label} 요청 한도 초과(HTTP 429). 쿼터와 결제 상태를 확인해 주세요.`);
+  }
+  if (status !== null && status >= 500) {
+    return new Error(`${label} 서버 오류(HTTP ${status}). 잠시 후 다시 시도해 주세요.`);
+  }
+  if (detail.includes("시간 초과")) {
+    return new Error(`${label} 연결 테스트 시간 초과(${CONNECTION_TEST_TIMEOUT_MS}ms).`);
+  }
+  if (detail.includes("네트워크") || detail.includes("Failed to fetch")) {
+    // OpenAI 401은 브라우저 CORS 계층에서 상태와 본문이 가려질 수 있다.
+    return new Error(
+      `${label} 인증·CORS·네트워크 오류. 브라우저가 상태 코드를 공개하지 않아 원인을 구분할 수 없습니다.`,
+    );
+  }
+  return new Error(`${label} 연결 테스트 실패: ${detail}`);
+}
+
+/** 승인 전 BYO fail-fast. 재시도 없이 정확히 한 번만 호출하며, 성공한 키만 저장 대상으로 삼는다.
+ *  OpenAI 401의 상태가 CORS로 가려지는 경우에는 인증 실패로 단정하지 않는다(SPEC §12 미결 3·7). */
+export async function testByoConnection(
+  provider: ByoProvider,
+  apiKey: string,
+  model: string,
+): Promise<void> {
+  const options: LlmRequestOptions = {
+    requestTimeoutMs: CONNECTION_TEST_TIMEOUT_MS,
+    maxAttempts: 1,
+    retryBaseMs: 0,
+  };
+  const client =
+    provider === "openai"
+      ? createOpenAIClient(apiKey, model, options)
+      : createGeminiClient(apiKey, model, options);
+
+  try {
+    await client.complete(CONNECTION_TEST_PROMPT, { temperature: 0, maxOutputTokens: 16 });
+  } catch (error) {
+    throw connectionTestError(provider, error);
+  }
 }
 
 /** 모의 모델 — 키 없이 파이프라인·데모를 돌리기 위한 결정적 대역.

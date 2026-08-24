@@ -18,6 +18,7 @@ import {
   createOpenAIClient,
   getByoKey,
   setByoKey,
+  testByoConnection,
 } from "./llm";
 
 const c = (id: string, q: string, a: string): CaseDef => ({ id, question: q, expectedAnswer: a });
@@ -348,5 +349,80 @@ describe("OpenAI Responses API 어댑터", () => {
     );
     vi.stubGlobal("fetch", empty);
     await expect(client.complete("요청")).rejects.toThrow("응답에 텍스트 없음");
+  });
+});
+
+describe("승인 전 BYO 1콜 연결 테스트", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("선택한 OpenAI 모델을 재시도 없이 한 번 호출하고 성공한다", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) => openAISuccessResponse("OK"),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(testByoConnection("openai", "key", "gpt-test")).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      model: "gpt-test",
+      temperature: 0,
+      max_output_tokens: 16,
+    });
+  });
+
+  it.each([
+    [401, "API 키 인증 실패(HTTP 401)"],
+    [403, "모델 접근 권한 없음(HTTP 403)"],
+    [404, "모델을 찾을 수 없거나 접근할 수 없습니다(HTTP 404)"],
+    [429, "요청 한도 초과(HTTP 429)"],
+    [503, "서버 오류(HTTP 503)"],
+  ])("읽을 수 있는 HTTP %s를 구분하고 재시도하지 않는다", async (status, expected) => {
+    const fetchMock = vi.fn(async () => errorResponse(status, "오류 본문"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(testByoConnection("openai", "key", "gpt-test")).rejects.toThrow(expected);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("브라우저가 상태를 숨긴 fetch 실패는 401로 단정하지 않는다", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    let caught: unknown;
+    try {
+      await testByoConnection("openai", "bad-key", "gpt-test");
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toContain("인증·CORS·네트워크 오류");
+    expect((caught as Error).message).not.toContain("401");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("15초를 넘긴 연결 테스트를 중단하고 시간 초과로 구분한다", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("중단됨", "AbortError"));
+          });
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const assertion = expect(testByoConnection("gemini", "key", "gemini-test")).rejects.toThrow(
+      "Gemini 연결 테스트 시간 초과(15000ms)",
+    );
+    await vi.advanceTimersByTimeAsync(15_000);
+    await assertion;
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
