@@ -1,14 +1,21 @@
 /** 결과 — 개선은 주장이 아니라 측정이다(PHILOSOPHY 원칙 1): 점수 헤드라인이 최상단.
  *  산출물 렌더는 등록소의 ArtifactView로 위임 — 이 파일은 템플릿을 모른다.
  *  홀드아웃 점수는 표시 전용 참고 지표(SPEC §3 원칙 7) — 루프에 관여하지 않았다.
- *  서버 기록은 있으면 남기고 없으면 조용히 넘어간다(오프라인 완결). */
+ *  서버 기록은 명시적 선택이며, 실패해도 JSON 파일 내보내기는 독립적으로 동작한다. */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ProvenanceType } from "@harnest/contracts";
 import { useProject, type HoldoutEvaluation } from "../state";
 import { getTemplate } from "../templates";
-import { saveProject, uploadResult } from "../lib/api";
+import { ExportSaveError, saveExport, savedExportUrl, type SavedExport } from "../lib/api";
+import {
+  buildProjectExport,
+  downloadProjectExport,
+  isHoldoutSettled,
+  needsRestoredHoldoutRecovery,
+  serializeProjectExport,
+} from "../lib/project-export";
 import { CurveChart } from "../components/CurveChart";
 
 const PROVENANCE_LABEL: Record<ProvenanceType, string> = {
@@ -36,8 +43,8 @@ function deltaColor(delta: number): string {
 
 const VERDICT_LABEL = { pass: "통과", warn: "주의", fail: "실패" } as const;
 
-function holdoutPhase(result: HoldoutEvaluation | null): string {
-  if (result === null) return "측정 없음";
+function holdoutPhase(result: HoldoutEvaluation | null, error: string | null): string {
+  if (result === null) return error === null ? "측정 중" : "채점 실패";
   return result.gateRejected
     ? "분량 게이트 실격 — 점수 미계산"
     : `${fmt(result.score)}점`;
@@ -49,28 +56,82 @@ function caseGrade(score: number | undefined): string {
 }
 
 export function ResultsPage() {
-  const { compiled, approvedAt, answers, runId, checkpoint, holdout, examinerRun, calibration } =
-    useProject();
+  const {
+    compiled,
+    approvedDigest,
+    approvedAt,
+    answers,
+    checkpoint,
+    holdout,
+    examinerRun,
+    calibration,
+  } = useProject();
   const navigate = useNavigate();
   const [saved, setSaved] = useState<"idle" | "saving" | "ok" | "fail">("idle");
+  const [savedRecord, setSavedRecord] = useState<SavedExport | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveUncertain, setSaveUncertain] = useState(false);
+  const [exported, setExported] = useState<"idle" | "ok" | "fail">("idle");
   const entry = compiled ? getTemplate(compiled.pack.templateId) : null;
+  const recordReady = compiled !== null && isHoldoutSettled(compiled.pack, holdout);
+  const recoverHoldout =
+    compiled !== null && needsRestoredHoldoutRecovery(compiled.pack, checkpoint, holdout);
 
-  // 업로드는 자동이 아니라 사용자의 선택이다 — 입력한 기록(질문·답 전체)과 산출물이
-  // 로컬 서버 DB에 저장되므로, 무엇이 전송되는지 고지하고 버튼으로만 보낸다.
-  const uploadToServer = async () => {
-    if (!compiled || !checkpoint || saved === "saving") return;
-    setSaved("saving");
-    const projectId = await saveProject({
-      interview: {
-        schemaVersion: "skeleton-1",
-        templateId: compiled.pack.templateId,
-        answers,
-      },
-      pack: compiled.pack,
-      loopSpec: compiled.loopSpec,
+  // 완료 체크포인트의 챔피언으로 복구 가능한 홀드아웃을 채점하는 책임은 관제실 런타임에 있다.
+  // /results 직접 복원도 영구적인 "측정 중" 상태에 머물지 않게 그 경계로 되돌린다.
+  useEffect(() => {
+    if (recoverHoldout) navigate("/console", { replace: true });
+  }, [recoverHoldout, navigate]);
+
+  const makeExport = async () => {
+    if (!compiled || !checkpoint || !approvedDigest || !approvedAt) {
+      throw new Error("승인된 완료 결과가 없습니다.");
+    }
+    const envelope = await buildProjectExport({
+      compiled,
+      answers,
+      examinerRun,
+      calibration,
+      approvedDigest,
+      approvedAt,
+      checkpoint,
+      holdout,
     });
-    const ok = projectId !== null && (await uploadResult(projectId, { checkpoint }));
-    setSaved(ok ? "ok" : "fail");
+    return { envelope, serialized: serializeProjectExport(envelope) };
+  };
+
+  const exportJson = async () => {
+    try {
+      const { envelope, serialized } = await makeExport();
+      downloadProjectExport(envelope, serialized);
+      setExported("ok");
+    } catch {
+      setExported("fail");
+    }
+  };
+
+  // 업로드는 자동이 아니라 사용자의 선택이다. 파일과 같은 JSON 봉투를 한 번에 저장한다.
+  const uploadToServer = async () => {
+    if (saved === "saving") return;
+    setSaved("saving");
+    setSavedRecord(null);
+    setSaveError(null);
+    setSaveUncertain(false);
+    try {
+      const { serialized } = await makeExport();
+      const record = await saveExport(serialized);
+      setSavedRecord(record);
+      setSaved("ok");
+    } catch (error) {
+      if (error instanceof ExportSaveError) {
+        setSavedRecord(error.savedRecord);
+        setSaveError(error.message);
+        setSaveUncertain(error.serverMayHaveStored);
+      } else {
+        setSaveError(error instanceof Error ? error.message : "서버 기록에 실패했습니다.");
+      }
+      setSaved("fail");
+    }
   };
 
   const adopted = useMemo(
@@ -98,6 +159,8 @@ export function ResultsPage() {
   const { pack } = compiled;
   const jp = pack.judgeProcedure;
   const hp = pack.holdoutPolicy;
+  const baselineHoldoutError = holdout.errors?.baseline ?? null;
+  const finalHoldoutError = holdout.errors?.final ?? null;
   const ArtifactView = entry.ArtifactView;
   const holdoutDelta =
     holdout.baseline !== null &&
@@ -138,28 +201,62 @@ export function ResultsPage() {
           총 {checkpoint.round}라운드
           {checkpoint.doneReason === "plateau" ? " · 정체로 조기 종료" : ""}
         </div>
-        <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <button onClick={exportJson} disabled={!recordReady}>JSON 내보내기</button>
+          {exported === "ok" && <span className="badge">JSON 내보냄</span>}
           {saved === "ok" ? (
-            <span className="badge">서버에 기록됨</span>
+            savedRecord !== null && (
+              <a
+                className="badge"
+                href={savedExportUrl(savedRecord)}
+                target="_blank"
+                rel="noreferrer"
+                title={`SHA-256 ${savedRecord.contentSha256}`}
+              >
+                서버 기록 {savedRecord.id.slice(0, 8)} 조회
+              </a>
+            )
           ) : (
-            <>
-              <button onClick={uploadToServer} disabled={saved === "saving"}>
-                {saved === "saving" ? "기록 중…" : "서버에 기록"}
-              </button>
-              <span style={{ fontSize: 12, color: "var(--ink-3)" }}>
-                입력한 질문·답 기록과 결과 문서가 로컬 서버(localhost:8000)에 저장됩니다.
-                {saved === "fail" ? " — 서버에 연결할 수 없습니다." : ""}
-              </span>
-            </>
+            <button
+              onClick={uploadToServer}
+              disabled={saved === "saving" || !recordReady}
+            >
+              {saved === "saving"
+                ? "기록 중…"
+                : saveUncertain
+                  ? "중복 가능 — 다시 기록"
+                  : "서버에 기록"}
+            </button>
           )}
+          {saved !== "ok" && savedRecord !== null && (
+            <a
+              className="badge muted"
+              href={savedExportUrl(savedRecord)}
+              target="_blank"
+              rel="noreferrer"
+            >
+              응답 기록 직접 확인
+            </a>
+          )}
+          <span style={{ fontSize: 12, color: "var(--ink-3)" }}>
+            입력, 승인된 Pack·검증 근거, 실행 결과·홀드아웃이 같은 JSON 형식으로 로컬 서버
+            (localhost:8000)에 최대 1 MiB까지 저장됩니다. API 키와 시험관 내부 산출물은 포함하지
+            않습니다.
+            {saved === "fail" && saveError !== null ? ` — ${saveError}` : ""}
+            {exported === "fail" ? " — JSON 기록의 결속을 확인할 수 없습니다." : ""}
+            {!recordReady ? " — 홀드아웃 채점이 끝난 뒤 기록할 수 있습니다." : ""}
+          </span>
         </div>
       </div>
 
-      {(holdout.baseline !== null || holdout.final !== null) && (
+      {(holdout.baseline !== null ||
+        holdout.final !== null ||
+        baselineHoldoutError !== null ||
+        finalHoldoutError !== null) && (
         <div className="card">
           <div style={{ fontSize: 16, fontWeight: 600 }}>
-            루프에 숨긴 검증 케이스에서 — 시작 {holdoutPhase(holdout.baseline)} → 종료{" "}
-            {holdoutPhase(holdout.final)}
+            루프에 숨긴 검증 케이스에서 — 시작 {holdoutPhase(holdout.baseline, baselineHoldoutError)} → 종료{" "}
+            {holdoutPhase(holdout.final, finalHoldoutError)}
             {holdoutDelta !== null && (
               <span
                 style={{
@@ -181,6 +278,13 @@ export function ResultsPage() {
             홀드아웃으로 배정된 케이스의 채점 결과는 실행 중 루프에 유입되지 않았습니다 — 시작과
             종료 시에만 측정한 참고 지표입니다.
           </p>
+          {(baselineHoldoutError !== null || finalHoldoutError !== null) && (
+            <p className="error" style={{ marginBottom: 0 }}>
+              {baselineHoldoutError !== null ? `시작 채점 실패: ${baselineHoldoutError}` : ""}
+              {baselineHoldoutError !== null && finalHoldoutError !== null ? " · " : ""}
+              {finalHoldoutError !== null ? `종료 채점 실패: ${finalHoldoutError}` : ""}
+            </p>
+          )}
           {holdoutCaseIds.length > 0 ? (
             <>
               <table className="grid" style={{ marginTop: 12 }}>

@@ -4,3 +4,4 @@ export * from "./loop";
 export * from "./digest";
 export * from "./examiner";
 export * from "./errors";
+export * from "./storage";

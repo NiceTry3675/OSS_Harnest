@@ -22,6 +22,8 @@ import {
 import { useProject, type HoldoutEvaluation, type HoldoutScores } from "../state";
 import { getTemplate, type TemplateRuntime } from "../templates";
 import { setByoKey } from "../lib/llm";
+import { markUnavailableRestoredHoldout } from "../lib/project-snapshot";
+import { isHoldoutPhasePending, isHoldoutSettled } from "../lib/project-export";
 import { CurveChart } from "../components/CurveChart";
 import { ExperimentTree } from "../components/ExperimentTree";
 
@@ -65,6 +67,7 @@ export function ConsolePage() {
   const {
     templateId,
     compiled,
+    approvedDigest,
     approvedAt,
     runId,
     setRunId,
@@ -82,7 +85,6 @@ export function ConsolePage() {
   const [retryTick, setRetryTick] = useState(0);
   /** 실행 중 오류 — 체크포인트가 남아 있으므로 재시도는 start() 재호출로 이어서 진행 */
   const [runError, setRunError] = useState<string | null>(null);
-  const [holdoutError, setHoldoutError] = useState<string | null>(null);
   const [callsPerRound, setCallsPerRound] = useState<number>(0);
   const [maxCallsPerRun, setMaxCallsPerRun] = useState<number>(0);
 
@@ -92,11 +94,27 @@ export function ConsolePage() {
   // 재진입이면 기존 runId로 재개, 최초 진입이면 새로 발급
   const runIdRef = useRef<string>(runId ?? crypto.randomUUID());
   // 홀드아웃 진행 상태 — onEvent 클로저에서 최신값을 보기 위한 ref (표시 전용 데이터)
-  const holdoutRef = useRef<HoldoutScores>({ ...holdout });
+  const holdoutRef = useRef<HoldoutScores>({
+    ...holdout,
+    errors: holdout.errors ?? { baseline: null, final: null },
+  });
   const baselineStartedRef = useRef(false);
   const finalStartedRef = useRef(false);
 
-  const ready = entry !== null && compiled !== null && approvedAt !== null;
+  const ready =
+    entry !== null &&
+    compiled !== null &&
+    approvedAt !== null &&
+    approvedDigest === compiled.pack.definitionDigest;
+
+  // Provider의 비동기 복원값을 이벤트 클로저에도 반영한다. 특히 지나간 기준선의 명시적
+  // 복원 실패가 빈 초기 ref에 덮이지 않아야 한다.
+  useEffect(() => {
+    holdoutRef.current = {
+      ...holdout,
+      errors: holdout.errors ?? { baseline: null, final: null },
+    };
+  }, [holdout]);
 
   useEffect(() => {
     if (ready && runId === null) setRunId(runIdRef.current);
@@ -116,7 +134,17 @@ export function ConsolePage() {
           return;
         }
         // 탭 회수로 남은 running 체크포인트는 화면에서 재개 가능한 상태로 투영한다.
-        setCheckpoint(saved.status === "running" ? { ...saved, status: "paused" } : saved);
+        const restored = saved.status === "running" ? { ...saved, status: "paused" as const } : saved;
+        setCheckpoint(restored);
+        // 화면 이탈 중 라운드 0이 지나갔다면 원샷 산출물은 더 이상 복원할 수 없다.
+        // 명시적 실패로 정리해 종료 홀드아웃까지 끝난 뒤 결과 기록이 영구 대기하지 않게 한다.
+        const restoredHoldout = markUnavailableRestoredHoldout(
+          holdoutRef.current,
+          restored,
+          compiled.pack.holdoutPolicy.mode !== "none",
+        );
+        holdoutRef.current = restoredHoldout;
+        setHoldout(restoredHoldout);
       })
       .catch((error: unknown) => {
         if (!cancelled) setRunError(error instanceof Error ? error.message : String(error));
@@ -124,10 +152,16 @@ export function ConsolePage() {
     return () => {
       cancelled = true;
     };
-  }, [ready, runId, compiled, setCheckpoint]);
+  }, [ready, runId, compiled, setCheckpoint, setHoldout]);
 
   useEffect(() => {
-    if (!entry || !compiled || !approvedAt || handleRef.current !== null) return;
+    if (!ready || !entry || !compiled || handleRef.current !== null) return;
+
+    let active = true;
+    const effectRunId = runIdRef.current;
+    const effectPackDigest = compiled.pack.definitionDigest;
+    const ownsEvent = (cp: LoopCheckpoint<unknown>): boolean =>
+      active && cp.runId === effectRunId && cp.packDigest === effectPackDigest;
 
     let runtime: TemplateRuntime;
     try {
@@ -143,42 +177,82 @@ export function ConsolePage() {
     setMaxCallsPerRun(runtime.maxCallsPerRun);
 
     const scoreHoldout = runtime.scoreHoldout;
+    const updateHoldout = (next: HoldoutScores): void => {
+      if (!active) return;
+      holdoutRef.current = next;
+      setHoldout(next);
+    };
     const onEvent = (cp: LoopCheckpoint<unknown>): void => {
+      if (!ownsEvent(cp)) return;
       setCheckpoint(cp);
       if (!scoreHoldout) return;
       // 홀드아웃은 표시 전용 — 아래 어떤 결과도 루프 제어·Generator로 되돌아가지 않는다
-      if (cp.round === 0 && holdoutRef.current.baseline === null && !baselineStartedRef.current) {
+      if (
+        cp.round === 0 &&
+        isHoldoutPhasePending(holdoutRef.current, "baseline") &&
+        !baselineStartedRef.current
+      ) {
         baselineStartedRef.current = true;
+        updateHoldout({
+          ...holdoutRef.current,
+          errors: { ...(holdoutRef.current.errors ?? { baseline: null, final: null }), baseline: null },
+        });
         const champion = cp.champion; // 그 시점 챔피언을 지역 캡처(이후 라운드 변이와 격리)
         void scoreHoldout(champion)
           .then((result) => {
-            holdoutRef.current = { ...holdoutRef.current, baseline: result };
-            setHoldout({ ...holdoutRef.current });
+            if (!active) return;
+            updateHoldout({
+              ...holdoutRef.current,
+              baseline: result,
+              errors: { ...(holdoutRef.current.errors ?? { baseline: null, final: null }), baseline: null },
+            });
           })
-          .catch((e: unknown) =>
-            setHoldoutError(e instanceof Error ? e.message : String(e)),
-          );
+          .catch((e: unknown) => {
+            if (!active) return;
+            updateHoldout({
+              ...holdoutRef.current,
+              errors: {
+                ...(holdoutRef.current.errors ?? { baseline: null, final: null }),
+                baseline: e instanceof Error ? e.message : String(e),
+              },
+            });
+          });
       }
       if (
         cp.status === "done" &&
-        holdoutRef.current.final === null &&
+        isHoldoutPhasePending(holdoutRef.current, "final") &&
         !finalStartedRef.current
       ) {
         finalStartedRef.current = true;
+        updateHoldout({
+          ...holdoutRef.current,
+          errors: { ...(holdoutRef.current.errors ?? { baseline: null, final: null }), final: null },
+        });
         const champion = cp.champion;
         void scoreHoldout(champion)
           .then((result) => {
-            holdoutRef.current = { ...holdoutRef.current, final: result };
-            setHoldout({ ...holdoutRef.current });
+            if (!active) return;
+            updateHoldout({
+              ...holdoutRef.current,
+              final: result,
+              errors: { ...(holdoutRef.current.errors ?? { baseline: null, final: null }), final: null },
+            });
           })
-          .catch((e: unknown) =>
-            setHoldoutError(e instanceof Error ? e.message : String(e)),
-          );
+          .catch((e: unknown) => {
+            if (!active) return;
+            updateHoldout({
+              ...holdoutRef.current,
+              errors: {
+                ...(holdoutRef.current.errors ?? { baseline: null, final: null }),
+                final: e instanceof Error ? e.message : String(e),
+              },
+            });
+          });
       }
     };
 
     const options: LoopRunOptions<unknown> = {
-      runId: runIdRef.current,
+      runId: effectRunId,
       pack: compiled.pack,
       spec: compiled.loopSpec,
       scorer: runtime.scorer,
@@ -188,25 +262,31 @@ export function ConsolePage() {
       onEvent,
       roundDelayMs: runtime.roundDelayMs,
     };
-    handleRef.current = createLoopRun(options);
-    // 완료 직후 홀드아웃 채점 중 새로고침된 경우, 저장된 최종 챔피언으로 종료 채점을 복구한다.
-    // round 0이 아니므로 누락된 시작 점수를 최종 문서로 잘못 다시 계산하지는 않는다.
+    const handle = createLoopRun(options);
+    handleRef.current = handle;
+    // 완료 직후 홀드아웃 채점 중 새로고침된 경우, 저장된 챔피언으로 복구 가능한 단계를 채점한다.
+    // round 0이면 시작·종료 산출물이 같아 둘 다 복구 가능하고, 이후 라운드는 종료만 복구한다.
     void storeRef.current!
-      .load(runIdRef.current)
+      .load(effectRunId)
       .then((saved) => {
-        if (
+        if (active &&
           saved?.status === "done" &&
-          saved.packDigest === compiled.pack.definitionDigest
+          saved.packDigest === effectPackDigest
         ) {
           onEvent(saved);
         }
       })
       .catch((error: unknown) => {
-        setRunError(error instanceof Error ? error.message : String(error));
+        if (active) setRunError(error instanceof Error ? error.message : String(error));
       });
-  }, [entry, compiled, approvedAt, retryTick, setCheckpoint, setHoldout]);
-
-  useEffect(() => () => handleRef.current?.pause(), []);
+    return () => {
+      active = false;
+      handle.pause();
+      if (handleRef.current === handle) handleRef.current = null;
+      baselineStartedRef.current = false;
+      finalStartedRef.current = false;
+    };
+  }, [ready, entry, compiled, retryTick, setCheckpoint, setHoldout]);
 
   const adopted = useMemo(
     () => new Set((checkpoint?.tree ?? []).filter((r) => r.adopted).map((r) => r.round)),
@@ -234,11 +314,16 @@ export function ConsolePage() {
   }
 
   const status = checkpoint?.status ?? "idle";
+  const baselineHoldoutError = holdout.errors?.baseline ?? null;
+  const finalHoldoutError = holdout.errors?.final ?? null;
+  const holdoutSettled = isHoldoutSettled(compiled.pack, holdout);
   const start = () => {
     setRunError(null);
-    handleRef.current
-      ?.start()
-      .catch((e: unknown) => setRunError(describeRunError(e)));
+    const handle = handleRef.current;
+    if (handle === null) return;
+    void handle.start().catch((e: unknown) => {
+      if (handleRef.current === handle) setRunError(describeRunError(e));
+    });
   };
   const retrySetup = () => {
     const key = keyInput.trim();
@@ -312,16 +397,21 @@ export function ConsolePage() {
             <span className={holdout.baseline.gateRejected ? "badge muted" : "badge"}>
               {holdoutLabel(holdout.baseline, "시작")}
             </span>
-            {holdoutError !== null && (
+            {baselineHoldoutError !== null && (
               <span className="hint" style={{ marginLeft: 4 }}>
-                숨김 케이스 채점 오류: {holdoutError}
+                시작 홀드아웃 채점 오류: {baselineHoldoutError}
               </span>
             )}
           </div>
         )}
-        {holdout.baseline === null && holdoutError !== null && (
+        {holdout.baseline === null && baselineHoldoutError !== null && (
           <p className="hint" style={{ marginBottom: 0 }}>
-            숨김 케이스 채점 오류: {holdoutError} (표시용 지표만 누락 — 실행에는 영향 없음)
+            시작 홀드아웃 채점 오류: {baselineHoldoutError} (표시용 지표만 누락 — 실행에는 영향 없음)
+          </p>
+        )}
+        {finalHoldoutError !== null && (
+          <p className="hint" style={{ marginBottom: 0 }}>
+            종료 홀드아웃 채점 오류: {finalHoldoutError} (표시용 지표만 누락 — 실행에는 영향 없음)
           </p>
         )}
         {callsPerRound > 0 && (
@@ -344,10 +434,13 @@ export function ConsolePage() {
           <button onClick={start} disabled={status !== "paused" || setupError !== null}>
             재개
           </button>
-          {status === "done" && (
+          {status === "done" && holdoutSettled && (
             <button className="primary" onClick={() => navigate("/results")}>
               결과 보기
             </button>
+          )}
+          {status === "done" && !holdoutSettled && (
+            <button disabled>홀드아웃 정리 중…</button>
           )}
         </div>
       </div>

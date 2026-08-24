@@ -11,12 +11,15 @@ import {
   type CalibrationResult,
   type EvaluationPack,
   type ExaminerReport,
+  type HoldoutScores,
   type LoopCheckpoint,
   type LoopSpec,
 } from "@harnest/contracts";
+export type { HoldoutCaseScore, HoldoutEvaluation, HoldoutScores } from "@harnest/contracts";
 import { IndexedDbCheckpointStore } from "@harnest/loop-engine";
 import {
   IndexedDbProjectStore,
+  markUnavailableRestoredHoldout,
   PROJECT_SNAPSHOT_VERSION,
   restoreProjectSnapshot,
   type ProjectSnapshot,
@@ -41,35 +44,6 @@ export interface ExaminerAttempts {
   count: number;
 }
 
-export interface HoldoutCaseScore {
-  caseId: string;
-  question: string;
-  score: number;
-  why: string;
-  /** 반복 = 같은 질문이 가시 세트에도 등장. 차단 사유가 아니라 결과 해석용 표기다. */
-  caseType: "repeated" | "new";
-}
-
-export type HoldoutEvaluation =
-  | {
-      gateRejected: true;
-      score: null;
-      perCase: [];
-      violations: string[];
-    }
-  | {
-      gateRejected: false;
-      score: number;
-      perCase: HoldoutCaseScore[];
-      violations: string[];
-    };
-
-/** 홀드아웃 채점 결과 — 라운드 0(원샷)과 종료 시에만 기록된다 */
-export interface HoldoutScores {
-  baseline: HoldoutEvaluation | null;
-  final: HoldoutEvaluation | null;
-}
-
 export interface ProjectState {
   /** IndexedDB 복원이 끝나기 전 페이지가 빈 상태로 마운트되는 것을 막는다 */
   hydrated: boolean;
@@ -88,6 +62,8 @@ export interface ProjectState {
   setCalibration: (c: CalibrationResult | null) => void;
   /** 현재 팩 기준 승인 차단 사유 — 비어 있어야 approve()가 동작한다 */
   blockers: string[];
+  /** 승인 순간 캡처된 다이제스트 — 정식 기록도 이 값을 사용하며 현재 Pack에서 재파생하지 않는다. */
+  approvedDigest: string | null;
   approvedAt: string | null;
   approve: () => void;
   runId: string | null;
@@ -102,6 +78,11 @@ export interface ProjectState {
 const Ctx = createContext<ProjectState | null>(null);
 const snapshotStore = new IndexedDbProjectStore();
 const checkpointStore = new IndexedDbCheckpointStore<unknown>();
+const emptyHoldout = (): HoldoutScores => ({
+  baseline: null,
+  final: null,
+  errors: { baseline: null, final: null },
+});
 
 export function ProjectProvider({ children }: { children: ReactNode }) {
   const [hydrated, setHydrated] = useState(false);
@@ -116,7 +97,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [approvedDigest, setApprovedDigest] = useState<string | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
   const [checkpoint, setCheckpoint] = useState<LoopCheckpoint<unknown> | null>(null);
-  const [holdout, setHoldout] = useState<HoldoutScores>({ baseline: null, final: null });
+  const [holdout, setHoldout] = useState<HoldoutScores>(emptyHoldout);
 
   useEffect(() => {
     let cancelled = false;
@@ -156,7 +137,13 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         setApprovedDigest(restored.approvedDigest);
         setRunId(restored.runId);
         setCheckpoint(restoredCheckpoint);
-        setHoldout(restored.holdout);
+        setHoldout(
+          markUnavailableRestoredHoldout(
+            restored.holdout,
+            restoredCheckpoint,
+            restored.compiled?.pack.holdoutPolicy.mode !== "none",
+          ),
+        );
       })
       .catch((error: unknown) => {
         console.warn("프로젝트 스냅샷을 복원하지 못했습니다.", error);
@@ -212,7 +199,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         setApprovedDigest(null);
         setRunId(null);
         setCheckpoint(null);
-        setHoldout({ baseline: null, final: null });
+        setHoldout(emptyHoldout());
       },
       examinerRun,
       setExaminerRun,
@@ -228,6 +215,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       calibration,
       setCalibration,
       blockers,
+      approvedDigest,
       approvedAt,
       // 차단 사유가 있으면 승인은 성립하지 않는다 — 화면 가드가 뚫려도 여기서 막힌다
       approve: () => {
@@ -253,10 +241,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         setApprovedDigest(null);
         setRunId(null);
         setCheckpoint(null);
-        setHoldout({ baseline: null, final: null });
+        setHoldout(emptyHoldout());
       },
     }),
-    [hydrated, templateId, answers, compiled, examinerRun, examinerAttempts, calibration, blockers, approvedAt, runId, checkpoint, holdout],
+    [hydrated, templateId, answers, compiled, examinerRun, examinerAttempts, calibration, blockers, approvedDigest, approvedAt, runId, checkpoint, holdout],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

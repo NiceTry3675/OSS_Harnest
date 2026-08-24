@@ -8,3 +8,8 @@ runs/cache/
 .env
 node_modules/
 dist/
+
+# 선택형 로컬 저장 API 데이터·Python 실행 캐시
+apps/api/harnest.db*
+__pycache__/
+*.py[cod]

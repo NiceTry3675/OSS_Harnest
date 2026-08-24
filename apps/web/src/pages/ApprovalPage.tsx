@@ -11,7 +11,7 @@
  *  결정적 전용 루프의 면제(SPEC §10)는 그대로 노출한다 — 정직 표기가 계약이다.
  *  pack만 보고 렌더하며 템플릿별 분기를 갖지 않는다(judgeProcedure union + 등록소 examiner로 분기). */
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   judgeCalibration,
@@ -117,6 +117,7 @@ export function ApprovalPage() {
     calibration,
     setCalibration,
     blockers,
+    approvedDigest,
     approvedAt,
     approve,
   } = useProject();
@@ -133,6 +134,16 @@ export function ApprovalPage() {
   // 재컴파일 뒤 늦게 도착한 배터리 결과를 버리기 위한 최신 다이제스트 참조(레이스 가드)
   const packDigestRef = useRef<string | null>(null);
   packDigestRef.current = pack?.definitionDigest ?? null;
+  const approvedRef = useRef(false);
+  const activeRef = useRef(false);
+
+  useEffect(() => {
+    activeRef.current = true;
+    return () => {
+      // 페이지를 떠난 동안 도착한 배터리 결과가 새 화면의 승인 증거를 바꾸지 못하게 한다.
+      activeRef.current = false;
+    };
+  }, []);
 
   const validReport =
     examinerRun !== null && pack !== null && examinerRun.report.forDigest === pack.definitionDigest;
@@ -171,12 +182,13 @@ export function ApprovalPage() {
     );
   }
 
-  const approved = approvedAt !== null;
+  const approved = approvedAt !== null && approvedDigest === pack.definitionDigest;
+  approvedRef.current = approved;
   const jp = pack.judgeProcedure;
   const hp = pack.holdoutPolicy;
 
   const runBattery = async (): Promise<void> => {
-    if (!entry.examiner || running || failedCalibration || quotaExhausted) return;
+    if (!entry.examiner || running || approved || failedCalibration || quotaExhausted) return;
     setBatteryError(null);
     let llm;
     try {
@@ -192,18 +204,24 @@ export function ApprovalPage() {
     setRunning(true);
     try {
       const run = await entry.examiner.runBattery(compiled, llm, setProgress);
-      // 실행 중 기준이 재컴파일됐다면 이 결과는 옛 절차의 것 — 버린다
-      if (packDigestRef.current !== startedDigest) return;
+      // 실행 중 기준이 재컴파일·승인됐거나 화면을 떠났다면 이 결과는 현재 승인 증거가 아니다.
+      if (
+        !activeRef.current ||
+        approvedRef.current ||
+        packDigestRef.current !== startedDigest
+      ) return;
       setExaminerRun(run);
       // 새 리포트 = 새 쌍: 이전 판정은 forReportAt 불일치로 계약에서도 무효지만 상태도 정리한다
       setCalibration(null);
       setChoices(null);
     } catch (e) {
-      if (packDigestRef.current !== startedDigest) return;
+      if (!activeRef.current || packDigestRef.current !== startedDigest) return;
       setBatteryError(e instanceof Error ? e.message : String(e));
     } finally {
-      setRunning(false);
-      setProgress("");
+      if (activeRef.current) {
+        setRunning(false);
+        setProgress("");
+      }
     }
   };
 
@@ -515,7 +533,11 @@ export function ApprovalPage() {
               </ul>
             ) : null}
             <div style={{ display: "flex", gap: 8 }}>
-              <button className="primary" onClick={approve} disabled={blockers.length > 0}>
+              <button
+                className="primary"
+                onClick={approve}
+                disabled={running || blockers.length > 0}
+              >
                 승인하고 동결
               </button>
               <button onClick={() => navigate("/wizard")}>수정하러 가기</button>

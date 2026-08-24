@@ -13,6 +13,7 @@ import { createLoopRun, IndexedDbCheckpointStore } from "@harnest/loop-engine";
 import type { CompiledGeneric } from "../state";
 import {
   IndexedDbProjectStore,
+  markUnavailableRestoredHoldout,
   PROJECT_SNAPSHOT_VERSION,
   restoreProjectSnapshot,
   type ProjectSnapshot,
@@ -114,7 +115,11 @@ describe("IndexedDbProjectStore", () => {
     expect(restoredMismatch.approvedAt).toBeNull();
     expect(restoredMismatch.approvedDigest).toBeNull();
     expect(restoredMismatch.runId).toBeNull();
-    expect(restoredMismatch.holdout).toEqual({ baseline: null, final: null });
+    expect(restoredMismatch.holdout).toEqual({
+      baseline: null,
+      final: null,
+      errors: { baseline: null, final: null },
+    });
   });
 
   it("승인 전 캘리브레이션 실패는 새로고침 뒤에도 같은 다이제스트에 고착된다", () => {
@@ -141,6 +146,32 @@ describe("IndexedDbProjectStore", () => {
     const legacy = makeSnapshot();
     delete legacy.examinerAttempts;
     expect(restoreProjectSnapshot(legacy)!.examinerAttempts).toBeNull();
+  });
+
+  it("재진입 시 지난 시작 홀드아웃만 복원 불가로 확정하고 종료 단계는 대기로 둔다", () => {
+    const saved = makeSnapshot({ holdout: { baseline: null, final: null } });
+    const restored = restoreProjectSnapshot(saved)!;
+    const settled = markUnavailableRestoredHoldout(
+      restored.holdout,
+      {
+        runId: "paused-after-baseline",
+        packDigest: pack.definitionDigest,
+        status: "paused",
+        round: 1,
+        champion: "라운드 1",
+        championScore: 1,
+        championViolations: [],
+        curve: [1],
+        tree: [],
+        provenance: [],
+        rngState: 1,
+      },
+      true,
+    );
+
+    expect(settled.errors?.baseline).toContain("복원할 수 없습니다");
+    expect(settled.errors?.final).toBeNull();
+    expect(settled.final).toBeNull();
   });
 
   it("복원된 runId로 IndexedDB 체크포인트를 이어서 완료한다", async () => {

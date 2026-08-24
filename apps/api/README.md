@@ -1,7 +1,7 @@
 # Harnest API
 
-프로젝트(인터뷰·판정 절차·루프 스펙)와 실행 결과(체크포인트)를 저장하는 CRUD 서버입니다.
-서버는 임의 코드를 실행하지 않으며, 승인된 판정 절차를 받은 그대로 보존해 돌려줍니다.
+버전형 프로젝트 내보내기 봉투와 레거시 프로젝트·결과를 보관하는 저장·조회 서버입니다.
+서버는 임의 코드를 실행하지 않으며, 받은 UTF-8 JSON 바이트를 그대로 보존해 돌려줍니다.
 
 ## 준비
 
@@ -17,18 +17,42 @@ pip3 install --user -r requirements.txt
 python3 -m uvicorn main:app --port 8000
 ```
 
-데이터는 같은 디렉터리의 `harnest.db`(SQLite)에 저장됩니다 (git 추적 제외).
+데이터는 같은 디렉터리의 `harnest.db`(SQLite)에 저장됩니다 (git 추적 제외). 시작할 때
+비파괴 마이그레이션을 실행하며, 기존 `projects`·`results` 행은 변경하지 않습니다.
 
 ## 엔드포인트
 
 | 메서드 | 경로 | 설명 |
 | --- | --- | --- |
 | GET | `/health` | 상태 확인 → `{"status":"ok"}` |
+| POST | `/exports` | 버전형 봉투 원문 저장 → `201 {id, storedAt, contentSha256}` |
+| GET | `/exports/{id}` | 저장한 봉투의 정확한 JSON 바이트 반환 (없으면 404) |
 | POST | `/projects` | 본문 `{interview, pack, loopSpec}` 저장 → `{"id": uuid}` |
 | GET | `/projects/{id}` | 저장된 프로젝트를 그대로 반환 (없으면 404) |
 | POST | `/projects/{id}/results` | 본문 `{checkpoint}` 저장 → `{"ok": true}` (프로젝트 없으면 404) |
 
-CORS는 `http://localhost:5173`(웹 앱)만 허용합니다.
+`POST /exports`는 `kind: "harnest.project-export"`, `envelopeVersion: 1`, `exportedAt`와
+`project.interview`·`project.evaluation`·`project.loopSpec`, `result.checkpoint`·`result.holdout`의
+완전한 v1 봉투 골격을 요구합니다. 인터뷰·Pack은 `skeleton-1`이고 같은 비어 있지 않은
+`templateId`를 가져야 하며, judge 절차에 맞는 null 또는 객체형 승인 증거를 요구합니다. Pack의
+`templateId`, `packVersion`, 소문자 SHA-256 `definitionDigest`를 색인하고, approval·examiner report·
+calibration·checkpoint의 귀속 식별자가 현재 Pack과 리포트에 결속되는지 확인합니다. checkpoint는
+`status: "done"` 및 `doneReason`을 가져야 하며,
+`holdoutPolicy.mode`가 `none`이면 결과도 `none`, `auto_tail`이면 baseline/final의 scored 또는
+failed 기록을 가진 `measured`여야 합니다. 고정 계층의 알 수 없는 필드, 배열 안의 잘못된 원소 타입,
+중복 JSON 키와 잘못된 Unicode surrogate는 거부합니다.
+
+이는 저장소의 구조·귀속 검사일 뿐입니다. Pack 다이제스트 재계산, examiner/calibration 판정,
+체크포인트 곡선과 홀드아웃 점수의 의미 검증은 브라우저의 `packages/contracts` 생산자 계약이
+권위이며 서버가 중복해서 판정하지 않습니다. 응답의 `Location`은 저장된 봉투 경로이고, GET
+응답의 `X-Content-SHA256`은 원문 바이트의 SHA-256입니다.
+
+쓰기 요청은 `application/json`, 최대 1 MiB이며 브라우저 `Origin`은 `http://localhost:5173`만
+허용합니다. 이 제한은 다른 웹페이지가 로컬 API에 단순 요청으로 데이터를 밀어 넣는 경로를 막습니다.
+
+새 봉투는 `project_exports`에 단일 레코드로 원자적으로 저장합니다. `definitionDigest`, `templateId`,
+`runId`에는 인덱스가 있으며, 원문은 exact round-trip을 위해 BLOB으로 보존합니다. 레거시
+`/projects` 경로는 기존 클라이언트 호환용입니다. CORS는 `http://localhost:5173`(웹 앱)만 허용합니다.
 
 ## 테스트
 
@@ -36,4 +60,5 @@ CORS는 `http://localhost:5173`(웹 앱)만 허용합니다.
 python3 test_api.py
 ```
 
-임시 DB로 전 엔드포인트 왕복을 검증하며, 실패 시 비정상 종료합니다.
+임시 DB로 레거시 호환, 완전한 봉투의 exact-byte 왕복, 메타데이터·해시·인덱스, 구조·귀속 오류,
+origin/content-type/크기 제한과 마이그레이션 멱등성을 검증하며, 실패 시 비정상 종료합니다.

@@ -2,7 +2,7 @@
  *  Evaluation Pack 정식 저장 계약이 아니라 단일 브라우저의 임시 영속화 계층이며,
  *  API 키는 이 타입과 저장 경로에 존재하지 않는다(SPEC §3 원칙 1, §7). */
 
-import type { CalibrationResult } from "@harnest/contracts";
+import type { CalibrationResult, LoopCheckpoint } from "@harnest/contracts";
 import type {
   CompiledGeneric,
   ExaminerAttempts,
@@ -43,7 +43,35 @@ export interface RestoredProjectSnapshot {
   holdout: HoldoutScores;
 }
 
-const emptyHoldout = (): HoldoutScores => ({ baseline: null, final: null });
+const emptyHoldout = (): HoldoutScores => ({
+  baseline: null,
+  final: null,
+  errors: { baseline: null, final: null },
+});
+
+const normalizeHoldout = (holdout: HoldoutScores): HoldoutScores => ({
+  ...holdout,
+  errors: holdout.errors ?? { baseline: null, final: null },
+});
+
+/**
+ * 구버전·중간 저장에는 점수도 실패 사유도 없을 수 있다. 라운드 0 산출물을 따로 보존하지
+ * 않으므로 이미 지나간 시작 단계만 '복원 불가'로 확정한다. 종료 단계는 완료 체크포인트의
+ * 챔피언으로 다시 채점할 수 있으므로 대기 상태를 유지해 관제실이 복구한다.
+ */
+export function markUnavailableRestoredHoldout(
+  holdout: HoldoutScores,
+  checkpoint: LoopCheckpoint<unknown> | null,
+  requiresHoldout: boolean,
+): HoldoutScores {
+  const normalized = normalizeHoldout(holdout);
+  if (!requiresHoldout || checkpoint === null) return normalized;
+  const errors = { ...normalized.errors! };
+  if (checkpoint.round > 0 && normalized.baseline === null && errors.baseline === null) {
+    errors.baseline = "저장된 기록에 시작 홀드아웃 결과가 없어 복원할 수 없습니다.";
+  }
+  return { ...normalized, errors };
+}
 
 /** 리포트·캘리브레이션은 불일치 상태도 복원해 수정→재검증 안내와 실패 고착을 보존한다.
  *  승인 이후 상태만 approvedDigest 일치로 복원한다. 불일치면 승인·실행 흔적을 폐기한다. */
@@ -67,7 +95,7 @@ export function restoreProjectSnapshot(
     approvedDigest: approvalMatches ? snapshot.approvedDigest : null,
     approvedAt: approvalMatches ? snapshot.approvedAt : null,
     runId: approvalMatches ? snapshot.runId : null,
-    holdout: approvalMatches ? snapshot.holdout : emptyHoldout(),
+    holdout: approvalMatches ? normalizeHoldout(snapshot.holdout) : emptyHoldout(),
   };
 }
 
