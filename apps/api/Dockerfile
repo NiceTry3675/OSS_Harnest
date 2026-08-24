@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.12-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -6,10 +6,10 @@ ENV HARNEST_DB=/data/harnest.db
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY apps/api/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY main.py ratelimit.py ./
+COPY apps/api/main.py apps/api/ratelimit.py ./
 
 RUN mkdir -p /data
 

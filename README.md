@@ -53,6 +53,11 @@ python3 -m uvicorn main:app --port 8000
 다른 API 주소를 쓰려면 GitHub 저장소 변수 `VITE_API_BASE`에 그 주소를 넣고 Pages 배포를 다시
 실행하세요.
 
+API 서버까지 켜려면 `apps/api`를 별도 호스팅에 배포해야 합니다. 이 저장소에는 Fly.io용
+`fly.toml`과 `Deploy API to Fly` 워크플로우가 포함되어 있으며, GitHub Secret `FLY_API_TOKEN`을
+등록하면 API 변경도 `main` push 때 자동 배포할 수 있습니다. SQLite 파일은 `/data/harnest.db`를
+사용하므로 `/data`에 영구 볼륨을 연결하세요.
+
 TypeScript와 웹 변경을 확인하려면 다음을 실행합니다.
 
 ```bash

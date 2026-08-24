@@ -1,0 +1,41 @@
+# Fly.io API server config for Harnest.
+# Create the app once with:
+#   fly apps create harnest-api-nicetry3675
+#   fly volumes create harnest_data --size 1 --region nrt --app harnest-api-nicetry3675
+#
+# Then set secrets with:
+#   fly secrets set SHARED_OPENAI_API_KEY=... --app harnest-api-nicetry3675
+#   fly secrets set SHARED_GEMINI_API_KEY=... --app harnest-api-nicetry3675
+
+app = "harnest-api-nicetry3675"
+primary_region = "nrt"
+
+[build]
+  dockerfile = "apps/api/Dockerfile"
+  build-target = "runtime"
+
+[env]
+  HARNEST_DB = "/data/harnest.db"
+  HARNEST_CORS_ORIGINS = "http://localhost:5173,http://harnest.p-e.kr,https://harnest.p-e.kr"
+  HARNEST_PROXY_RATE_LIMIT = "20"
+
+[[mounts]]
+  source = "harnest_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 20
+    hard_limit = 40
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1

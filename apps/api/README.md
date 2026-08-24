@@ -25,6 +25,21 @@ python3 -m uvicorn main:app --port 8000
 Docker를 지원하는 작은 호스팅(Render, Fly.io, Railway 등)에 `apps/api`를 서비스로 올립니다.
 컨테이너는 `apps/api/Dockerfile`을 사용하며, 실행 포트는 플랫폼이 제공하는 `PORT`를 따릅니다.
 
+이 저장소에는 Fly.io 기준 설정도 들어 있습니다. `fly.toml`은 도쿄 리전(`nrt`)의 작은 shared CPU
+머신과 1GB SQLite 볼륨을 전제로 합니다. Fly.io는 앱 설정을 `fly.toml`로 관리하고, 비밀 값은
+`fly secrets`로 넣는 방식을 권장합니다.
+
+```sh
+fly apps create harnest-api-nicetry3675
+fly volumes create harnest_data --size 1 --region nrt --app harnest-api-nicetry3675
+fly secrets set SHARED_OPENAI_API_KEY=... --app harnest-api-nicetry3675
+fly deploy --remote-only --app harnest-api-nicetry3675
+```
+
+GitHub Actions 자동 배포를 쓰려면 Fly.io에서 deploy token을 만들고 GitHub 저장소 Secret
+`FLY_API_TOKEN`에 저장하세요. 이후 `apps/api/**`나 `fly.toml`이 `main`에 push될 때 API도 자동
+배포됩니다.
+
 권장 도메인:
 
 ```text
