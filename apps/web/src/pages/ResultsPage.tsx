@@ -13,7 +13,7 @@ import { CurveChart } from "../components/CurveChart";
 
 const PROVENANCE_LABEL: Record<ProvenanceType, string> = {
   run_started: "실행 시작",
-  round: "라운드",
+  round: "고침",
   adopted: "채택",
   paused: "일시정지",
   resumed: "재개",
@@ -39,7 +39,7 @@ const VERDICT_LABEL = { pass: "통과", warn: "주의", fail: "실패" } as cons
 function holdoutPhase(result: HoldoutEvaluation | null): string {
   if (result === null) return "측정 없음";
   return result.gateRejected
-    ? "분량 게이트 실격 — 점수 미계산"
+    ? "분량을 넘겨 탈락 — 점수를 매기지 않음"
     : `${fmt(result.score)}점`;
 }
 
@@ -118,12 +118,12 @@ export function ResultsPage() {
     <div>
       <h1>결과</h1>
       <p className="sub">
-        승인된 기준으로 측정한 결과입니다 — 점수를 먼저 확인한 뒤 산출물을 받으세요.
+        당신이 승인한 기준으로 매긴 점수입니다. 점수를 먼저 보고 결과물을 받으세요.
       </p>
 
       <div className="card">
         <div style={{ fontSize: 24, fontWeight: 700 }}>
-          원샷 {fmt(baseline)}점 → 루프 {fmt(final)}점{" "}
+          AI가 한 번에 만든 것 {fmt(baseline)}점 → 고쳐서 {fmt(final)}점{" "}
           <span
             style={{
               fontSize: 15,
@@ -135,7 +135,7 @@ export function ResultsPage() {
           </span>
         </div>
         <div style={{ fontSize: 13, color: "var(--ink-3)", marginTop: 4 }}>
-          총 {checkpoint.round}라운드
+          총 {checkpoint.round}번 고침
           {checkpoint.doneReason === "plateau" ? " · 정체로 조기 종료" : ""}
         </div>
         <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 10 }}>
@@ -147,7 +147,7 @@ export function ResultsPage() {
                 {saved === "saving" ? "기록 중…" : "서버에 기록"}
               </button>
               <span style={{ fontSize: 12, color: "var(--ink-3)" }}>
-                입력한 질문·답 기록과 결과 문서가 로컬 서버(localhost:8000)에 저장됩니다.
+                입력한 질문·답과 결과 문서를 내 컴퓨터의 서버에 저장합니다.
                 {saved === "fail" ? " — 서버에 연결할 수 없습니다." : ""}
               </span>
             </>
@@ -158,7 +158,7 @@ export function ResultsPage() {
       {(holdout.baseline !== null || holdout.final !== null) && (
         <div className="card">
           <div style={{ fontSize: 16, fontWeight: 600 }}>
-            루프에 숨긴 검증 케이스에서 — 시작 {holdoutPhase(holdout.baseline)} → 종료{" "}
+            AI에게 안 보여준 질문에서 — 시작 {holdoutPhase(holdout.baseline)} → 종료{" "}
             {holdoutPhase(holdout.final)}
             {holdoutDelta !== null && (
               <span
@@ -178,7 +178,7 @@ export function ResultsPage() {
             )}
           </div>
           <p className="hint" style={{ marginBottom: 0 }}>
-            홀드아웃으로 배정된 케이스의 채점 결과는 실행 중 루프에 유입되지 않았습니다 — 시작과
+            이 질문들의 채점 결과는 AI가 고치는 동안 전혀 쓰이지 않았습니다 — 시작과
             종료 시에만 측정한 참고 지표입니다.
           </p>
           {holdoutCaseIds.length > 0 ? (
@@ -187,7 +187,7 @@ export function ResultsPage() {
                 <thead>
                   <tr>
                     <th style={{ textAlign: "left" }}>구분</th>
-                    <th style={{ textAlign: "left" }}>홀드아웃 질문</th>
+                    <th style={{ textAlign: "left" }}>안 보여준 질문</th>
                     <th>시작</th>
                     <th>종료</th>
                   </tr>
@@ -213,7 +213,7 @@ export function ResultsPage() {
                 </tbody>
               </table>
               <p className="hint" style={{ marginBottom: 0 }}>
-                반복은 같은 질문이 가시 세트에도 등장했음을, 신규는 질문 문면이 가시 세트에 없었음을
+                반복은 AI에게 보여준 질문 중에도 같은 것이 있었다는 뜻이고, 신규는 그렇지 않았다는
                 뜻합니다. 질문 반복은 이 문서 유형의 측정 대상이므로 제거하지 않고 구분해 보고합니다.
               </p>
             </>
@@ -226,10 +226,10 @@ export function ResultsPage() {
         <ArtifactView problem={compiled.problem} artifact={checkpoint.champion} />
       </div>
 
-      <h2>남은 실패 항목</h2>
+      <h2>아직 못 맞힌 질문</h2>
       <div className="card">
         {checkpoint.championViolations.length === 0 ? (
-          <p style={{ margin: 0, fontSize: 14, color: "var(--good)" }}>남은 실패 항목 없음</p>
+          <p style={{ margin: 0, fontSize: 14, color: "var(--good)" }}>모든 질문에 답할 수 있습니다</p>
         ) : (
           <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: "var(--ink-2)" }}>
             {checkpoint.championViolations.map((v, i) => (
@@ -243,32 +243,32 @@ export function ResultsPage() {
         <CurveChart curve={checkpoint.curve} adopted={adopted} />
       </div>
 
-      <h2>활성 방어 세트</h2>
+      <h2>이번 실행에 적용된 안전장치</h2>
       <div className="card">
         {jp.kind === "deterministic_only" ? (
           <>
             <span className="badge" title={jp.exemptions.pairwise}>
-              결정적 채점 전용
+              정해진 방식으로만 채점
             </span>
             <span className="badge muted" title={jp.exemptions.examinerReport}>
-              검증 리포트: 해당 없음(특례)
+              기준 시험: 해당 없음
             </span>
             <span className="badge muted" title={jp.exemptions.calibration}>
-              캘리브레이션: 해당 없음(특례)
+              내 판단과 맞춰보기: 해당 없음
             </span>
             <span className="badge muted" title={hp.note}>
-              홀드아웃: 해당 없음
+              숨겨둔 질문: 해당 없음
             </span>
           </>
         ) : (
           <>
-            <span className="badge">케이스 실측 채점(저지: {jp.judge.model})</span>
+            <span className="badge">실제로 답하게 해서 채점 (채점 AI: {jp.judge.model})</span>
             <span className="badge" title={jp.pairwiseNotice}>
-              채택: 스칼라 엄격 개선
+              점수가 실제로 올랐을 때만 채택
             </span>
             {hp.mode === "auto_tail" && (
               <span className="badge" title={hp.note}>
-                홀드아웃 {hp.holdoutCaseIds.length}케이스(자동 꼬리)
+                안 보여준 질문 {hp.holdoutCaseIds.length}개
               </span>
             )}
             {examinerRun !== null && examinerRun.report.forDigest === pack.definitionDigest ? (
@@ -286,13 +286,13 @@ export function ResultsPage() {
             {calibration !== null && calibration.forDigest === pack.definitionDigest ? (
               <span
                 className="badge"
-                title={`판정 ${VERDICT_LABEL[calibration.verdict]} — 알려진 꼼수 쌍 포함 블라인드 A/B`}
+                title={`판정 ${VERDICT_LABEL[calibration.verdict]} — 속임수 문서를 섞어 정답을 가린 채 비교`}
               >
-                캘리브레이션: {calibration.pairs.filter((p) => p.agreed).length}/
+                내 판단과 일치: {calibration.pairs.filter((p) => p.agreed).length}/
                 {calibration.pairs.length} 일치
               </span>
             ) : (
-              <span className="badge muted">캘리브레이션: 기록 없음</span>
+              <span className="badge muted">내 판단과 맞춰보기: 기록 없음</span>
             )}
           </>
         )}

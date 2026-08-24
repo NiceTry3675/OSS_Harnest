@@ -36,13 +36,13 @@ function fmt(n: number): string {
 function describeRunError(e: unknown): string {
   if (e instanceof GradeFormatError) return e.message;
   const message = e instanceof Error ? e.message : String(e);
-  return `모델 호출 중 오류가 발생했습니다: ${message}`;
+  return `AI를 부르는 중 문제가 생겼습니다: ${message}`;
 }
 
 function holdoutLabel(result: HoldoutEvaluation, phase: string): string {
   return result.gateRejected
-    ? `숨김 검증(${phase}): 분량 게이트 실격 — 점수 미계산`
-    : `숨김 케이스(${phase}): ${fmt(result.score)}점`;
+    ? `숨겨둔 질문(${phase}): 분량을 넘겨 탈락 — 점수를 매기지 않음`
+    : `숨겨둔 질문(${phase}): ${fmt(result.score)}점`;
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -103,7 +103,7 @@ export function ConsolePage() {
         if (cancelled || saved === null) return;
         if (saved.packDigest !== compiled.pack.definitionDigest) {
           setRunError(
-            "체크포인트의 판정 절차가 현재 승인본과 다릅니다 — 이어받을 수 없습니다(재승인 필요).",
+            "저장된 진행 상황이 지금 승인한 기준과 달라서 이어서 할 수 없습니다 — 다시 승인해 주세요.",
           );
           return;
         }
@@ -246,8 +246,7 @@ export function ConsolePage() {
       <h1>관제실</h1>
       <p className="sub">
         채점 기준은 당신이 승인했고, 실행 중 AI는 이 기준을 변경할 수 없습니다.{" "}
-        <span className="lock-badge">기준 동결</span>{" "}
-        <span className="mono digest">{compiled.pack.definitionDigest.slice(0, 16)}…</span>
+        <span className="lock-badge">🔒 기준 잠김</span>
       </p>
 
       {setupError !== null && (
@@ -263,7 +262,7 @@ export function ConsolePage() {
               onChange={(e) => setKeyInput(e.target.value)}
             />
             <p className="hint">
-              키는 이 브라우저(localStorage)에만 저장되고 벤더 API로 직행합니다 — 우리 서버로는
+              키는 이 브라우저에만 저장되고 AI 회사로 바로 전송됩니다 — 우리 서버로는
               가지 않습니다.
             </p>
           </div>
@@ -275,7 +274,7 @@ export function ConsolePage() {
           </div>
           <p className="hint" style={{ marginBottom: 0 }}>
             키 없이 사용하려면 기준을 처음부터 다시 만들어 모의 모델로 승인해 주세요 — 승인된
-            판정 절차는 여기서 바꿀 수 없습니다.
+            채점 방식은 여기서 바꿀 수 없습니다.
           </p>
         </div>
       )}
@@ -283,16 +282,16 @@ export function ConsolePage() {
       <div className="card">
         <div className="row">
           <Stat
-            label="라운드"
+            label="고친 횟수"
             value={`${checkpoint?.round ?? 0} / ${compiled.loopSpec.maxRounds}`}
           />
           <Stat label="상태" value={STATUS_LABEL[status] ?? status} />
           <Stat
-            label="현재 챔피언 점수"
+            label="현재 최고 점수"
             value={checkpoint ? `${fmt(checkpoint.championScore)}점` : "—"}
           />
           <Stat
-            label="기준선(라운드 0) 점수"
+            label="처음 점수"
             value={
               checkpoint && checkpoint.curve.length > 0 ? `${fmt(checkpoint.curve[0])}점` : "—"
             }
@@ -305,19 +304,19 @@ export function ConsolePage() {
             </span>
             {holdoutError !== null && (
               <span className="hint" style={{ marginLeft: 4 }}>
-                숨김 케이스 채점 오류: {holdoutError}
+                숨겨둔 질문 채점 중 문제: {holdoutError}
               </span>
             )}
           </div>
         )}
         {holdout.baseline === null && holdoutError !== null && (
           <p className="hint" style={{ marginBottom: 0 }}>
-            숨김 케이스 채점 오류: {holdoutError} (표시용 지표만 누락 — 실행에는 영향 없음)
+            숨겨둔 질문 채점 중 문제: {holdoutError} (참고 점수만 빠지고 실행에는 영향 없습니다)
           </p>
         )}
         {callsPerRound > 0 && (
           <p className="hint" style={{ marginTop: 10, marginBottom: 0 }}>
-            라운드당 약 {callsPerRound}회 모델 호출 · 최대 {compiled.loopSpec.maxRounds}라운드
+            한 번 고칠 때마다 AI를 약 {callsPerRound}회 부릅니다 · 최대 {compiled.loopSpec.maxRounds}번까지
           </p>
         )}
         <div style={{ display: "flex", gap: 8, marginTop: 14 }}>

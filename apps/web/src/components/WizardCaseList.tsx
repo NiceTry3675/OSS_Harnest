@@ -67,7 +67,7 @@ export function WizardCaseList({
             />
           </div>
           <div className="field" style={{ marginBottom: 0 }}>
-            <label htmlFor={`case-a-${i}`}>그때의 답</label>
+            <label htmlFor={`case-a-${i}`}>그때 해준 답</label>
             <textarea
               id={`case-a-${i}`}
               rows={3}
@@ -84,10 +84,10 @@ export function WizardCaseList({
           disabled={pairs.length >= maxPairs}
           onClick={() => onChange([...pairs, { question: "", expectedAnswer: "" }])}
         >
-          쌍 추가
+          질문 추가
         </button>
         <span className="hint" style={{ marginTop: 0 }}>
-          {minPairs}~{maxPairs}쌍을 입력하세요.
+          {minPairs}~{maxPairs}질문과 답을 입력하세요.
         </span>
       </div>
     </div>

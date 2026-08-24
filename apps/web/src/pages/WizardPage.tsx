@@ -12,9 +12,9 @@ import { getByoKey, setByoKey, testByoConnection, type ByoProvider } from "../li
 import { useProject } from "../state";
 
 const ROLE_LABEL: Record<Question["role"], string> = {
-  material: "입력 자료",
-  constraints: "제약 조건",
-  criteria: "평가 기준",
+  material: "가진 자료",
+  constraints: "지켜야 할 조건",
+  criteria: "채점 방식",
 };
 
 /** caseList 안내 기본 범위 — 질문이 min/max를 선언하면 그 값을 따른다 */
@@ -199,7 +199,7 @@ export function WizardPage() {
   return (
     <div>
       <h1>{entry.name}</h1>
-      <p className="sub">몇 가지 질문에 답하면, 오른쪽에 채점 기준이 실시간으로 만들어집니다.</p>
+      <p className="sub">답을 채울 때마다 오른쪽에 채점 기준이 만들어집니다. 다음 단계에서 직접 확인하고 승인하게 됩니다.</p>
 
       <div className="row">
         <div className="card grow">
@@ -252,7 +252,7 @@ export function WizardPage() {
                 className="field"
                 style={{ borderTop: "1px solid var(--border)", paddingTop: 14 }}
               >
-                <label>채점 모델 선택</label>
+                <label>채점을 맡길 AI 고르기</label>
                 <div style={{ display: "grid", gap: 6, fontSize: 14 }}>
                   <label style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
                     <input
@@ -265,7 +265,7 @@ export function WizardPage() {
                         setError(null);
                       }}
                     />
-                    모의 모델 (무료 · 데모용 결정적 채점)
+                    연습용 모델 — 무료, 실제 AI를 부르지 않고 정해진 방식으로만 채점합니다
                   </label>
                   <label style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
                     <input
@@ -278,7 +278,7 @@ export function WizardPage() {
                         setError(null);
                       }}
                     />
-                    Gemini (BYO 키 — 키는 이 브라우저에만 저장됩니다)
+                    Gemini — 내 API 키를 사용합니다
                   </label>
                   <label style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
                     <input
@@ -291,7 +291,7 @@ export function WizardPage() {
                         setError(null);
                       }}
                     />
-                    OpenAI · GPT-5.6 Sol (BYO 키 — 브라우저 직행)
+                    OpenAI (GPT-5.6 Sol) — 내 API 키를 사용합니다
                   </label>
                 </div>
                 {judgeChoice !== "mock" ? (
@@ -308,8 +308,8 @@ export function WizardPage() {
                       }}
                     />
                     <div className="hint">
-                      키는 이 브라우저(localStorage)에만 저장되고, 요청은 {judgeChoice === "openai" ? "OpenAI" : "Gemini"} API로 직접 전송됩니다.
-                      승인 화면으로 이동하기 전에 선택한 모델로 1회 연결을 확인합니다.
+                      키는 이 브라우저에만 저장되고 우리 서버로는 보내지 않습니다. 요청은 이 브라우저에서 {judgeChoice === "openai" ? "OpenAI" : "Gemini"}로 바로 갑니다.
+                      다음 화면으로 넘어가기 전에 키가 맞는지 한 번 확인합니다.
                     </div>
                   </div>
                 ) : null}
@@ -334,8 +334,8 @@ export function WizardPage() {
                   ? submitting
                     ? judgeChoice === "mock"
                       ? "확인 중…"
-                      : "모델 연결 확인 중…"
-                    : "작성 완료 — 승인 화면으로"
+                      : "키 확인 중…"
+                    : "다 됐어요 — 기준 확인하러 가기"
                   : "다음"}
               </button>
             </div>

@@ -19,7 +19,7 @@ const PAD_R = 14;
 const PAD_T = 14;
 const PAD_B = 26;
 const GRID_VALUES = [25, 50, 75, 100];
-const TITLE = "개선 곡선 — 라운드별 챔피언 점수";
+const TITLE = "점수 변화 — 고칠 때마다 기록된 최고 점수";
 
 function fmt(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(1);
@@ -59,7 +59,7 @@ export function CurveChart({ curve, adopted, xMax }: CurveChartProps) {
             fontSize: 13,
           }}
         >
-          실행하면 곡선이 그려집니다
+          실행을 시작하면 여기에 점수가 그려집니다
         </div>
       </div>
     );
@@ -182,7 +182,7 @@ export function CurveChart({ curve, adopted, xMax }: CurveChartProps) {
           }}
         >
           <span style={{ color: "var(--ink-2)" }}>
-            {hover === 0 ? "기준선(라운드 0)" : `라운드 ${hover}`}
+            {hover === 0 ? "처음 점수" : `${hover}번째 고침`}
           </span>{" "}
           · {fmt(hoverScore)}점
           {hover !== 0 && (

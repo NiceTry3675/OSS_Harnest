@@ -72,7 +72,7 @@ const timetableEntry: TemplateEntry = {
   id: timetable.TEMPLATE_ID,
   name: timetable.TEMPLATE_NAME,
   description:
-    "근무자 명단과 원칙만 알려주세요. 연속 근무 한도·주당 상한·배정 형평을 당신이 승인한 기준으로 채점하며, 통과할 때까지 근무표를 스스로 다듬습니다.",
+    "근무자 명단과 원칙만 알려주세요. 연속 근무 한도·주당 상한·배정 형평을 당신이 승인한 기준으로 채점하고, 그 기준에 맞게 근무표를 다듬습니다.",
   badge: "개발용 테스트 템플릿",
   needsModel: false,
   questions: timetable.questions,
@@ -101,7 +101,7 @@ const handoverEntry: TemplateEntry = {
   id: handover.TEMPLATE_ID,
   name: handover.TEMPLATE_NAME,
   description:
-    "실제로 받았던 질문과 그때의 답을 넣으세요. 문서만 읽은 AI가 그 질문들에 실제로 답해보는 방식으로 채점하며, 당신이 정한 분량 안에서 커버리지를 넓혀 갑니다.",
+    "그동안 실제로 받았던 질문과 그때 해준 답을 넣으세요. 문서만 읽은 AI가 그 질문들에 직접 답해보게 해서 채점하고, 정해둔 분량 안에서 답할 수 있는 질문을 늘려 갑니다.",
   needsModel: true,
   questions: handover.questions,
   compile: (submission, judge) =>
@@ -116,7 +116,7 @@ const handoverEntry: TemplateEntry = {
     const key = getByoKey(provider);
     if (!key) {
       throw new Error(
-        `승인된 채점 모델(${PROVIDER_LABEL[provider]} BYO)의 키가 없습니다 — 키를 입력하거나, 기준을 다시 만들어 모의 모델로 승인하세요.`,
+        `승인된 채점 AI(${PROVIDER_LABEL[provider]})의 키가 없습니다 — 키를 입력하거나, 기준을 다시 만들어 연습용 모델로 승인해 주세요.`,
       );
     }
     return provider === "openai"
@@ -135,7 +135,7 @@ const handoverEntry: TemplateEntry = {
       handover.buildCalibrationPairs(run as handover.ExaminerRun, pack),
   },
   createRuntime(compiled, llm) {
-    if (!llm) throw new Error("채점 모델이 준비되지 않았습니다 — 키를 입력하거나 모의 모델을 선택하세요.");
+    if (!llm) throw new Error("채점을 맡을 AI가 준비되지 않았습니다 — 키를 입력하거나 연습용 모델을 골라 주세요.");
     const jp = compiled.pack.judgeProcedure;
     if (
       jp.kind === "case_answering" &&
@@ -144,7 +144,7 @@ const handoverEntry: TemplateEntry = {
     ) {
       // 승인 시 동결된 저지와 실행 모델이 다르면 실행 불가 — 재승인 원칙(SPEC §8)
       throw new Error(
-        `승인된 채점 모델(${jp.judge.provider}/${jp.judge.model})을 사용할 수 없습니다 — 기준을 다시 만들어 승인해 주세요.`,
+        `승인할 때 정한 채점 AI(${jp.judge.provider} / ${jp.judge.model})를 지금은 쓸 수 없습니다 — 기준을 다시 만들어 승인해 주세요.`,
       );
     }
     const problem = compiled.problem as handover.HandoverProblem;
