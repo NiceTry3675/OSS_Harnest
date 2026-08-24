@@ -1,6 +1,20 @@
-/** 선택형 백엔드(FastAPI, :8000) 연동 — 서버 없이도 전 흐름이 완결되어야 한다. */
+/** 선택형 백엔드(FastAPI) 연동 — 있으면 기록하고 없으면 조용히 건너뛴다.
+ *  Lite의 본체는 브라우저다: 서버 없이도 전 흐름이 완결되어야 한다 (SPEC §3 원칙 1). */
 
-const BASE = "http://localhost:8000";
+function defaultApiBase(): string {
+  const configured = import.meta.env.VITE_API_BASE;
+  if (typeof configured === "string" && configured.trim()) return configured.trim();
+  return import.meta.env.PROD ? "https://api.harnest.p-e.kr" : "http://localhost:8000";
+}
+
+/** 빌드 시 `VITE_API_BASE`로 다른 서버 주소를 주입할 수 있다. */
+export const API_BASE = defaultApiBase();
+
+/** 사용자에게 저장 위치를 알리기 위한 표기. 상대 경로면 현재 도메인이다. */
+export const API_LABEL = API_BASE.startsWith("http")
+  ? new URL(API_BASE).host
+  : `${window.location.host}${API_BASE}`;
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SHA256_RE = /^[0-9a-f]{64}$/;
 export const MAX_EXPORT_BYTES = 1024 * 1024;
@@ -88,7 +102,7 @@ function savedExportResponse(value: unknown, location: string | null): SavedExpo
 }
 
 export function savedExportUrl(record: SavedExport): string {
-  return `${BASE}${record.location}`;
+  return `${API_BASE}${record.location}`;
 }
 
 function timeoutMs(options: SaveExportOptions): number {
@@ -170,7 +184,7 @@ export async function saveExport(
     durationMs,
     null,
     async (signal) => {
-      const response = await fetch(`${BASE}/exports`, {
+      const response = await fetch(`${API_BASE}/exports`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: serialized,
@@ -224,7 +238,7 @@ export async function saveExport(
     durationMs,
     saved,
     async (signal) => {
-      const response = await fetch(`${BASE}${saved.location}`, { signal });
+      const response = await fetch(`${API_BASE}${saved.location}`, { signal });
       return { response, body: response.ok ? await response.text() : null };
     },
   );

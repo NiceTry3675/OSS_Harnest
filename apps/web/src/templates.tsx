@@ -22,7 +22,10 @@ import {
   createGeminiClient,
   createMockClient,
   createOpenAIClient,
+  createSharedGeminiClient,
+  createSharedOpenAIClient,
   getByoKey,
+  hasSharedKey,
   PROVIDER_LABEL,
 } from "./lib/llm";
 
@@ -131,14 +134,21 @@ const handoverEntry: TemplateEntry = {
     }
     const provider = jp.judge.provider;
     const key = getByoKey(provider);
-    if (!key) {
-      throw new Error(
-        `승인된 채점 모델(${PROVIDER_LABEL[provider]} BYO)의 키가 없습니다 — 키를 입력하거나, 기준을 다시 만들어 모의 모델로 승인하세요.`,
-      );
+    if (key) {
+      return provider === "openai"
+        ? createOpenAIClient(key, jp.judge.model)
+        : createGeminiClient(key, jp.judge.model);
     }
-    return provider === "openai"
-      ? createOpenAIClient(key, jp.judge.model)
-      : createGeminiClient(key, jp.judge.model);
+    // BYO 키가 없으면 관리자가 서버에 둔 공유 키로 대체한다(있을 때만).
+    // 이 경로는 요청이 Harnest 서버(/proxy/*)를 거친다 — README·SPEC의 공유 키 절 참고.
+    if (hasSharedKey(provider)) {
+      return provider === "openai"
+        ? createSharedOpenAIClient(jp.judge.model)
+        : createSharedGeminiClient(jp.judge.model);
+    }
+    throw new Error(
+      `승인된 채점 모델(${PROVIDER_LABEL[provider]})의 키가 없습니다 — 키를 입력하거나, 기준을 다시 만들어 모의 모델로 승인하세요.`,
+    );
   },
   caseAssist: {
     nudge:

@@ -2,6 +2,11 @@
 
 레거시 프로젝트 API는 호환성을 위해 유지한다. 정식 내보내기 봉투는 원문 JSON
 바이트와 검색용 메타데이터만 저장하며, 판정 절차나 승인 의미를 해석·변경하지 않는다.
+
+이 서버는 기본적으로 벤더 모델 호출을 중계하지 않는다(SPEC §3 원칙 1 — BYO 키는
+브라우저에서 벤더로 직행). `/proxy/*`는 관리자가 자신의 벤더 키를 서버 환경변수에
+설정했을 때만 열리는 예외 경로다. 사용자가 자기 키를 넣지 않아도 그 벤더를 쓸 수
+있게 하되, 관리자의 계정으로 요청과 비용이 발생하므로 IP별 시간당 한도로 막는다.
 """
 
 import hashlib
@@ -15,23 +20,37 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 
+import httpx
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from ratelimit import build_rate_limiter
+
 # 테스트가 임시 DB를 쓸 수 있도록 환경변수 우회 허용. 기본은 이 파일 옆 harnest.db
 DB_PATH = os.environ.get(
     "HARNEST_DB", os.path.join(os.path.dirname(os.path.abspath(__file__)), "harnest.db")
 )
-WEB_ORIGIN = "http://localhost:5173"
 MAX_EXPORT_BYTES = 1024 * 1024
 
 app = FastAPI(title="Harnest API", version="0.1.0")
 
+
+def _cors_origins() -> List[str]:
+    """쉼표로 구분한 허용 오리진 목록."""
+    raw = os.environ.get(
+        "HARNEST_CORS_ORIGINS",
+        "http://localhost:5173,http://harnest.p-e.kr,https://harnest.p-e.kr",
+    )
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
+ALLOWED_ORIGINS = set(_cors_origins())
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[WEB_ORIGIN],
+    allow_origins=list(ALLOWED_ORIGINS),
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["Location", "X-Content-SHA256"],
@@ -43,6 +62,13 @@ EXPORT_ENVELOPE_VERSION = 1
 INTERVIEW_SCHEMA_VERSION = "skeleton-1"
 PACK_VERSION = "skeleton-1"
 SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
+rate_limiter = build_rate_limiter()
+
+# 관리자가 설정하지 않으면 빈 문자열이고, /proxy/* 해당 벤더는 404로 막는다.
+SHARED_OPENAI_API_KEY = os.environ.get("SHARED_OPENAI_API_KEY", "")
+SHARED_GEMINI_API_KEY = os.environ.get("SHARED_GEMINI_API_KEY", "")
+PROXY_RATE_LIMIT_PER_HOUR = int(os.environ.get("HARNEST_PROXY_RATE_LIMIT", "20"))
+_MODEL_NAME_RE = re.compile(r"^[a-zA-Z0-9._-]{1,100}$")
 
 
 @contextmanager
@@ -419,7 +445,7 @@ def validate_holdout_evaluation(value: Dict[str, Any], path: str) -> None:
 async def read_export_payload(request: Request) -> bytes:
     # CORS 헤더는 응답 공개만 제어하고 단순 요청의 쓰기 자체를 막지 않는다.
     origin = request.headers.get("origin")
-    if origin is not None and origin != WEB_ORIGIN:
+    if origin is not None and origin not in ALLOWED_ORIGINS:
         raise HTTPException(status_code=403, detail="허용하지 않는 Origin입니다.")
 
     media_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
@@ -851,3 +877,72 @@ def upload_result(project_id: str, body: ResultIn) -> Dict[str, bool]:
             (project_id, json.dumps(body.checkpoint, ensure_ascii=False), now_iso()),
         )
     return {"ok": True}
+
+
+@app.get("/config")
+def get_config() -> Dict[str, Any]:
+    return {
+        "sharedProviders": {
+            "openai": bool(SHARED_OPENAI_API_KEY),
+            "gemini": bool(SHARED_GEMINI_API_KEY),
+        }
+    }
+
+
+def _client_ip(request: Request) -> str:
+    # 프록시(nginx, CDN 등) 뒤에서 돈다면 실제 방문자 IP는 X-Forwarded-For에 담긴다.
+    # 이게 없으면 request.client.host는 프록시 자신의 IP라 IP별 제한의 의미가 없어진다.
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _enforce_rate_limit(request: Request) -> None:
+    ip = _client_ip(request)
+    if not rate_limiter.check(ip, PROXY_RATE_LIMIT_PER_HOUR):
+        raise HTTPException(
+            status_code=429,
+            detail=f"공유 키 사용량이 시간당 {PROXY_RATE_LIMIT_PER_HOUR}회를 넘었습니다. "
+            "잠시 후 다시 시도하거나 본인 키를 입력해 주세요.",
+        )
+
+
+@app.post("/proxy/openai")
+def proxy_openai(body: Dict[str, Any], request: Request) -> Response:
+    if not SHARED_OPENAI_API_KEY:
+        raise HTTPException(status_code=404, detail="공유 키가 설정되지 않았습니다.")
+    _enforce_rate_limit(request)
+    try:
+        upstream = httpx.post(
+            "https://api.openai.com/v1/responses",
+            json=body,
+            headers={"Authorization": f"Bearer {SHARED_OPENAI_API_KEY}"},
+            timeout=45.0,
+        )
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"OpenAI 연결 실패: {exc}") from exc
+    return Response(
+        content=upstream.content, status_code=upstream.status_code, media_type="application/json"
+    )
+
+
+@app.post("/proxy/gemini/{model}")
+def proxy_gemini(model: str, body: Dict[str, Any], request: Request) -> Response:
+    if not SHARED_GEMINI_API_KEY:
+        raise HTTPException(status_code=404, detail="공유 키가 설정되지 않았습니다.")
+    if not _MODEL_NAME_RE.match(model):
+        raise HTTPException(status_code=400, detail="잘못된 모델 이름입니다.")
+    _enforce_rate_limit(request)
+    try:
+        upstream = httpx.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+            json=body,
+            headers={"x-goog-api-key": SHARED_GEMINI_API_KEY},
+            timeout=45.0,
+        )
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"Gemini 연결 실패: {exc}") from exc
+    return Response(
+        content=upstream.content, status_code=upstream.status_code, media_type="application/json"
+    )

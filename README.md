@@ -22,11 +22,15 @@ Harnest는 사용자가 채점 절차를 검증하고 승인한 뒤, 그 절차�
 
 OpenAI CORS의 정상·401 경로와 스모크 테스트 관측값은 [OpenAI BYO 실측 결과](experiments/byo-cors-openai/RESULT.md)에 있습니다.
 
-API 키와 벤더 모델 호출은 Harnest 서버를 거치지 않습니다. 다만 사용자가 결과 화면에서
+API 키와 벤더 모델 호출은 기본적으로 Harnest 서버를 거치지 않습니다. 다만 사용자가 결과 화면에서
 **서버에 기록**을 선택하면 입력, 승인된 Pack·검증 근거, 실행 결과·홀드아웃의 JSON 기록이
-선택형 로컬 API에 전송됩니다. 서버 기록은 UTF-8 JSON 1 MiB까지이며, 같은 계약 형식은 서버
+FastAPI 저장 API에 전송됩니다. 서버 기록은 UTF-8 JSON 1 MiB까지이며, 같은 계약 형식은 서버
 없이 파일로 내보낼 수 있습니다. 현재 봉투는 완료 결과의 감사·보관용이고 가져오기·진행 재개
 형식은 아닙니다.
+
+관리자가 서버에 `SHARED_OPENAI_API_KEY` 또는 `SHARED_GEMINI_API_KEY`를 설정하면, 사용자가
+자기 키를 넣지 않아도 해당 모델을 쓸 수 있는 공유 키 경로가 열립니다. 이 키는 프런트엔드나
+GitHub Pages에 넣지 않고 FastAPI 서버의 비밀 환경변수에만 저장합니다.
 
 ## 실행
 
@@ -44,6 +48,10 @@ cd apps/api
 pip3 install -r requirements.txt
 python3 -m uvicorn main:app --port 8000
 ```
+
+운영 배포에서는 프런트엔드가 기본으로 `https://api.harnest.p-e.kr`을 API 서버로 사용합니다.
+다른 API 주소를 쓰려면 GitHub 저장소 변수 `VITE_API_BASE`에 그 주소를 넣고 Pages 배포를 다시
+실행하세요.
 
 TypeScript와 웹 변경을 확인하려면 다음을 실행합니다.
 

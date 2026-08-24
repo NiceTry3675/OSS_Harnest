@@ -554,12 +554,45 @@ def run() -> None:
     r = client.get("/exports/no-such-id")
     assert r.status_code == 404, r.text
 
+    # 공유 키를 설정하지 않은 기본 상태 — /config는 둘 다 false, /proxy/*는 404
+    r = client.get("/config")
+    assert r.status_code == 200, r.text
+    assert r.json() == {"sharedProviders": {"openai": False, "gemini": False}}
+
+    r = client.post("/proxy/openai", json={"model": "x", "input": "hi"})
+    assert r.status_code == 404, r.text
+
+    r = client.post("/proxy/gemini/gemini-3.7-flash", json={"contents": []})
+    assert r.status_code == 404, r.text
+
+    run_ratelimit_and_model_validation()
+
     print("모든 테스트 통과")
+
+
+def run_ratelimit_and_model_validation() -> None:
+    """네트워크 호출 없이 확인 가능한 순수 로직 — 레이트리밋 카운터와 모델명 검증."""
+    from ratelimit import InMemoryRateLimiter
+
+    limiter = InMemoryRateLimiter()
+    for _ in range(3):
+        assert limiter.check("1.2.3.4", 3) is True
+    assert limiter.check("1.2.3.4", 3) is False, "한도를 넘으면 False여야 한다"
+    assert limiter.check("5.6.7.8", 3) is True, "다른 키는 별도 카운터를 써야 한다"
+
+    from main import _MODEL_NAME_RE
+
+    assert _MODEL_NAME_RE.match("gemini-3.7-flash")
+    assert not _MODEL_NAME_RE.match("../etc/passwd")
+    assert not _MODEL_NAME_RE.match("model?x=1")
 
 
 if __name__ == "__main__":
     try:
         run()
     finally:
-        os.unlink(_tmp.name)
+        try:
+            os.unlink(_tmp.name)
+        except PermissionError:
+            pass
     sys.exit(0)

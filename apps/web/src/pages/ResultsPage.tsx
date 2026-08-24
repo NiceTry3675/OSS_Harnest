@@ -8,7 +8,13 @@ import { useNavigate } from "react-router-dom";
 import type { ProvenanceType } from "@harnest/contracts";
 import { useProject, type HoldoutEvaluation } from "../state";
 import { getTemplate } from "../templates";
-import { ExportSaveError, saveExport, savedExportUrl, type SavedExport } from "../lib/api";
+import {
+  API_LABEL,
+  ExportSaveError,
+  saveExport,
+  savedExportUrl,
+  type SavedExport,
+} from "../lib/api";
 import {
   buildProjectExport,
   downloadProjectExport,
@@ -246,7 +252,7 @@ export function ResultsPage() {
           )}
           <span style={{ fontSize: 12, color: "var(--ink-3)" }}>
             입력, 승인된 Pack·검증 근거, 실행 결과·홀드아웃이 같은 JSON 형식으로 로컬 서버
-            (localhost:8000)에 최대 1 MiB까지 저장됩니다. API 키와 시험관 내부 산출물은 포함하지
+            ({API_LABEL})에 최대 1 MiB까지 저장됩니다. API 키와 시험관 내부 산출물은 포함하지
             않습니다.
             {saved === "fail" && saveError !== null ? ` — ${saveError}` : ""}
             {exported === "fail" ? " — JSON 기록의 결속을 확인할 수 없습니다." : ""}

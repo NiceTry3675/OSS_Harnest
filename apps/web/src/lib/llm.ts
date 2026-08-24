@@ -1,5 +1,7 @@
-/** LLM 클라이언트 — BYO 원칙: 키는 이 브라우저(localStorage)에만 머물고,
- *  요청은 벤더 API로 직행한다. 우리 서버로는 키도 본문도 가지 않는다 (SPEC §3 원칙 1). */
+/** LLM 클라이언트 — 기본은 BYO 원칙: 키는 이 브라우저(localStorage)에만 머물고,
+ *  요청은 벤더 API로 직행한다. 우리 서버로는 키도 본문도 가지 않는다 (SPEC §3 원칙 1).
+ *  관리자가 서버에 공유 키를 설정했을 때만 예외로 /proxy/*를 거치는 보조 경로가
+ *  있다 — createSharedOpenAIClient/createSharedGeminiClient, 아래쪽 참고. */
 
 import type { CaseDef, JudgeProvider } from "@harnest/contracts";
 import { DRAFT_CASES_MARKER, type HandoverProblem, type LlmClient } from "@harnest/template-handover";
@@ -243,6 +245,219 @@ export function createOpenAIClient(
   };
 }
 
+// ── 공유 키 판정(관리자가 서버에 둔 키) ──────────────────────────────────
+// BYO가 기본 경로다. 관리자가 자기 키를 Lambda에 설정했을 때만, 사용자가 키를
+// 안 넣어도 그 벤더를 쓸 수 있게 하는 보조 경로다. 이 경로는 요청이 벤더로
+// 직행하지 않고 Harnest 서버(/proxy/*)를 거친다 — 키가 서버에만 있기 때문이다.
+
+function resolveApiBase(apiBase?: string): string {
+  if (apiBase) return apiBase;
+  const configured = import.meta.env.VITE_API_BASE;
+  if (typeof configured === "string" && configured.trim()) return configured.trim();
+  return import.meta.env.PROD ? "https://api.harnest.p-e.kr" : "http://localhost:8000";
+}
+
+export async function fetchSharedProviders(
+  apiBase?: string,
+): Promise<Partial<Record<ByoProvider, boolean>>> {
+  try {
+    const res = await fetch(`${resolveApiBase(apiBase)}/config`);
+    if (!res.ok) return {};
+    const data = (await res.json()) as {
+      sharedProviders?: Partial<Record<ByoProvider, boolean>>;
+    };
+    return data.sharedProviders ?? {};
+  } catch {
+    return {};
+  }
+}
+
+let sharedProvidersCache: Partial<Record<ByoProvider, boolean>> = {};
+
+/** 앱 시작 시, 그리고 위저드가 열릴 때 다시 불러 캐시를 채운다. createLlm()은
+ *  동기 함수라 호출 시점에 이 캐시를 그대로 읽는다 — 최신 값을 보장하지는
+ *  않지만, 위저드를 거쳐야 그 지점에 도달하므로 실질적으로는 늦지 않는다. */
+export async function loadSharedProviders(
+  apiBase?: string,
+): Promise<Partial<Record<ByoProvider, boolean>>> {
+  sharedProvidersCache = await fetchSharedProviders(apiBase);
+  return sharedProvidersCache;
+}
+
+export function hasSharedKey(provider: ByoProvider): boolean {
+  return sharedProvidersCache[provider] === true;
+}
+
+export interface SharedProxyOptions extends LlmRequestOptions {
+  apiBase?: string;
+}
+
+export function createSharedOpenAIClient(
+  model = "gpt-5.6-sol",
+  options: SharedProxyOptions = {},
+): LlmClient {
+  const timeoutMs = Math.max(1, options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const maxAttempts = Math.max(1, Math.floor(options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS));
+  const retryBaseMs = Math.max(0, options.retryBaseMs ?? DEFAULT_RETRY_BASE_MS);
+  const base = resolveApiBase(options.apiBase);
+
+  return {
+    providerId: "openai",
+    model,
+    async complete(prompt, opts) {
+      const body = JSON.stringify({
+        model,
+        input: prompt,
+        reasoning: { effort: "none" },
+        temperature: opts?.temperature ?? 0.7,
+        max_output_tokens: opts?.maxOutputTokens ?? 8192,
+        store: false,
+      });
+      let lastError: Error = new Error("LLM 호출 실패");
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+        let res: Response;
+        try {
+          res = await fetch(`${base}/proxy/openai`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body,
+            signal: controller.signal,
+          });
+        } catch (e) {
+          clearTimeout(timeout);
+          lastError = controller.signal.aborted
+            ? new Error(`OpenAI(공유) 요청 시간 초과 (${timeoutMs}ms)`)
+            : new Error(
+                `OpenAI(공유) 네트워크 오류: ${e instanceof Error ? e.message : String(e)}`,
+              );
+          if (attempt + 1 >= maxAttempts) throw lastError;
+          await wait(retryBaseMs * (attempt + 1));
+          continue;
+        }
+
+        if (!res.ok) {
+          const excerpt = await responseExcerpt(res);
+          clearTimeout(timeout);
+          lastError = new Error(`OpenAI(공유) HTTP ${res.status}${excerpt ? `: ${excerpt}` : ""}`);
+          const retryable = res.status === 429 || (res.status >= 500 && res.status <= 599);
+          if (!retryable || attempt + 1 >= maxAttempts) throw lastError;
+          await wait(retryBaseMs * (attempt + 1));
+          continue;
+        }
+
+        let data: OpenAIResponse;
+        try {
+          data = (await res.json()) as OpenAIResponse;
+        } catch {
+          clearTimeout(timeout);
+          if (controller.signal.aborted) {
+            lastError = new Error(`OpenAI(공유) 요청 시간 초과 (${timeoutMs}ms)`);
+            if (attempt + 1 >= maxAttempts) throw lastError;
+            await wait(retryBaseMs * (attempt + 1));
+            continue;
+          }
+          throw new Error("OpenAI(공유) 응답 JSON을 해석할 수 없습니다.");
+        }
+        clearTimeout(timeout);
+
+        const text = openAIOutputText(data);
+        if (text.length > 0) return text;
+        if (data.error?.message) {
+          throw new Error(`OpenAI(공유) 응답 실패: ${data.error.message}`);
+        }
+        if (data.status === "incomplete") {
+          throw new Error(
+            `OpenAI(공유) 응답이 완료되지 않았습니다${data.incomplete_details?.reason ? `: ${data.incomplete_details.reason}` : ""}`,
+          );
+        }
+        throw new Error("OpenAI(공유) 응답에 텍스트 없음");
+      }
+      throw lastError;
+    },
+  };
+}
+
+export function createSharedGeminiClient(
+  model = "gemini-3.7-flash",
+  options: SharedProxyOptions = {},
+): LlmClient {
+  const timeoutMs = Math.max(1, options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const maxAttempts = Math.max(1, Math.floor(options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS));
+  const retryBaseMs = Math.max(0, options.retryBaseMs ?? DEFAULT_RETRY_BASE_MS);
+  const base = resolveApiBase(options.apiBase);
+
+  return {
+    providerId: "gemini",
+    model,
+    async complete(prompt, opts) {
+      const body = JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: opts?.temperature ?? 0.7,
+          maxOutputTokens: opts?.maxOutputTokens ?? 8192,
+        },
+      });
+      let lastError: Error = new Error("LLM 호출 실패");
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+        let res: Response;
+        try {
+          res = await fetch(`${base}/proxy/gemini/${model}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body,
+            signal: controller.signal,
+          });
+        } catch (e) {
+          clearTimeout(timeout);
+          lastError = controller.signal.aborted
+            ? new Error(`Gemini(공유) 요청 시간 초과 (${timeoutMs}ms)`)
+            : new Error(
+                `Gemini(공유) 네트워크 오류: ${e instanceof Error ? e.message : String(e)}`,
+              );
+          if (attempt + 1 >= maxAttempts) throw lastError;
+          await wait(retryBaseMs * (attempt + 1));
+          continue;
+        }
+
+        if (!res.ok) {
+          const excerpt = await responseExcerpt(res);
+          clearTimeout(timeout);
+          lastError = new Error(`Gemini(공유) HTTP ${res.status}${excerpt ? `: ${excerpt}` : ""}`);
+          const retryable = res.status === 429 || (res.status >= 500 && res.status <= 599);
+          if (!retryable || attempt + 1 >= maxAttempts) throw lastError;
+          await wait(retryBaseMs * (attempt + 1));
+          continue;
+        }
+
+        let data: {
+          candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+        };
+        try {
+          data = (await res.json()) as typeof data;
+        } catch {
+          clearTimeout(timeout);
+          if (controller.signal.aborted) {
+            lastError = new Error(`Gemini(공유) 요청 시간 초과 (${timeoutMs}ms)`);
+            if (attempt + 1 >= maxAttempts) throw lastError;
+            await wait(retryBaseMs * (attempt + 1));
+            continue;
+          }
+          throw new Error("Gemini(공유) 응답 JSON을 해석할 수 없습니다.");
+        }
+        clearTimeout(timeout);
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (typeof text !== "string") throw new Error("Gemini(공유) 응답에 텍스트 없음");
+        return text;
+      }
+      throw lastError;
+    },
+  };
+}
+
 function connectionTestError(provider: ByoProvider, error: unknown): Error {
   const label = PROVIDER_LABEL[provider];
   const detail = error instanceof Error ? error.message : String(error);
@@ -321,6 +536,31 @@ export function createAssistMockClient(): LlmClient {
       return JSON.stringify(pairs);
     },
   };
+}
+
+/** 공유 키 fail-fast — BYO와 같은 원칙(SPEC §8)을 공유 키 경로에도 적용한다.
+ *  관리자 키가 만료·소진됐을 수 있으므로, 승인 화면으로 넘어가기 전에 한 번 확인한다. */
+export async function testSharedConnection(
+  provider: ByoProvider,
+  model: string,
+  apiBase?: string,
+): Promise<void> {
+  const options: SharedProxyOptions = {
+    requestTimeoutMs: CONNECTION_TEST_TIMEOUT_MS,
+    maxAttempts: 1,
+    retryBaseMs: 0,
+    apiBase,
+  };
+  const client =
+    provider === "openai"
+      ? createSharedOpenAIClient(model, options)
+      : createSharedGeminiClient(model, options);
+
+  try {
+    await client.complete(CONNECTION_TEST_PROMPT, { temperature: 0, maxOutputTokens: 16 });
+  } catch (error) {
+    throw connectionTestError(provider, error);
+  }
 }
 
 /** 모의 모델 — 키 없이 파이프라인·데모를 돌리기 위한 결정적 대역.

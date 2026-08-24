@@ -20,6 +20,46 @@ python3 -m uvicorn main:app --port 8000
 데이터는 같은 디렉터리의 `harnest.db`(SQLite)에 저장됩니다 (git 추적 제외). 시작할 때
 비파괴 마이그레이션을 실행하며, 기존 `projects`·`results` 행은 변경하지 않습니다.
 
+## 가벼운 운영 배포
+
+Docker를 지원하는 작은 호스팅(Render, Fly.io, Railway 등)에 `apps/api`를 서비스로 올립니다.
+컨테이너는 `apps/api/Dockerfile`을 사용하며, 실행 포트는 플랫폼이 제공하는 `PORT`를 따릅니다.
+
+권장 도메인:
+
+```text
+api.harnest.p-e.kr -> 배포 플랫폼이 안내하는 API 서비스 주소
+```
+
+SQLite 파일은 컨테이너 재시작 때 사라지지 않도록 영구 디스크에 둡니다. 기본 컨테이너 설정은
+`HARNEST_DB=/data/harnest.db`를 사용하므로, 배포 플랫폼에서 `/data`를 persistent disk/volume으로
+연결하세요. 영구 디스크를 붙이지 않으면 서버는 동작하지만 저장 기록은 재배포나 재시작 때 사라질 수
+있습니다.
+
+## 환경변수
+
+| 변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `HARNEST_DB` | `./harnest.db` | SQLite 파일 경로 |
+| `HARNEST_CORS_ORIGINS` | `http://localhost:5173` | 쉼표로 구분한 허용 오리진 |
+| `SHARED_OPENAI_API_KEY` | — | 설정하면 `/proxy/openai`가 열려, 방문자가 자기 키 없이 OpenAI를 쓸 수 있습니다 |
+| `SHARED_GEMINI_API_KEY` | — | 설정하면 `/proxy/gemini/{model}`이 열려, 방문자가 자기 키 없이 Gemini를 쓸 수 있습니다 |
+| `HARNEST_PROXY_RATE_LIMIT` | `20` | `/proxy/*`의 IP당 시간당 요청 상한 |
+
+## 공유 키 프록시 (선택)
+
+기본은 BYO(bring your own key)입니다 — 브라우저가 벤더로 직접 요청을 보내고, 키는
+localStorage에만 저장됩니다(SPEC §3 원칙 1). `SHARED_OPENAI_API_KEY` /
+`SHARED_GEMINI_API_KEY`를 설정하면, 사용자가 자기 키를 넣지 않아도 그 벤더를 쓸 수
+있는 예외 경로가 열립니다. 이 경우 요청은 브라우저 → 이 서버 → 벤더로 흐르고, 비용은
+관리자(키 소유자) 계정에서 나갑니다.
+
+**공유 키를 켤 때 반드시 할 일:**
+- 벤더 콘솔(OpenAI, Google Cloud)에 월 지출 한도를 걸어 두세요. `HARNEST_PROXY_RATE_LIMIT`는
+  최악의 시나리오를 줄일 뿐, 막아 주지 않습니다.
+- `/config`는 어떤 벤더가 공유 키를 갖고 있는지(불리언만) 공개합니다. 키 자체는 절대
+  응답에 담기지 않습니다.
+
 ## 엔드포인트
 
 | 메서드 | 경로 | 설명 |
@@ -30,6 +70,9 @@ python3 -m uvicorn main:app --port 8000
 | POST | `/projects` | 본문 `{interview, pack, loopSpec}` 저장 → `{"id": uuid}` |
 | GET | `/projects/{id}` | 저장된 프로젝트를 그대로 반환 (없으면 404) |
 | POST | `/projects/{id}/results` | 본문 `{checkpoint}` 저장 → `{"ok": true}` (프로젝트 없으면 404) |
+| GET | `/config` | 공유 키 보유 여부 → `{"sharedProviders": {"openai": bool, "gemini": bool}}` |
+| POST | `/proxy/openai` | 본문을 그대로 OpenAI Responses API에 전달 (공유 키 미설정 시 404) |
+| POST | `/proxy/gemini/{model}` | 본문을 그대로 Gemini generateContent에 전달 (공유 키 미설정 시 404) |
 
 `POST /exports`는 `kind: "harnest.project-export"`, `envelopeVersion: 1`, `exportedAt`와
 `project.interview`·`project.evaluation`·`project.loopSpec`, `result.checkpoint`·`result.holdout`의
@@ -52,7 +95,9 @@ failed 기록을 가진 `measured`여야 합니다. 고정 계층의 알 수 없
 
 새 봉투는 `project_exports`에 단일 레코드로 원자적으로 저장합니다. `definitionDigest`, `templateId`,
 `runId`에는 인덱스가 있으며, 원문은 exact round-trip을 위해 BLOB으로 보존합니다. 레거시
-`/projects` 경로는 기존 클라이언트 호환용입니다. CORS는 `http://localhost:5173`(웹 앱)만 허용합니다.
+`/projects` 경로는 기존 클라이언트 호환용입니다.
+
+CORS는 `HARNEST_CORS_ORIGINS`로 정합니다. 기본은 `http://localhost:5173`(웹 앱)만 허용합니다.
 
 ## 테스트
 

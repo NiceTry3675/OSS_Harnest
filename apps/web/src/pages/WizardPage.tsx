@@ -3,6 +3,7 @@
  *  채점 모델(저지)은 승인 전에 확정되어야 하므로 마지막 스텝에서 고른다(SPEC §8). */
 
 import { useMemo, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { Question } from "@harnest/contracts";
 import type { LlmClient } from "@harnest/template-handover";
@@ -15,8 +16,10 @@ import {
   createGeminiClient,
   createOpenAIClient,
   getByoKey,
+  loadSharedProviders,
   setByoKey,
   testByoConnection,
+  testSharedConnection,
   type ByoProvider,
 } from "../lib/llm";
 import {
@@ -89,6 +92,19 @@ export function WizardPage() {
     gemini: getByoKey("gemini") ?? "",
     openai: getByoKey("openai") ?? "",
   }));
+  const [sharedProviders, setSharedProviders] = useState<Partial<Record<ByoProvider, boolean>>>(
+    {},
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    loadSharedProviders().then((result) => {
+      if (!cancelled) setSharedProviders(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const liveAnswers = useMemo(() => toAnswers(questions, draft), [questions, draft]);
 
@@ -235,7 +251,7 @@ export function WizardPage() {
     }
     if (entry!.needsModel && judgeChoice !== "mock") {
       const key = keyDrafts[judgeChoice].trim();
-      if (!key) {
+      if (!key && !sharedProviders[judgeChoice]) {
         setError(`${judgeChoice === "openai" ? "OpenAI" : "Gemini"} API 키를 입력해 주세요.`);
         return;
       }
@@ -244,9 +260,14 @@ export function WizardPage() {
     try {
       if (entry!.needsModel && judgeChoice !== "mock") {
         const key = keyDrafts[judgeChoice].trim();
-        await testByoConnection(judgeChoice, key, JUDGE_MODEL[judgeChoice]);
-        // 실패한 키가 기존의 정상 키를 덮지 않도록 성공한 뒤에만 저장한다.
-        setByoKey(judgeChoice, key);
+        if (key) {
+          await testByoConnection(judgeChoice, key, JUDGE_MODEL[judgeChoice]);
+          // 실패한 키가 기존의 정상 키를 덮지 않도록 성공한 뒤에만 저장한다.
+          setByoKey(judgeChoice, key);
+        } else {
+          // 키를 비워 뒀고 관리자 공유 키가 있는 경우 — 그 경로도 승인 전에 한 번 확인한다.
+          await testSharedConnection(judgeChoice, JUDGE_MODEL[judgeChoice]);
+        }
       }
       const answers = toAnswers(questions, draft);
       const compiled = await entry!.compile(
@@ -443,7 +464,11 @@ export function WizardPage() {
                     <input
                       type="password"
                       value={keyDrafts[judgeChoice]}
-                      placeholder={`${judgeChoice === "openai" ? "OpenAI" : "Gemini"} API 키`}
+                      placeholder={
+                        sharedProviders[judgeChoice]
+                          ? `${judgeChoice === "openai" ? "OpenAI" : "Gemini"} API 키 (선택 — 비우면 관리자 공유 키 사용)`
+                          : `${judgeChoice === "openai" ? "OpenAI" : "Gemini"} API 키`
+                      }
                       autoComplete="off"
                       onChange={(e) => {
                         const value = e.target.value;
@@ -452,7 +477,18 @@ export function WizardPage() {
                       }}
                     />
                     <div className="hint">
-                      키는 이 브라우저(localStorage)에만 저장되고, 요청은 {judgeChoice === "openai" ? "OpenAI" : "Gemini"} API로 직접 전송됩니다.
+                      {keyDrafts[judgeChoice].trim() || !sharedProviders[judgeChoice] ? (
+                        <>
+                          키는 이 브라우저(localStorage)에만 저장되고, 요청은{" "}
+                          {judgeChoice === "openai" ? "OpenAI" : "Gemini"} API로 직접 전송됩니다.
+                        </>
+                      ) : (
+                        <>
+                          키를 비워 두면 관리자가 서버에 설정한 공유 키를 사용합니다. 이 경우
+                          요청이 벤더로 직행하지 않고 Harnest 서버를 거칩니다(키 자체는 여전히
+                          브라우저로 오지 않습니다).
+                        </>
+                      )}{" "}
                       승인 화면으로 이동하기 전에 선택한 모델로 1회 연결을 확인합니다.
                     </div>
                   </div>
