@@ -7,7 +7,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { GradeFormatError, type LoopCheckpoint } from "@harnest/contracts";
+import {
+  CallBudgetExceededError,
+  GradeFormatError,
+  type LoopCheckpoint,
+} from "@harnest/contracts";
 import {
   createLoopRun,
   IndexedDbCheckpointStore,
@@ -34,6 +38,9 @@ function fmt(n: number): string {
 
 /** 오류 종류는 계약 타입으로만 판별한다 — 템플릿이 만든 메시지 문자열 매칭 금지(경계 원칙). */
 function describeRunError(e: unknown): string {
+  if (e instanceof CallBudgetExceededError) {
+    return `${e.message} 비용 보호를 위한 실행 한도이며, 정상 실행에서는 도달하지 않습니다.`;
+  }
   if (e instanceof GradeFormatError) return e.message;
   const message = e instanceof Error ? e.message : String(e);
   return `모델 호출 중 오류가 발생했습니다: ${message}`;
@@ -77,6 +84,7 @@ export function ConsolePage() {
   const [runError, setRunError] = useState<string | null>(null);
   const [holdoutError, setHoldoutError] = useState<string | null>(null);
   const [callsPerRound, setCallsPerRound] = useState<number>(0);
+  const [maxCallsPerRun, setMaxCallsPerRun] = useState<number>(0);
 
   const handleRef = useRef<LoopHandle | null>(null);
   const storeRef = useRef<CheckpointStore<unknown> | null>(null);
@@ -132,6 +140,7 @@ export function ConsolePage() {
     }
     setSetupError(null);
     setCallsPerRound(runtime.callsPerRound);
+    setMaxCallsPerRun(runtime.maxCallsPerRun);
 
     const scoreHoldout = runtime.scoreHoldout;
     const onEvent = (cp: LoopCheckpoint<unknown>): void => {
@@ -318,6 +327,7 @@ export function ConsolePage() {
         {callsPerRound > 0 && (
           <p className="hint" style={{ marginTop: 10, marginBottom: 0 }}>
             라운드당 약 {callsPerRound}회 모델 호출 · 최대 {compiled.loopSpec.maxRounds}라운드
+            {maxCallsPerRun > 0 ? ` · 실행 1회 호출 예산 ${maxCallsPerRun}회` : ""}
           </p>
         )}
         <div style={{ display: "flex", gap: 8, marginTop: 14 }}>

@@ -5,6 +5,7 @@
 import type { CalibrationResult } from "@harnest/contracts";
 import type {
   CompiledGeneric,
+  ExaminerAttempts,
   ExaminerRunGeneric,
   HoldoutScores,
 } from "../state";
@@ -17,6 +18,9 @@ export interface ProjectSnapshot {
   answers: Record<string, unknown>;
   compiled: CompiledGeneric | null;
   examinerRun: ExaminerRunGeneric | null;
+  /** 검증 배터리 실행 계수 — 새로고침이 재검증 쿼터(SPEC §5.2)를 초기화하지 못하게 한다.
+   *  이 필드가 없는 구버전 스냅샷은 계수 0으로 읽는다. */
+  examinerAttempts?: ExaminerAttempts | null;
   calibration: CalibrationResult | null;
   /** 승인 순간의 다이제스트 — 승인 전 상태에는 null */
   approvedDigest: string | null;
@@ -30,6 +34,7 @@ export interface RestoredProjectSnapshot {
   answers: Record<string, unknown>;
   compiled: CompiledGeneric | null;
   examinerRun: ExaminerRunGeneric | null;
+  examinerAttempts: ExaminerAttempts | null;
   calibration: CalibrationResult | null;
   /** 승인 순간 캡처된 다이제스트 — 현재 팩과 일치할 때만 approvedAt과 함께 복원된다 */
   approvedDigest: string | null;
@@ -57,6 +62,7 @@ export function restoreProjectSnapshot(
     answers: snapshot.answers,
     compiled: snapshot.compiled,
     examinerRun: snapshot.examinerRun,
+    examinerAttempts: snapshot.examinerAttempts ?? null,
     calibration: snapshot.calibration,
     approvedDigest: approvalMatches ? snapshot.approvedDigest : null,
     approvedAt: approvalMatches ? snapshot.approvedAt : null,

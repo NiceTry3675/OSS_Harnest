@@ -5,3 +5,13 @@
 export class GradeFormatError extends Error {
   override readonly name = "GradeFormatError";
 }
+
+/** 실행 1회의 모델 호출 예산 소진 — 판정 결과가 아니라 운영 한도다 (SPEC §5.2).
+ *  폭주 루프·무한 재시도가 BYO 키 비용을 태우지 않게 하는 백스톱이며,
+ *  진행은 체크포인트에 남으므로 점수로 변환하지 않고 실행을 중단시킨다. */
+export class CallBudgetExceededError extends Error {
+  constructor(readonly budget: number) {
+    super(`실행 1회의 모델 호출 예산(${budget}회)을 모두 사용했습니다.`);
+  }
+  override readonly name = "CallBudgetExceededError";
+}

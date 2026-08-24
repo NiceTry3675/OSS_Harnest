@@ -6,6 +6,7 @@
  *  - responder는 문서+질문만 본다(prompts.responderPrompt가 그 형태를 강제). */
 
 import {
+  CallBudgetExceededError,
   GradeFormatError,
   type CaseDef,
   type JudgeProvider,
@@ -54,7 +55,22 @@ export type HoldoutScoreResult =
       violations: string[];
     };
 
-export { GradeFormatError };
+export { CallBudgetExceededError, GradeFormatError };
+
+/** 호출 예산 백스톱 — 예산을 소진하면 이후 호출을 CallBudgetExceededError로 차단한다.
+ *  판정 의미에는 관여하지 않는 순수 계수 래퍼이며, 정상 실행에서는 절대 걸리지 않아야 한다. */
+export function withCallBudget(llm: LlmClient, budget: number): LlmClient {
+  let used = 0;
+  return {
+    providerId: llm.providerId,
+    model: llm.model,
+    complete(prompt, opts) {
+      if (used >= budget) return Promise.reject(new CallBudgetExceededError(budget));
+      used += 1;
+      return llm.complete(prompt, opts);
+    },
+  };
+}
 
 function withoutCodeFence(raw: string): string {
   const trimmed = raw.trim();

@@ -15,6 +15,7 @@ import { useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   judgeCalibration,
+  MAX_EXAMINER_RUNS_PER_DIGEST,
   type AbChoice,
   type CalibrationPairSpec,
   type ExaminerCheckId,
@@ -111,6 +112,8 @@ export function ApprovalPage() {
     compiled,
     examinerRun,
     setExaminerRun,
+    examinerAttempts,
+    noteExaminerAttempt,
     calibration,
     setCalibration,
     blockers,
@@ -135,6 +138,13 @@ export function ApprovalPage() {
     examinerRun !== null && pack !== null && examinerRun.report.forDigest === pack.definitionDigest;
   const staleReport = examinerRun !== null && !validReport;
   const reportFailed = validReport && examinerRun!.report.overall === "fail";
+
+  /** 재검증 쿼터(SPEC §5.2) — 배터리 1회 ≈ 35호출이므로 같은 다이제스트 실행 횟수를 제한한다 */
+  const attemptsForPack =
+    examinerAttempts !== null && pack !== null && examinerAttempts.forDigest === pack.definitionDigest
+      ? examinerAttempts.count
+      : 0;
+  const quotaExhausted = attemptsForPack >= MAX_EXAMINER_RUNS_PER_DIGEST;
 
   const calibForPack =
     calibration !== null && pack !== null && calibration.forDigest === pack.definitionDigest;
@@ -166,7 +176,7 @@ export function ApprovalPage() {
   const hp = pack.holdoutPolicy;
 
   const runBattery = async (): Promise<void> => {
-    if (!entry.examiner || running || failedCalibration) return;
+    if (!entry.examiner || running || failedCalibration || quotaExhausted) return;
     setBatteryError(null);
     let llm;
     try {
@@ -177,6 +187,8 @@ export function ApprovalPage() {
     }
     if (!llm) return;
     const startedDigest = pack.definitionDigest;
+    // 전송 실패도 호출을 소모하므로 완료가 아니라 시작 시점에 계수한다
+    noteExaminerAttempt(startedDigest);
     setRunning(true);
     try {
       const run = await entry.examiner.runBattery(compiled, llm, setProgress);
@@ -220,6 +232,24 @@ export function ApprovalPage() {
         ) : null}
       </div>
     ) : null;
+
+  const quotaHint =
+    attemptsForPack > 0 && !quotaExhausted ? (
+      <p className="hint" style={{ margin: "6px 0 0" }}>
+        검증 실행 {attemptsForPack}/{MAX_EXAMINER_RUNS_PER_DIGEST}회 사용 — 같은 기준에서는 최대{" "}
+        {MAX_EXAMINER_RUNS_PER_DIGEST}회까지 실행할 수 있습니다 (1회당 약 35회 모델 호출).
+      </p>
+    ) : null;
+
+  const quotaExhaustedBox = quotaExhausted ? (
+    <div style={{ marginTop: 8 }}>
+      <p className="error" style={{ margin: "0 0 8px" }}>
+        이 기준으로 검증을 {MAX_EXAMINER_RUNS_PER_DIGEST}회 실행했습니다 — 비용 보호를 위해 같은
+        기준의 추가 검증은 막혀 있습니다. 기준을 수정하면 새 절차로 다시 검증할 수 있습니다.
+      </p>
+      <button onClick={() => navigate("/wizard")}>기준을 수정하러 가기</button>
+    </div>
+  ) : null;
 
   const effectiveChoices: (AbChoice | null)[] =
     choices ??
@@ -325,10 +355,15 @@ export function ApprovalPage() {
                 </p>
                 {running ? (
                   <p className="hint" style={{ margin: 0 }}>검증 중… {progress}</p>
+                ) : quotaExhausted ? (
+                  quotaExhaustedBox
                 ) : (
-                  <button className="primary" onClick={() => void runBattery()}>
-                    검증 실행
-                  </button>
+                  <>
+                    <button className="primary" onClick={() => void runBattery()}>
+                      검증 실행
+                    </button>
+                    {quotaHint}
+                  </>
                 )}
                 {batteryErrorBox}
               </div>
@@ -364,9 +399,16 @@ export function ApprovalPage() {
                         주세요.
                       </p>
                     ) : null}
-                    <button onClick={() => void runBattery()} disabled={running}>
-                      {running ? `검증 중… ${progress}` : "다시 검증"}
-                    </button>
+                    {quotaExhausted && !reportFailed ? null : quotaExhausted ? (
+                      quotaExhaustedBox
+                    ) : (
+                      <>
+                        <button onClick={() => void runBattery()} disabled={running}>
+                          {running ? `검증 중… ${progress}` : "다시 검증"}
+                        </button>
+                        {quotaHint}
+                      </>
+                    )}
                     {batteryErrorBox}
                   </div>
                 ) : null}

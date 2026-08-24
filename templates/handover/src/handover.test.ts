@@ -4,12 +4,14 @@
 
 import { describe, expect, it } from "vitest";
 import { GradeFormatError, type CaseDef, type InterviewSubmission } from "@harnest/contracts";
-import { compile, MAX_CASES, MIN_CASES, TEMPLATE_ID, type CompileOptions } from "./index";
+import { compile, MAX_CALLS_PER_RUN, MAX_CASES, MIN_CASES, TEMPLATE_ID, type CompileOptions } from "./index";
 import {
+  CallBudgetExceededError,
   createGenerator,
   createScorer,
   gradeResponse,
   scoreHoldout,
+  withCallBudget,
   type LlmClient,
 } from "./runtime";
 
@@ -315,5 +317,34 @@ describe("createGenerator", () => {
       expect(prompt).not.toContain(h.question);
       expect(prompt).not.toContain(h.expectedAnswer);
     }
+  });
+});
+
+describe("withCallBudget", () => {
+  it("예산 안에서는 그대로 위임하고, 소진 후에는 원 클라이언트 호출 없이 차단한다", async () => {
+    let underlyingCalls = 0;
+    const llm: LlmClient = {
+      providerId: "mock",
+      model: "테스트-모의",
+      async complete() {
+        underlyingCalls += 1;
+        return "응답";
+      },
+    };
+    const budgeted = withCallBudget(llm, 2);
+    await expect(budgeted.complete("1")).resolves.toBe("응답");
+    await expect(budgeted.complete("2")).resolves.toBe("응답");
+    await expect(budgeted.complete("3")).rejects.toBeInstanceOf(CallBudgetExceededError);
+    await expect(budgeted.complete("4")).rejects.toBeInstanceOf(CallBudgetExceededError);
+    expect(underlyingCalls).toBe(2);
+  });
+
+  it("선언된 실행 예산은 최대 구성의 이론적 최악 호출 수를 넘는 백스톱이다", async () => {
+    const { problem, loopSpec } = await compile(makeSubmission(MAX_CASES), mockJudge);
+    const perCaseWorst = 3; // responder + grader + 형식 재시도 1회
+    const worst =
+      (loopSpec.maxRounds + 1) * (1 + problem.visibleCases.length * perCaseWorst) +
+      2 * problem.holdoutCases.length * perCaseWorst;
+    expect(MAX_CALLS_PER_RUN).toBeGreaterThan(worst);
   });
 });

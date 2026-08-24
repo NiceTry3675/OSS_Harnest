@@ -9,6 +9,11 @@
 
 import type { EvaluationPack, JudgeProvider } from "./pack";
 
+/** 같은 definitionDigest에 대한 검증 배터리 실행 쿼터 (SPEC §5.2) — 최초 1회 + 전송 오류
+ *  등으로 인한 재실행 여유 2회. 소진되면 절차를 수정해 새 다이제스트로 재검증한다.
+ *  실패 리포트의 재실행(SPEC §4.1)도 이 쿼터 안에서만 허용된다. */
+export const MAX_EXAMINER_RUNS_PER_DIGEST = 3;
+
 export type ExaminerVerdict = "pass" | "warn" | "fail";
 
 export type ExaminerCheckId = "ordering" | "discrimination" | "stability" | "hack_resistance";

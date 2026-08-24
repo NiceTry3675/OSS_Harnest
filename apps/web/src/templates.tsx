@@ -37,6 +37,9 @@ export interface TemplateRuntime {
   /** 라운드 0과 종료 시에만 호출할 것 — 결과는 루프 판단에 유입 금지(SPEC §3 원칙 7) */
   scoreHoldout: ((artifact: unknown) => Promise<HoldoutEvaluation>) | null;
   callsPerRound: number;
+  /** 실행 1회의 모델 호출 예산 — 0이면 예산 없음(결정적 템플릿). 초과 시
+   *  CallBudgetExceededError로 실행이 중단된다(SPEC §5.2, 체크포인트는 보존). */
+  maxCallsPerRun: number;
   roundDelayMs: number;
 }
 
@@ -86,6 +89,7 @@ const timetableEntry: TemplateEntry = {
       initial: (rng) => timetable.initialTimetable(problem, rng),
       scoreHoldout: null,
       callsPerRound: 0,
+      maxCallsPerRun: 0,
       roundDelayMs: 120,
     };
   },
@@ -148,16 +152,19 @@ const handoverEntry: TemplateEntry = {
       );
     }
     const problem = compiled.problem as handover.HandoverProblem;
-    const scorer = handover.createScorer(problem, llm);
-    const generate = handover.createGenerator(problem, llm);
+    // 실행 1회 예산은 런타임 인스턴스 단위로 계수한다 — 라운드 0·루프·홀드아웃이 모두 포함된다
+    const budgeted = handover.withCallBudget(llm, handover.MAX_CALLS_PER_RUN);
+    const scorer = handover.createScorer(problem, budgeted);
+    const generate = handover.createGenerator(problem, budgeted);
     return {
       scorer: (a) => scorer(a as handover.HandoverDoc),
       generate: (champ, rng, feedback) =>
         generate(champ as handover.HandoverDoc, rng, feedback),
-      initial: handover.createInitial(problem, llm),
+      initial: handover.createInitial(problem, budgeted),
       scoreHoldout: (artifact) =>
-        handover.scoreHoldout(problem, artifact as handover.HandoverDoc, llm),
+        handover.scoreHoldout(problem, artifact as handover.HandoverDoc, budgeted),
       callsPerRound: handover.estimateCallsPerRound(problem),
+      maxCallsPerRun: handover.MAX_CALLS_PER_RUN,
       roundDelayMs: 0,
     };
   },

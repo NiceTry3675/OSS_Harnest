@@ -34,6 +34,13 @@ export interface ExaminerRunGeneric {
   artifacts: unknown;
 }
 
+/** 검증 배터리 실행 횟수 — 다이제스트에 결속된 비용 쿼터 재료(SPEC §5.2).
+ *  전송 실패도 호출을 소모하므로 완료가 아니라 시작 시점에 계수한다. */
+export interface ExaminerAttempts {
+  forDigest: string;
+  count: number;
+}
+
 export interface HoldoutCaseScore {
   caseId: string;
   question: string;
@@ -74,6 +81,9 @@ export interface ProjectState {
   setCompiled: (c: CompiledGeneric | null) => void;
   examinerRun: ExaminerRunGeneric | null;
   setExaminerRun: (r: ExaminerRunGeneric | null) => void;
+  examinerAttempts: ExaminerAttempts | null;
+  /** 배터리 시작 1회 = 1 계수. 다른 다이제스트의 첫 시도는 계수를 새로 시작한다 */
+  noteExaminerAttempt: (digest: string) => void;
   calibration: CalibrationResult | null;
   setCalibration: (c: CalibrationResult | null) => void;
   /** 현재 팩 기준 승인 차단 사유 — 비어 있어야 approve()가 동작한다 */
@@ -99,6 +109,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
   const [compiled, setCompiled] = useState<CompiledGeneric | null>(null);
   const [examinerRun, setExaminerRun] = useState<ExaminerRunGeneric | null>(null);
+  const [examinerAttempts, setExaminerAttempts] = useState<ExaminerAttempts | null>(null);
   const [calibration, setCalibration] = useState<CalibrationResult | null>(null);
   const [approvedAt, setApprovedAt] = useState<string | null>(null);
   // 승인 순간 캡처된 다이제스트 — 저장 시점에 현재 팩에서 파생하면 재결속 위험이 생긴다
@@ -139,6 +150,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         setAnswers(restored.answers);
         setCompiled(restored.compiled);
         setExaminerRun(restored.examinerRun);
+        setExaminerAttempts(restored.examinerAttempts);
         setCalibration(restored.calibration);
         setApprovedAt(restored.approvedAt);
         setApprovedDigest(restored.approvedDigest);
@@ -165,6 +177,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       answers,
       compiled,
       examinerRun,
+      examinerAttempts,
       calibration,
       approvedDigest,
       approvedAt,
@@ -174,7 +187,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     void snapshotStore.save(snapshot).catch((error: unknown) => {
       console.warn("프로젝트 스냅샷을 저장하지 못했습니다.", error);
     });
-  }, [hydrated, templateId, answers, compiled, examinerRun, calibration, approvedDigest, approvedAt, runId, holdout]);
+  }, [hydrated, templateId, answers, compiled, examinerRun, examinerAttempts, calibration, approvedDigest, approvedAt, runId, holdout]);
 
   const blockers = useMemo(
     () =>
@@ -203,6 +216,15 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       },
       examinerRun,
       setExaminerRun,
+      examinerAttempts,
+      // 같은 다이제스트로 되돌아온 재컴파일에도 계수가 유지되도록 다이제스트 결속으로만 관리한다
+      noteExaminerAttempt: (digest: string) => {
+        setExaminerAttempts((prev) =>
+          prev !== null && prev.forDigest === digest
+            ? { forDigest: digest, count: prev.count + 1 }
+            : { forDigest: digest, count: 1 },
+        );
+      },
       calibration,
       setCalibration,
       blockers,
@@ -225,6 +247,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         setAnswers({});
         setCompiled(null);
         setExaminerRun(null);
+        setExaminerAttempts(null);
         setCalibration(null);
         setApprovedAt(null);
         setApprovedDigest(null);
@@ -233,7 +256,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         setHoldout({ baseline: null, final: null });
       },
     }),
-    [hydrated, templateId, answers, compiled, examinerRun, calibration, blockers, approvedAt, runId, checkpoint, holdout],
+    [hydrated, templateId, answers, compiled, examinerRun, examinerAttempts, calibration, blockers, approvedAt, runId, checkpoint, holdout],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

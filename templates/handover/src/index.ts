@@ -15,6 +15,12 @@ export const TEMPLATE_NAME = "인수인계·온보딩 문서";
 export const MAX_CASES = 9;
 export const MIN_CASES = 4;
 
+/** 실행 1회(라운드 0 + 루프 + 홀드아웃 2회 채점)의 모델 호출 예산 (SPEC §5.2).
+ *  최대 구성(가시 6·홀드아웃 3·라운드 0+8라운드)에서 케이스당 3콜(responder+grader+형식
+ *  재시도)이 전부 발생해도 (8+1)×(1+6×3) + 2×3×3 = 189회다. 220은 정상 실행에서
+ *  절대 걸리지 않는 백스톱이다. */
+export const MAX_CALLS_PER_RUN = 220;
+
 export interface HandoverProblem {
   material: string;
   /** 루프(Generator·scorer)가 보는 케이스 — 원료이자 가시 시험지 */
@@ -43,6 +49,9 @@ export const questions: Question[] = [
     type: "caseList",
     label: "실제로 받았던 질문과 그때의 답",
     help: `실제 질문·답 쌍 ${MIN_CASES}~${MAX_CASES}개. 마지막 1/3은 검증용으로 숨겨져 문서 작성에 쓰이지 않습니다`,
+    // 케이스 수 상한의 정본은 이 선언 — 위저드는 min/max를 읽어 렌더하고 compile이 재검증한다
+    min: MIN_CASES,
+    max: MAX_CASES,
   },
   {
     id: "lengthCap",

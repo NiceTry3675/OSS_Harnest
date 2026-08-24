@@ -132,6 +132,17 @@ describe("IndexedDbProjectStore", () => {
       .toBe(true);
   });
 
+  it("검증 실행 계수는 새로고침 뒤에도 유지되고, 구버전 스냅샷은 0으로 읽는다", () => {
+    const attempts = { forDigest: pack.definitionDigest, count: 2 };
+    const restored = restoreProjectSnapshot(makeSnapshot({ examinerAttempts: attempts }))!;
+    expect(restored.examinerAttempts).toEqual(attempts);
+
+    // 필드가 없던 구버전 스냅샷 — 관용적으로 null(계수 0)로 복원한다
+    const legacy = makeSnapshot();
+    delete legacy.examinerAttempts;
+    expect(restoreProjectSnapshot(legacy)!.examinerAttempts).toBeNull();
+  });
+
   it("복원된 runId로 IndexedDB 체크포인트를 이어서 완료한다", async () => {
     globalThis.indexedDB = fakeIndexedDB;
     const runId = "snapshot-checkpoint-resume";
