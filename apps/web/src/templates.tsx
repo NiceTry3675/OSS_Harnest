@@ -68,6 +68,19 @@ export interface TemplateEntry {
     ): Promise<ExaminerRunGeneric>;
     buildPairs(run: ExaminerRunGeneric, pack: EvaluationPack): CalibrationPairSpec[];
   };
+  /** 인터뷰 단계 케이스 초안 보조(선택) — caseList 질문에서만 노출된다.
+   *  클릭당 본 호출 1회 + 형식 재시도 1회로 템플릿 상수가 상한하며 실행 예산 밖이다(SPEC §5.2).
+   *  초안은 사용자가 확인해야만 제출에 포함된다 — 강제는 위저드 검증·수집이 담당. */
+  caseAssist?: {
+    /** 초안 버튼 옆 안내 문구 — 템플릿이 소유한다 */
+    nudge: string;
+    draft(
+      material: string,
+      existing: Array<{ question: string; expectedAnswer: string }>,
+      count: number,
+      llm: LlmClient,
+    ): Promise<Array<{ question: string; expectedAnswer: string }>>;
+  };
   ArtifactView: ComponentType<{ problem: unknown; artifact: unknown }>;
 }
 
@@ -126,6 +139,12 @@ const handoverEntry: TemplateEntry = {
     return provider === "openai"
       ? createOpenAIClient(key, jp.judge.model)
       : createGeminiClient(key, jp.judge.model);
+  },
+  caseAssist: {
+    nudge:
+      "AI 초안은 참고 자료에 이미 있는 내용만 재구성합니다. 자료에 없는 지식 — 구두로만 전해지던 규칙, 예외 상황 — 을 직접 추가할수록 검증이 강해집니다.",
+    draft: (material, existing, count, llm) =>
+      handover.draftCases(llm, material, existing, count),
   },
   examiner: {
     runBattery: (compiled, llm, onProgress) =>

@@ -15,6 +15,10 @@ export const TEMPLATE_NAME = "인수인계·온보딩 문서";
 export const MAX_CASES = 9;
 export const MIN_CASES = 4;
 
+/** 참고 자료 문자 수 상한 — 서버 선택 저장의 봉투 상한(1 MiB)과 매 라운드 생성 프롬프트에
+ *  material이 통째로 실리는 비용 구조를 고려한 값. 질문 선언이 정본, compile이 재검증한다. */
+export const MATERIAL_MAX_CHARS = 100_000;
+
 /** 실행 1회(라운드 0 + 루프 + 홀드아웃 2회 채점)의 모델 호출 예산 (SPEC §5.2).
  *  최대 구성(가시 6·홀드아웃 3·라운드 0+8라운드)에서 케이스당 3콜(responder+grader+형식
  *  재시도)이 전부 발생해도 (8+1)×(1+6×3) + 2×3×3 = 189회다. 220은 정상 실행에서
@@ -40,8 +44,10 @@ export const questions: Question[] = [
     role: "material",
     type: "textarea",
     label: "업무 소개 · 참고 자료",
-    help: "인수인계 대상 업무를 소개하는 글이나 기존 자료를 붙여넣으세요 (선택)",
+    help: "인수인계 대상 업무를 소개하는 글을 쓰거나, 기존 자료 파일(.txt .md .pdf .docx 등)을 첨부하세요 (선택). 파일 내용은 이 브라우저 안에서만 추출됩니다",
     placeholder: "예: 저는 사내 배포 파이프라인을 관리합니다. 주간 배포는 …",
+    attachText: true,
+    maxChars: MATERIAL_MAX_CHARS,
   },
   {
     id: "cases",
@@ -87,17 +93,27 @@ export async function compile(
 
   if (!Array.isArray(rawCases)) throw new Error("질문·답 기록을 입력해 주세요.");
   const cases: CaseDef[] = rawCases
-    .map((c, i) => ({
-      id: `case-${i + 1}`,
-      question: String((c as CaseDef).question ?? "").trim(),
-      expectedAnswer: String((c as CaseDef).expectedAnswer ?? "").trim(),
-    }))
+    .map((c, i) => {
+      const prov = (c as CaseDef).provenance;
+      return {
+        id: `case-${i + 1}`,
+        question: String((c as CaseDef).question ?? "").trim(),
+        expectedAnswer: String((c as CaseDef).expectedAnswer ?? "").trim(),
+        // "user"는 생략 규약 — 직접 입력 흐름의 casesDigest를 기존과 동일하게 유지한다
+        ...(prov === "ai" || prov === "ai_edited" ? { provenance: prov } : {}),
+      };
+    })
     .filter((c) => c.question.length > 0 && c.expectedAnswer.length > 0);
 
   if (cases.length < MIN_CASES) throw new Error(`질문·답 쌍이 ${MIN_CASES}개 이상 필요합니다.`);
   if (cases.length > MAX_CASES) throw new Error(`질문·답 쌍은 최대 ${MAX_CASES}개입니다 (비용 상한).`);
   if (!Number.isInteger(lengthCap) || lengthCap < 500 || lengthCap > 8000) {
     throw new Error("문서 최대 분량은 500~8000자여야 합니다.");
+  }
+  if (material.length > MATERIAL_MAX_CHARS) {
+    throw new Error(
+      `참고 자료는 최대 ${MATERIAL_MAX_CHARS.toLocaleString()}자입니다 (현재 ${material.length.toLocaleString()}자).`,
+    );
   }
 
   // 자동 꼬리 분할: 입력 순서의 마지막 1/3(최소 1개)이 홀드아웃 — 실측 02 반복성 보존 설계의 축소판
@@ -162,6 +178,7 @@ export async function compile(
   return { problem, pack, loopSpec };
 }
 
+export * from "./assist";
 export * from "./prompts";
 export * from "./runtime";
 export * from "./probes";

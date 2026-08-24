@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { GradeFormatError, type CaseDef, type InterviewSubmission } from "@harnest/contracts";
 import { compile, MAX_CALLS_PER_RUN, MAX_CASES, MIN_CASES, TEMPLATE_ID, type CompileOptions } from "./index";
+import { mutatePrompt, oneshotPrompt } from "./prompts";
 import {
   CallBudgetExceededError,
   createGenerator,
@@ -127,6 +128,51 @@ describe("compile", () => {
       judgeModel: "gpt-5.6-sol",
     });
     expect(c.pack.definitionDigest).not.toBe(b.pack.definitionDigest);
+  });
+
+  it("케이스 provenance는 컴파일을 통과해 가시·홀드아웃 케이스에 유지된다", async () => {
+    const submission = makeSubmission(6);
+    const cases = submission.answers["cases"] as Array<Record<string, unknown>>;
+    cases[0].provenance = "ai";
+    cases[5].provenance = "ai_edited";
+    const { problem } = await compile(submission, mockJudge);
+
+    expect(problem.visibleCases[0].provenance).toBe("ai");
+    expect(problem.visibleCases[1].provenance).toBeUndefined();
+    expect(problem.holdoutCases[1].provenance).toBe("ai_edited");
+  });
+
+  it("provenance만 달라도 다이제스트가 달라진다 — 케이스 출처는 판정 절차에 결속된다", async () => {
+    const plain = await compile(makeSubmission(6), mockJudge);
+    const withAi = makeSubmission(6);
+    (withAi.answers["cases"] as Array<Record<string, unknown>>)[0].provenance = "ai";
+    const { pack } = await compile(withAi, mockJudge);
+
+    expect(pack.definitionDigest).not.toBe(plain.pack.definitionDigest);
+  });
+
+  it('명시적 "user"와 생략은 같은 다이제스트다 — 직접 입력 흐름의 다이제스트 보존(생략 규약)', async () => {
+    const plain = await compile(makeSubmission(6), mockJudge);
+    const explicit = makeSubmission(6);
+    for (const c of explicit.answers["cases"] as Array<Record<string, unknown>>) {
+      c.provenance = "user";
+    }
+    const { pack } = await compile(explicit, mockJudge);
+
+    expect(pack.definitionDigest).toBe(plain.pack.definitionDigest);
+  });
+
+  it("provenance는 생성 프롬프트에 유입되지 않는다 — 공개용 메타데이터", async () => {
+    const submission = makeSubmission(6);
+    for (const c of submission.answers["cases"] as Array<Record<string, unknown>>) {
+      c.provenance = "ai";
+    }
+    const { problem } = await compile(submission, mockJudge);
+
+    expect(oneshotPrompt(problem)).not.toContain("provenance");
+    expect(
+      mutatePrompt(problem, "챔피언 문서", 42, ["case-1: 오답"], 3),
+    ).not.toContain("provenance");
   });
 });
 

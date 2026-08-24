@@ -98,6 +98,58 @@ ${response}
 JSON만 출력: {"score": 0 | 0.5 | 1, "why": "<한 문장>"}`;
 }
 
+/** 케이스 초안 보조(인터뷰 단계) 프롬프트 마커 — 모의 클라이언트가 이 문자열로 분기한다.
+ *  기존 마커("아래 문서만을 근거로"·"JSON만 출력"·"## 실패 목록")와 겹치면 안 되고,
+ *  이 프롬프트 본문에도 그 문자열들이 등장해서는 안 된다(테스트로 고정). */
+export const DRAFT_CASES_MARKER = "## 케이스 초안 요청";
+
+/** 케이스 초안 — 자료에 명시된 내용만 근거로 질답쌍을 제안한다. 산출물은 사용자가
+ *  확인·수정한 뒤에만 제출에 포함되므로 이 프롬프트는 동결 판정 절차의 일부가 아니다. */
+export function draftCasesPrompt(
+  material: string,
+  existingQuestions: string[],
+  count: number,
+): string {
+  const existingBlock =
+    existingQuestions.length > 0
+      ? `\n## 이미 입력된 질문 (중복 금지)\n${existingQuestions.map((q) => `- ${q}`).join("\n")}\n`
+      : "";
+  return `${DRAFT_CASES_MARKER}
+생성 개수: ${count}
+
+당신은 인수인계 문서 검증에 쓸 질문·답 쌍의 초안을 만듭니다.
+아래 참고 자료를 근거로, 이 업무를 넘겨받는 후임자가 실제로 물을 법한 질문과 그 답 ${count}쌍을 작성하세요.
+
+규칙:
+- 답은 자료에 명시된 내용만 근거로 작성하고, 자료에 없는 내용은 지어내지 마세요.
+- 자료 밖의 지식(구두로만 전해지던 규칙, 예외 상황)은 이 초안에 담을 수 없습니다 — 그런 질문은 만들지 마세요.
+- 이미 입력된 질문과 같거나 사실상 같은 질문은 만들지 마세요.
+- 질문은 구체적으로, 답은 간결하고 실행 가능하게 쓰세요.
+
+## 참고 자료
+${material}
+${existingBlock}
+설명·코드 펜스 없이 JSON 배열 하나만 출력하세요:
+[{"question": "<질문>", "expectedAnswer": "<답>"}]`;
+}
+
+/** 초안 내용은 바꾸지 않고 출력 형식만 한 번 고치게 한다 — graderRetryPrompt와 같은 패턴 */
+export function draftCasesRetryPrompt(
+  material: string,
+  existingQuestions: string[],
+  count: number,
+  malformed: string,
+): string {
+  return `${draftCasesPrompt(material, existingQuestions, count)}
+
+이전 출력은 형식 검증에 실패했습니다:
+<invalid-output>
+${malformed}
+</invalid-output>
+
+설명·코드 펜스 없이 위 스키마의 유효한 JSON 배열 하나만 다시 출력하세요.`;
+}
+
 /** 채점 내용은 바꾸지 않고 출력 형식만 한 번 고치게 한다. 클라이언트 호출은 대화 상태가
  *  없으므로 원래 채점 문맥을 다시 싣는다. */
 export function graderRetryPrompt(

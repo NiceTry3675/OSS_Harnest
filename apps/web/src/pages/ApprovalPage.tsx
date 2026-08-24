@@ -23,6 +23,7 @@ import {
 } from "@harnest/contracts";
 import { useProject } from "../state";
 import { getTemplate, type TemplateEntry } from "../templates";
+import { countCaseProvenance } from "../lib/case-provenance";
 import { PROVIDER_LABEL, setByoKey } from "../lib/llm";
 
 const VERDICT_LABEL: Record<ExaminerVerdict, string> = { pass: "통과", warn: "주의", fail: "실패" };
@@ -110,6 +111,7 @@ export function ApprovalPage() {
   const {
     templateId,
     compiled,
+    answers,
     examinerRun,
     setExaminerRun,
     examinerAttempts,
@@ -131,6 +133,11 @@ export function ApprovalPage() {
   const [choices, setChoices] = useState<(AbChoice | null)[] | null>(null);
 
   const pack = compiled?.pack ?? null;
+  // 케이스 출처 공개 — AI 초안이 0개여도 표시한다(공개가 원칙)
+  const caseCounts = useMemo(
+    () => (entry ? countCaseProvenance(entry.questions, answers) : null),
+    [entry, answers],
+  );
   // 재컴파일 뒤 늦게 도착한 배터리 결과를 버리기 위한 최신 다이제스트 참조(레이스 가드)
   const packDigestRef = useRef<string | null>(null);
   packDigestRef.current = pack?.definitionDigest ?? null;
@@ -351,6 +358,17 @@ export function ApprovalPage() {
             <p style={{ fontSize: 14, margin: 0 }}>
               숨김 검증 케이스 {hp.holdoutCaseIds.length}개 — 실행 시작·종료 시에만 채점되며 AI
               수정 과정에 노출되지 않습니다.
+            </p>
+          </>
+        ) : null}
+
+        {caseCounts !== null && caseCounts.total > 0 ? (
+          <>
+            <h2>케이스 출처</h2>
+            <p style={{ fontSize: 14, margin: 0 }}>
+              {caseCounts.ai + caseCounts.aiEdited > 0
+                ? `직접 입력 ${caseCounts.user}개 · AI 초안 확인 ${caseCounts.ai}개 · AI 초안 수정 ${caseCounts.aiEdited}개 — 초안도 당신이 확인한 순간부터 채점 정답으로 동결됩니다.`
+                : `전체 ${caseCounts.total}개 직접 입력.`}
             </p>
           </>
         ) : null}

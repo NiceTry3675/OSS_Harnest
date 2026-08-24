@@ -2,7 +2,7 @@
  *  요청은 벤더 API로 직행한다. 우리 서버로는 키도 본문도 가지 않는다 (SPEC §3 원칙 1). */
 
 import type { CaseDef, JudgeProvider } from "@harnest/contracts";
-import type { HandoverProblem, LlmClient } from "@harnest/template-handover";
+import { DRAFT_CASES_MARKER, type HandoverProblem, type LlmClient } from "@harnest/template-handover";
 
 export type ByoProvider = Exclude<JudgeProvider, "mock">;
 
@@ -300,6 +300,27 @@ export async function testByoConnection(
   } catch (error) {
     throw connectionTestError(provider, error);
   }
+}
+
+/** 케이스 초안 보조 전용 모의 클라이언트 — 케이스 입력 스텝에는 아직 compiled problem이
+ *  없어 createMockClient를 쓸 수 없다. 초안 프롬프트의 마커와 "생성 개수: N"을 읽어
+ *  결정적 질답쌍 N개를 돌려준다. 초안 요청이 아닌 프롬프트는 오분기 조기 발견을 위해 거부. */
+export function createAssistMockClient(): LlmClient {
+  return {
+    providerId: "mock",
+    model: "모의 모델 (결정적)",
+    async complete(prompt) {
+      if (!prompt.includes(DRAFT_CASES_MARKER)) {
+        throw new Error("모의 초안 클라이언트에 초안 요청이 아닌 프롬프트가 들어왔습니다.");
+      }
+      const count = Math.max(1, Number(prompt.match(/생성 개수: (\d+)/)?.[1] ?? 1));
+      const pairs = Array.from({ length: count }, (_, i) => ({
+        question: `모의 초안 질문 ${i + 1}: 참고 자료의 핵심 절차 ${i + 1}은 무엇인가요?`,
+        expectedAnswer: `모의 초안 답 ${i + 1}: 자료에 적힌 절차 ${i + 1}을 따르면 됩니다.`,
+      }));
+      return JSON.stringify(pairs);
+    },
+  };
 }
 
 /** 모의 모델 — 키 없이 파이프라인·데모를 돌리기 위한 결정적 대역.

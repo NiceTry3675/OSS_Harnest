@@ -72,7 +72,7 @@ export function withCallBudget(llm: LlmClient, budget: number): LlmClient {
   };
 }
 
-function withoutCodeFence(raw: string): string {
+export function withoutCodeFence(raw: string): string {
   const trimmed = raw.trim();
   const fenced = trimmed.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i);
   return (fenced?.[1] ?? trimmed).trim();
@@ -233,7 +233,7 @@ export async function scoreHoldout(
 }
 
 /** 반복 여부는 결과 해석용으로만 정규화한다. 중복 입력을 거부하거나 분할을 바꾸지 않는다. */
-function normalizeQuestion(question: string): string {
+export function normalizeQuestion(question: string): string {
   return question.normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase("ko-KR");
 }
 

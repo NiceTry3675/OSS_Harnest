@@ -8,11 +8,13 @@ import {
   createGenerator,
   createInitial,
   createScorer,
+  draftCases,
   runExaminerBattery,
   scoreHoldout,
 } from "@harnest/template-handover";
 import type { HandoverProblem } from "@harnest/template-handover";
 import {
+  createAssistMockClient,
   createGeminiClient,
   createMockClient,
   createOpenAIClient,
@@ -143,6 +145,25 @@ describe("모의 모델 관통", () => {
         calibration,
       ).some((b) => b.includes("검증이 다시 실행")),
     ).toBe(true);
+  });
+});
+
+describe("케이스 초안 보조 모의 클라이언트", () => {
+  it("draftCases 관통 — 요청한 개수의 결정적 질답쌍을 돌려준다", async () => {
+    const llm = createAssistMockClient();
+    const result = await draftCases(llm, problem.material.repeat(3), [], 2);
+    expect(result).toHaveLength(2);
+    for (const pair of result) {
+      expect(pair.question.length).toBeGreaterThan(0);
+      expect(pair.expectedAnswer.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("초안 요청이 아닌 프롬프트는 오분기 조기 발견을 위해 거부한다", async () => {
+    const llm = createAssistMockClient();
+    await expect(llm.complete("아래 문서만을 근거로 답하세요")).rejects.toThrow(
+      "초안 요청이 아닌 프롬프트",
+    );
   });
 });
 

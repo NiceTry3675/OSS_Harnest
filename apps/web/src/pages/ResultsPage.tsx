@@ -17,6 +17,7 @@ import {
   serializeProjectExport,
 } from "../lib/project-export";
 import { CurveChart } from "../components/CurveChart";
+import { countCaseProvenance } from "../lib/case-provenance";
 
 const PROVENANCE_LABEL: Record<ProvenanceType, string> = {
   run_started: "실행 시작",
@@ -73,6 +74,11 @@ export function ResultsPage() {
   const [saveUncertain, setSaveUncertain] = useState(false);
   const [exported, setExported] = useState<"idle" | "ok" | "fail">("idle");
   const entry = compiled ? getTemplate(compiled.pack.templateId) : null;
+  // 케이스 출처 공개 — caseList 질문이 없는 템플릿(결정적 전용 등)은 null이라 렌더되지 않는다
+  const caseCounts = useMemo(
+    () => (entry ? countCaseProvenance(entry.questions, answers) : null),
+    [entry, answers],
+  );
   const recordReady = compiled !== null && isHoldoutSettled(compiled.pack, holdout);
   const recoverHoldout =
     compiled !== null && needsRestoredHoldoutRecovery(compiled.pack, checkpoint, holdout);
@@ -398,6 +404,18 @@ export function ResultsPage() {
             ) : (
               <span className="badge muted">캘리브레이션: 기록 없음</span>
             )}
+            {caseCounts !== null && caseCounts.total > 0 ? (
+              caseCounts.ai + caseCounts.aiEdited > 0 ? (
+                <span
+                  className="badge"
+                  title={`확인 ${caseCounts.ai} · 수정 ${caseCounts.aiEdited} — 확인된 초안은 승인 시 다이제스트에 결속됨`}
+                >
+                  케이스 출처: AI 초안 {caseCounts.ai + caseCounts.aiEdited}/{caseCounts.total}
+                </span>
+              ) : (
+                <span className="badge muted">케이스 전부 직접 입력</span>
+              )
+            ) : null}
           </>
         )}
       </div>
