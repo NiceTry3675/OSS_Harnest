@@ -3,15 +3,14 @@
  *  실패해도 크래시 없이 안내만. 템플릿별 분기 없이 등록소 인터페이스만 사용한다. */
 
 import { useEffect, useRef, useState } from "react";
-import type { EvaluationPack } from "@harnest/contracts";
+import type { EvaluationPack, JudgeProvider } from "@harnest/contracts";
 import type { TemplateEntry } from "../templates";
+import { PROVIDER_LABEL } from "../lib/llm";
 
 type BlueprintState =
   | { kind: "pending" }
   | { kind: "ok"; pack: EvaluationPack }
   | { kind: "fail"; reason: string | null };
-
-const PROVIDER_LABEL: Record<"gemini" | "mock", string> = { gemini: "Gemini", mock: "모의" };
 
 export function WizardBlueprint({
   entry,
@@ -20,7 +19,7 @@ export function WizardBlueprint({
 }: {
   entry: TemplateEntry;
   answers: Record<string, unknown>;
-  judge: { provider: "gemini" | "mock"; model: string };
+  judge: { provider: JudgeProvider; model: string };
 }) {
   const [state, setState] = useState<BlueprintState>({ kind: "pending" });
   // 디바운스 + 최신 요청만 반영(늦게 끝난 이전 compile 결과 무시)

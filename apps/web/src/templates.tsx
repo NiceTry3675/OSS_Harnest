@@ -3,15 +3,28 @@
  *  템플릿마다 엔진에 분기가 생기면 경고). */
 
 import type { ComponentType } from "react";
-import type { InterviewSubmission, Question, ScoreResult } from "@harnest/contracts";
+import type {
+  CalibrationPairSpec,
+  EvaluationPack,
+  InterviewSubmission,
+  JudgeProvider,
+  Question,
+  ScoreResult,
+} from "@harnest/contracts";
 import type { GeneratorFeedback } from "@harnest/loop-engine";
 import * as timetable from "@harnest/template-timetable";
 import * as handover from "@harnest/template-handover";
-import type { CompiledGeneric } from "./state";
+import type { CompiledGeneric, ExaminerRunGeneric, HoldoutEvaluation } from "./state";
 import type { LlmClient } from "@harnest/template-handover";
 import { TimetableGrid } from "./components/TimetableGrid";
 import { HandoverDocView } from "./components/HandoverDocView";
-import { createGeminiClient, createMockClient, getByoKey } from "./lib/llm";
+import {
+  createGeminiClient,
+  createMockClient,
+  createOpenAIClient,
+  getByoKey,
+  PROVIDER_LABEL,
+} from "./lib/llm";
 
 export interface TemplateRuntime {
   scorer: (artifact: unknown) => ScoreResult | Promise<ScoreResult>;
@@ -22,7 +35,7 @@ export interface TemplateRuntime {
   ) => unknown | Promise<unknown>;
   initial: (rng: () => number) => unknown | Promise<unknown>;
   /** 라운드 0과 종료 시에만 호출할 것 — 결과는 루프 판단에 유입 금지(SPEC §3 원칙 7) */
-  scoreHoldout: ((artifact: unknown) => Promise<number>) | null;
+  scoreHoldout: ((artifact: unknown) => Promise<HoldoutEvaluation>) | null;
   callsPerRound: number;
   roundDelayMs: number;
 }
@@ -32,16 +45,26 @@ export interface TemplateEntry {
   name: string;
   description: string;
   badge?: string;
-  /** true면 BYO 키 또는 모의 모델 선택이 필요(저지 모델은 승인 전에 확정 — SPEC §12 미결 7) */
+  /** true면 BYO 키 또는 모의 모델 선택이 필요(저지 모델은 승인 전에 확정 — SPEC §8) */
   needsModel: boolean;
   questions: Question[];
   compile(
     submission: InterviewSubmission,
-    judge: { provider: "gemini" | "mock"; model: string },
+    judge: { provider: JudgeProvider; model: string },
   ): Promise<CompiledGeneric>;
   /** 승인·동결된 팩의 저지 선언에 맞는 클라이언트 구성 — 불일치면 throw(재승인 원칙) */
   createLlm(compiled: CompiledGeneric): LlmClient | null;
   createRuntime(compiled: CompiledGeneric, llm: LlmClient | null): TemplateRuntime;
+  /** llm_judge 포함 템플릿의 승인 전 요건 — 검증 배터리와 캘리브레이션 쌍(SPEC §3 원칙 2).
+   *  결정적 전용 템플릿은 undefined(SPEC §10 면제). */
+  examiner?: {
+    runBattery(
+      compiled: CompiledGeneric,
+      llm: LlmClient,
+      onProgress?: (message: string) => void,
+    ): Promise<ExaminerRunGeneric>;
+    buildPairs(run: ExaminerRunGeneric, pack: EvaluationPack): CalibrationPairSpec[];
+  };
   ArtifactView: ComponentType<{ problem: unknown; artifact: unknown }>;
 }
 
@@ -89,13 +112,27 @@ const handoverEntry: TemplateEntry = {
     if (jp.judge.provider === "mock") {
       return createMockClient(compiled.problem as handover.HandoverProblem);
     }
-    const key = getByoKey();
+    const provider = jp.judge.provider;
+    const key = getByoKey(provider);
     if (!key) {
       throw new Error(
-        "승인된 채점 모델(Gemini BYO)의 키가 없습니다 — 키를 입력하거나, 기준을 다시 만들어 모의 모델로 승인하세요.",
+        `승인된 채점 모델(${PROVIDER_LABEL[provider]} BYO)의 키가 없습니다 — 키를 입력하거나, 기준을 다시 만들어 모의 모델로 승인하세요.`,
       );
     }
-    return createGeminiClient(key, jp.judge.model);
+    return provider === "openai"
+      ? createOpenAIClient(key, jp.judge.model)
+      : createGeminiClient(key, jp.judge.model);
+  },
+  examiner: {
+    runBattery: (compiled, llm, onProgress) =>
+      handover.runExaminerBattery(
+        compiled.problem as handover.HandoverProblem,
+        compiled.pack,
+        llm,
+        onProgress,
+      ),
+    buildPairs: (run, pack) =>
+      handover.buildCalibrationPairs(run as handover.ExaminerRun, pack),
   },
   createRuntime(compiled, llm) {
     if (!llm) throw new Error("채점 모델이 준비되지 않았습니다 — 키를 입력하거나 모의 모델을 선택하세요.");
@@ -103,9 +140,9 @@ const handoverEntry: TemplateEntry = {
     if (
       jp.kind === "case_answering" &&
       (jp.judge.provider !== llm.providerId ||
-        (jp.judge.provider === "gemini" && jp.judge.model !== llm.model))
+        (jp.judge.provider !== "mock" && jp.judge.model !== llm.model))
     ) {
-      // 승인 시 동결된 저지와 실행 모델이 다르면 실행 불가 — 재승인 원칙(SPEC §12 미결 7)
+      // 승인 시 동결된 저지와 실행 모델이 다르면 실행 불가 — 재승인 원칙(SPEC §8)
       throw new Error(
         `승인된 채점 모델(${jp.judge.provider}/${jp.judge.model})을 사용할 수 없습니다 — 기준을 다시 만들어 승인해 주세요.`,
       );
@@ -118,8 +155,8 @@ const handoverEntry: TemplateEntry = {
       generate: (champ, rng, feedback) =>
         generate(champ as handover.HandoverDoc, rng, feedback),
       initial: handover.createInitial(problem, llm),
-      scoreHoldout: async (artifact) =>
-        (await handover.scoreHoldout(problem, artifact as handover.HandoverDoc, llm)).score,
+      scoreHoldout: (artifact) =>
+        handover.scoreHoldout(problem, artifact as handover.HandoverDoc, llm),
       callsPerRound: handover.estimateCallsPerRound(problem),
       roundDelayMs: 0,
     };

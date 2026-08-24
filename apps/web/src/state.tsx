@@ -1,9 +1,26 @@
 /** 프로젝트 상태 — 페이지 간 공유되는 단일 컨텍스트 (템플릿 무관).
- *  흐름: 템플릿 선택 → 인터뷰(answers) → 컴파일(compiled) → 승인(approvedAt) → 실행(checkpoint) → 결과.
- *  재컴파일 = 판정 절차 변경 → 승인·실행 상태를 반드시 무효화한다(재승인 원칙). */
+ *  흐름: 템플릿 선택 → 인터뷰(answers) → 컴파일(compiled) → 검증·캘리브레이션 → 승인(approvedAt)
+ *  → 실행(checkpoint) → 결과. 재컴파일 = 판정 절차 변경 → 승인·실행 상태를 반드시 무효화한다.
+ *  검증 리포트·캘리브레이션은 재컴파일 시 지우지 않는다 — forDigest 불일치가 "기준이 수정되어
+ *  무효화됨"을 화면에 알리는 재료다(수정→재검증 왕복, SPEC §4.1). 승인 가능 여부는
+ *  approvalBlockers가 판단하며, approve()는 차단 사유가 있으면 무시된다(UI 밖 이중 방어). */
 
-import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
-import type { EvaluationPack, LoopCheckpoint, LoopSpec } from "@harnest/contracts";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  approvalBlockers,
+  type CalibrationResult,
+  type EvaluationPack,
+  type ExaminerReport,
+  type LoopCheckpoint,
+  type LoopSpec,
+} from "@harnest/contracts";
+import { IndexedDbCheckpointStore } from "@harnest/loop-engine";
+import {
+  IndexedDbProjectStore,
+  PROJECT_SNAPSHOT_VERSION,
+  restoreProjectSnapshot,
+  type ProjectSnapshot,
+} from "./lib/project-snapshot";
 
 export interface CompiledGeneric {
   problem: unknown;
@@ -11,19 +28,56 @@ export interface CompiledGeneric {
   loopSpec: LoopSpec;
 }
 
+/** 배터리 실행 결과 — report는 계약 타입, artifacts는 템플릿 소유(캘리브레이션 쌍 재료) */
+export interface ExaminerRunGeneric {
+  report: ExaminerReport;
+  artifacts: unknown;
+}
+
+export interface HoldoutCaseScore {
+  caseId: string;
+  question: string;
+  score: number;
+  why: string;
+  /** 반복 = 같은 질문이 가시 세트에도 등장. 차단 사유가 아니라 결과 해석용 표기다. */
+  caseType: "repeated" | "new";
+}
+
+export type HoldoutEvaluation =
+  | {
+      gateRejected: true;
+      score: null;
+      perCase: [];
+      violations: string[];
+    }
+  | {
+      gateRejected: false;
+      score: number;
+      perCase: HoldoutCaseScore[];
+      violations: string[];
+    };
+
 /** 홀드아웃 채점 결과 — 라운드 0(원샷)과 종료 시에만 기록된다 */
 export interface HoldoutScores {
-  baseline: number | null;
-  final: number | null;
+  baseline: HoldoutEvaluation | null;
+  final: HoldoutEvaluation | null;
 }
 
 export interface ProjectState {
+  /** IndexedDB 복원이 끝나기 전 페이지가 빈 상태로 마운트되는 것을 막는다 */
+  hydrated: boolean;
   templateId: string | null;
   setTemplateId: (id: string | null) => void;
   answers: Record<string, unknown>;
   setAnswers: (a: Record<string, unknown>) => void;
   compiled: CompiledGeneric | null;
   setCompiled: (c: CompiledGeneric | null) => void;
+  examinerRun: ExaminerRunGeneric | null;
+  setExaminerRun: (r: ExaminerRunGeneric | null) => void;
+  calibration: CalibrationResult | null;
+  setCalibration: (c: CalibrationResult | null) => void;
+  /** 현재 팩 기준 승인 차단 사유 — 비어 있어야 approve()가 동작한다 */
+  blockers: string[];
   approvedAt: string | null;
   approve: () => void;
   runId: string | null;
@@ -36,18 +90,103 @@ export interface ProjectState {
 }
 
 const Ctx = createContext<ProjectState | null>(null);
+const snapshotStore = new IndexedDbProjectStore();
+const checkpointStore = new IndexedDbCheckpointStore<unknown>();
 
 export function ProjectProvider({ children }: { children: ReactNode }) {
+  const [hydrated, setHydrated] = useState(false);
   const [templateId, setTemplateId] = useState<string | null>(null);
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
   const [compiled, setCompiled] = useState<CompiledGeneric | null>(null);
+  const [examinerRun, setExaminerRun] = useState<ExaminerRunGeneric | null>(null);
+  const [calibration, setCalibration] = useState<CalibrationResult | null>(null);
   const [approvedAt, setApprovedAt] = useState<string | null>(null);
+  // 승인 순간 캡처된 다이제스트 — 저장 시점에 현재 팩에서 파생하면 재결속 위험이 생긴다
+  const [approvedDigest, setApprovedDigest] = useState<string | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
   const [checkpoint, setCheckpoint] = useState<LoopCheckpoint<unknown> | null>(null);
   const [holdout, setHoldout] = useState<HoldoutScores>({ baseline: null, final: null });
 
+  useEffect(() => {
+    let cancelled = false;
+    void snapshotStore
+      .load()
+      .then(async (snapshot) => {
+        if (cancelled || snapshot === null) return;
+        const restored = restoreProjectSnapshot(snapshot);
+        if (restored === null) return;
+        // 승인 불일치로 실행 흔적을 폐기할 때, 그 runId의 체크포인트도 고아로 남기지 않는다
+        if (snapshot.runId !== null && restored.runId === null) {
+          void checkpointStore.delete(snapshot.runId).catch((error: unknown) => {
+            console.warn("고아 체크포인트를 정리하지 못했습니다.", error);
+          });
+        }
+        let restoredCheckpoint: LoopCheckpoint<unknown> | null = null;
+        if (restored.runId !== null && restored.compiled !== null) {
+          try {
+            const saved = await checkpointStore.load(restored.runId);
+            if (saved?.packDigest === restored.compiled.pack.definitionDigest) {
+              // 탭 회수로 남은 running은 사용자가 재개할 수 있게 화면에서만 paused로 투영한다.
+              restoredCheckpoint =
+                saved.status === "running" ? { ...saved, status: "paused" } : saved;
+            }
+          } catch (error) {
+            console.warn("체크포인트를 복원하지 못했습니다.", error);
+          }
+        }
+        if (cancelled) return;
+        setTemplateId(restored.templateId);
+        setAnswers(restored.answers);
+        setCompiled(restored.compiled);
+        setExaminerRun(restored.examinerRun);
+        setCalibration(restored.calibration);
+        setApprovedAt(restored.approvedAt);
+        setApprovedDigest(restored.approvedDigest);
+        setRunId(restored.runId);
+        setCheckpoint(restoredCheckpoint);
+        setHoldout(restored.holdout);
+      })
+      .catch((error: unknown) => {
+        console.warn("프로젝트 스냅샷을 복원하지 못했습니다.", error);
+      })
+      .finally(() => {
+        if (!cancelled) setHydrated(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const snapshot: ProjectSnapshot = {
+      schemaVersion: PROJECT_SNAPSHOT_VERSION,
+      templateId,
+      answers,
+      compiled,
+      examinerRun,
+      calibration,
+      approvedDigest,
+      approvedAt,
+      runId,
+      holdout,
+    };
+    void snapshotStore.save(snapshot).catch((error: unknown) => {
+      console.warn("프로젝트 스냅샷을 저장하지 못했습니다.", error);
+    });
+  }, [hydrated, templateId, answers, compiled, examinerRun, calibration, approvedDigest, approvedAt, runId, holdout]);
+
+  const blockers = useMemo(
+    () =>
+      compiled
+        ? approvalBlockers(compiled.pack, examinerRun?.report ?? null, calibration)
+        : [],
+    [compiled, examinerRun, calibration],
+  );
+
   const value = useMemo<ProjectState>(
     () => ({
+      hydrated,
       templateId,
       setTemplateId,
       answers,
@@ -57,12 +196,24 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setCompiled: (c: CompiledGeneric | null) => {
         setCompiled(c);
         setApprovedAt(null);
+        setApprovedDigest(null);
         setRunId(null);
         setCheckpoint(null);
         setHoldout({ baseline: null, final: null });
       },
+      examinerRun,
+      setExaminerRun,
+      calibration,
+      setCalibration,
+      blockers,
       approvedAt,
-      approve: () => setApprovedAt(new Date().toISOString()),
+      // 차단 사유가 있으면 승인은 성립하지 않는다 — 화면 가드가 뚫려도 여기서 막힌다
+      approve: () => {
+        if (compiled === null || blockers.length > 0) return;
+        setApprovedAt(new Date().toISOString());
+        // 승인이 결속하는 다이제스트는 이 순간 캡처한다 — 이후 팩이 바뀌어도 따라가지 않는다
+        setApprovedDigest(compiled.pack.definitionDigest);
+      },
       runId,
       setRunId,
       checkpoint,
@@ -73,13 +224,16 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         setTemplateId(null);
         setAnswers({});
         setCompiled(null);
+        setExaminerRun(null);
+        setCalibration(null);
         setApprovedAt(null);
+        setApprovedDigest(null);
         setRunId(null);
         setCheckpoint(null);
         setHoldout({ baseline: null, final: null });
       },
     }),
-    [templateId, answers, compiled, approvedAt, runId, checkpoint, holdout],
+    [hydrated, templateId, answers, compiled, examinerRun, calibration, blockers, approvedAt, runId, checkpoint, holdout],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

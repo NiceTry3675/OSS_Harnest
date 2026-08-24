@@ -1,21 +1,67 @@
 /** LLM 클라이언트 — BYO 원칙: 키는 이 브라우저(localStorage)에만 머물고,
  *  요청은 벤더 API로 직행한다. 우리 서버로는 키도 본문도 가지 않는다 (SPEC §3 원칙 1). */
 
-import type { CaseDef } from "@harnest/contracts";
+import type { CaseDef, JudgeProvider } from "@harnest/contracts";
 import type { HandoverProblem, LlmClient } from "@harnest/template-handover";
 
-const KEY_STORAGE = "harnest.byo.gemini";
+export type ByoProvider = Exclude<JudgeProvider, "mock">;
 
-export function getByoKey(): string | null {
-  return localStorage.getItem(KEY_STORAGE);
+export const PROVIDER_LABEL: Record<JudgeProvider, string> = {
+  gemini: "Gemini",
+  openai: "OpenAI",
+  mock: "모의",
+};
+
+const KEY_STORAGE: Record<ByoProvider, string> = {
+  gemini: "harnest.byo.gemini",
+  openai: "harnest.byo.openai",
+};
+const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_MAX_ATTEMPTS = 3;
+const DEFAULT_RETRY_BASE_MS = 1_500;
+const CONNECTION_TEST_TIMEOUT_MS = 15_000;
+
+export interface LlmRequestOptions {
+  requestTimeoutMs?: number;
+  maxAttempts?: number;
+  retryBaseMs?: number;
 }
 
-export function setByoKey(key: string | null): void {
-  if (key) localStorage.setItem(KEY_STORAGE, key);
-  else localStorage.removeItem(KEY_STORAGE);
+export type GeminiClientOptions = LlmRequestOptions;
+export type OpenAIClientOptions = LlmRequestOptions;
+
+const CONNECTION_TEST_PROMPT = "연결 확인 요청입니다. OK라고만 응답하세요.";
+
+export function getByoKey(provider: ByoProvider): string | null {
+  return localStorage.getItem(KEY_STORAGE[provider]);
 }
 
-export function createGeminiClient(apiKey: string, model = "gemini-3.7-flash"): LlmClient {
+export function setByoKey(provider: ByoProvider, key: string | null): void {
+  if (key) localStorage.setItem(KEY_STORAGE[provider], key);
+  else localStorage.removeItem(KEY_STORAGE[provider]);
+}
+
+async function responseExcerpt(response: Response): Promise<string> {
+  try {
+    return (await response.text()).replace(/\s+/g, " ").trim().slice(0, 300);
+  } catch {
+    return "";
+  }
+}
+
+function wait(ms: number): Promise<void> {
+  return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
+}
+
+export function createGeminiClient(
+  apiKey: string,
+  model = "gemini-3.7-flash",
+  options: GeminiClientOptions = {},
+): LlmClient {
+  const timeoutMs = Math.max(1, options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const maxAttempts = Math.max(1, Math.floor(options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS));
+  const retryBaseMs = Math.max(0, options.retryBaseMs ?? DEFAULT_RETRY_BASE_MS);
+
   return {
     providerId: "gemini",
     model,
@@ -27,28 +73,233 @@ export function createGeminiClient(apiKey: string, model = "gemini-3.7-flash"): 
           maxOutputTokens: opts?.maxOutputTokens ?? 8192,
         },
       });
-      let lastError: unknown = null;
-      for (let attempt = 0; attempt < 3; attempt++) {
+      let lastError: Error = new Error("LLM 호출 실패");
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+        let res: Response;
         try {
-          const res = await fetch(
+          res = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-            { method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey }, body },
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+              body,
+              signal: controller.signal,
+            },
           );
-          if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`);
-          const data = (await res.json()) as {
-            candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-          };
-          const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (typeof text !== "string") throw new Error("Gemini 응답에 텍스트 없음");
-          return text;
         } catch (e) {
-          lastError = e;
-          await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+          lastError = controller.signal.aborted
+            ? new Error(`Gemini 요청 시간 초과 (${timeoutMs}ms)`)
+            : new Error(`Gemini 네트워크 오류: ${e instanceof Error ? e.message : String(e)}`);
+          clearTimeout(timeout);
+          if (attempt + 1 >= maxAttempts) throw lastError;
+          await wait(retryBaseMs * (attempt + 1));
+          continue;
         }
+
+        if (!res.ok) {
+          const excerpt = await responseExcerpt(res);
+          clearTimeout(timeout);
+          lastError = new Error(`Gemini HTTP ${res.status}${excerpt ? `: ${excerpt}` : ""}`);
+          const retryable = res.status === 429 || (res.status >= 500 && res.status <= 599);
+          if (!retryable || attempt + 1 >= maxAttempts) throw lastError;
+          await wait(retryBaseMs * (attempt + 1));
+          continue;
+        }
+
+        let data: {
+          candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+        };
+        try {
+          data = (await res.json()) as typeof data;
+        } catch {
+          clearTimeout(timeout);
+          if (controller.signal.aborted) {
+            lastError = new Error(`Gemini 요청 시간 초과 (${timeoutMs}ms)`);
+            if (attempt + 1 >= maxAttempts) throw lastError;
+            await wait(retryBaseMs * (attempt + 1));
+            continue;
+          }
+          throw new Error("Gemini 응답 JSON을 해석할 수 없습니다.");
+        }
+        clearTimeout(timeout);
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (typeof text !== "string") throw new Error("Gemini 응답에 텍스트 없음");
+        return text;
       }
-      throw lastError instanceof Error ? lastError : new Error("LLM 호출 실패");
+      throw lastError;
     },
   };
+}
+
+type OpenAIResponse = {
+  status?: string;
+  error?: { code?: string | null; message?: string | null } | null;
+  incomplete_details?: { reason?: string | null } | null;
+  output?: Array<{
+    content?: Array<{ type?: string; text?: string }>;
+  }>;
+};
+
+function openAIOutputText(data: OpenAIResponse): string {
+  return (data.output ?? [])
+    .flatMap((item) => item.content ?? [])
+    .filter((part) => part.type === "output_text" && typeof part.text === "string")
+    .map((part) => part.text!)
+    .join("");
+}
+
+/** OpenAI Responses API 브라우저 직행 어댑터 — 2026-08-24 Chrome CORS 실측 go.
+ *  401 응답은 CORS 허용 Origin 없이 반환되어 브라우저가 상태·본문을 숨길 수 있으므로,
+ *  fetch 실패는 인증·CORS·네트워크 가능성을 합쳐 안내한다(SPEC §8). */
+export function createOpenAIClient(
+  apiKey: string,
+  model = "gpt-5.6-sol",
+  options: OpenAIClientOptions = {},
+): LlmClient {
+  const timeoutMs = Math.max(1, options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const maxAttempts = Math.max(1, Math.floor(options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS));
+  const retryBaseMs = Math.max(0, options.retryBaseMs ?? DEFAULT_RETRY_BASE_MS);
+
+  return {
+    providerId: "openai",
+    model,
+    async complete(prompt, opts) {
+      const body = JSON.stringify({
+        model,
+        input: prompt,
+        reasoning: { effort: "none" },
+        temperature: opts?.temperature ?? 0.7,
+        max_output_tokens: opts?.maxOutputTokens ?? 8192,
+        store: false,
+      });
+      let lastError: Error = new Error("LLM 호출 실패");
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+        let res: Response;
+        try {
+          res = await fetch("https://api.openai.com/v1/responses", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              "Content-Type": "application/json",
+            },
+            body,
+            signal: controller.signal,
+          });
+        } catch (e) {
+          clearTimeout(timeout);
+          lastError = controller.signal.aborted
+            ? new Error(`OpenAI 요청 시간 초과 (${timeoutMs}ms)`)
+            : new Error(
+                `OpenAI 네트워크/CORS 또는 인증 오류: ${e instanceof Error ? e.message : String(e)}`,
+              );
+          if (attempt + 1 >= maxAttempts) throw lastError;
+          await wait(retryBaseMs * (attempt + 1));
+          continue;
+        }
+
+        if (!res.ok) {
+          const excerpt = await responseExcerpt(res);
+          clearTimeout(timeout);
+          lastError = new Error(`OpenAI HTTP ${res.status}${excerpt ? `: ${excerpt}` : ""}`);
+          const retryable = res.status === 429 || (res.status >= 500 && res.status <= 599);
+          if (!retryable || attempt + 1 >= maxAttempts) throw lastError;
+          await wait(retryBaseMs * (attempt + 1));
+          continue;
+        }
+
+        let data: OpenAIResponse;
+        try {
+          data = (await res.json()) as OpenAIResponse;
+        } catch {
+          clearTimeout(timeout);
+          if (controller.signal.aborted) {
+            lastError = new Error(`OpenAI 요청 시간 초과 (${timeoutMs}ms)`);
+            if (attempt + 1 >= maxAttempts) throw lastError;
+            await wait(retryBaseMs * (attempt + 1));
+            continue;
+          }
+          throw new Error("OpenAI 응답 JSON을 해석할 수 없습니다.");
+        }
+        clearTimeout(timeout);
+
+        const text = openAIOutputText(data);
+        if (text.length > 0) return text;
+        if (data.error?.message) {
+          throw new Error(`OpenAI 응답 실패: ${data.error.message}`);
+        }
+        if (data.status === "incomplete") {
+          throw new Error(
+            `OpenAI 응답이 완료되지 않았습니다${data.incomplete_details?.reason ? `: ${data.incomplete_details.reason}` : ""}`,
+          );
+        }
+        throw new Error("OpenAI 응답에 텍스트 없음");
+      }
+      throw lastError;
+    },
+  };
+}
+
+function connectionTestError(provider: ByoProvider, error: unknown): Error {
+  const label = PROVIDER_LABEL[provider];
+  const detail = error instanceof Error ? error.message : String(error);
+  const statusMatch = detail.match(/HTTP (\d{3})/);
+  const status = statusMatch ? Number(statusMatch[1]) : null;
+
+  if (status === 401) {
+    return new Error(`${label} API 키 인증 실패(HTTP 401). 키를 확인해 주세요.`);
+  }
+  if (status === 403) {
+    return new Error(`${label} 모델 접근 권한 없음(HTTP 403). 계정과 모델 권한을 확인해 주세요.`);
+  }
+  if (status === 404) {
+    return new Error(
+      `${label} 모델을 찾을 수 없거나 접근할 수 없습니다(HTTP 404). 모델 ID와 권한을 확인해 주세요.`,
+    );
+  }
+  if (status === 429) {
+    return new Error(`${label} 요청 한도 초과(HTTP 429). 쿼터와 결제 상태를 확인해 주세요.`);
+  }
+  if (status !== null && status >= 500) {
+    return new Error(`${label} 서버 오류(HTTP ${status}). 잠시 후 다시 시도해 주세요.`);
+  }
+  if (detail.includes("시간 초과")) {
+    return new Error(`${label} 연결 테스트 시간 초과(${CONNECTION_TEST_TIMEOUT_MS}ms).`);
+  }
+  if (detail.includes("네트워크") || detail.includes("Failed to fetch")) {
+    // OpenAI 401은 브라우저 CORS 계층에서 상태와 본문이 가려질 수 있다.
+    return new Error(
+      `${label} 인증·CORS·네트워크 오류. 브라우저가 상태 코드를 공개하지 않아 원인을 구분할 수 없습니다.`,
+    );
+  }
+  return new Error(`${label} 연결 테스트 실패: ${detail}`);
+}
+
+/** 승인 전 BYO fail-fast. 재시도 없이 정확히 한 번만 호출하며, 성공한 키만 저장 대상으로 삼는다.
+ *  OpenAI 401의 상태가 CORS로 가려지는 경우에는 인증 실패로 단정하지 않는다(SPEC §8). */
+export async function testByoConnection(
+  provider: ByoProvider,
+  apiKey: string,
+  model: string,
+): Promise<void> {
+  const options: LlmRequestOptions = {
+    requestTimeoutMs: CONNECTION_TEST_TIMEOUT_MS,
+    maxAttempts: 1,
+    retryBaseMs: 0,
+  };
+  const client =
+    provider === "openai"
+      ? createOpenAIClient(apiKey, model, options)
+      : createGeminiClient(apiKey, model, options);
+
+  try {
+    await client.complete(CONNECTION_TEST_PROMPT, { temperature: 0, maxOutputTokens: 16 });
+  } catch (error) {
+    throw connectionTestError(provider, error);
+  }
 }
 
 /** 모의 모델 — 키 없이 파이프라인·데모를 돌리기 위한 결정적 대역.

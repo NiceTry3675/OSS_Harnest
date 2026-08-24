@@ -279,6 +279,41 @@ describe("createLoopRun", () => {
     const after = await store.load("done-run");
     expect(after).toEqual(done);
   });
+
+  it("채점 형식 오류 라운드는 0점으로 기록하지 않고 직전 체크포인트에서 재개한다", async () => {
+    const store = new MemoryCheckpointStore<number>();
+    let failedOnce = false;
+    const opts: LoopRunOptions<number> = {
+      runId: "grade-format-error",
+      pack,
+      spec: makeSpec({ maxRounds: 1 }),
+      scorer: (artifact) => {
+        if (artifact === 1 && !failedOnce) {
+          failedOnce = true;
+          throw new Error("채점 출력 형식 오류 — 테스트");
+        }
+        return ok(artifact * 10);
+      },
+      generate: () => 1,
+      initial: () => 0,
+      store,
+      onEvent: () => {},
+    };
+
+    await expect(createLoopRun(opts).start()).rejects.toThrow("채점 출력 형식 오류");
+    const beforeRetry = await store.load(opts.runId);
+    expect(beforeRetry?.round).toBe(0);
+    expect(beforeRetry?.tree).toEqual([]);
+    expect(beforeRetry?.curve).toEqual([0]);
+
+    await createLoopRun(opts).start();
+    const afterRetry = await store.load(opts.runId);
+    expect(afterRetry?.status).toBe("done");
+    expect(afterRetry?.round).toBe(1);
+    expect(afterRetry?.tree).toHaveLength(1);
+    expect(afterRetry?.curve).toEqual([0, 10]);
+    expect(afterRetry?.provenance.some((p) => p.type === "resumed")).toBe(true);
+  });
 });
 
 describe("createLoopRun — 비동기 슬롯", () => {

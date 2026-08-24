@@ -1,5 +1,5 @@
-/** 루프 계약 — SPEC §5.1.1. 스켈레톤 채택 규칙은 결정적 전용 특례:
- *  스칼라가 엄격히 개선될 때만 채택, 동점은 챔피언 유지. */
+/** 현재 루프 계약 — SPEC §5.1.1.
+ *  스칼라가 엄격히 개선될 때만 채택하고 동점은 챔피언을 유지한다. */
 
 export type AdoptionRule = "scalar_strict";
 
@@ -8,7 +8,7 @@ export interface LoopSpec {
   /** 연속 미채택이 이 수에 달하면 정체 조기 종료 */
   plateauRounds: number;
   adoptionRule: AdoptionRule;
-  /** 시드 고정 = 리플레이 가능(부가 기능 1 리플레이 모드의 기반) */
+  /** 시드 고정 = 로컬 RNG 수열 재현. 비결정적 외부 모델 출력까지 보장하지 않는다. */
   seed: number;
 }
 
@@ -34,7 +34,7 @@ export type ProvenanceType =
   | "run_started" | "round" | "adopted" | "paused" | "resumed"
   | "finished" | "plateau_stop";
 
-/** 읽기는 자유·기록되지 않는다. 기록되는 것은 결과에 영향을 주는 사건뿐 (PHILOSOPHY §2) */
+/** 읽기는 자유·기록되지 않는다. 기록되는 것은 결과에 영향을 주는 사건뿐 (SPEC §3 원칙 7) */
 export interface ProvenanceEntry {
   at: string;
   type: ProvenanceType;
@@ -43,8 +43,8 @@ export interface ProvenanceEntry {
 
 export type LoopStatus = "idle" | "running" | "paused" | "done";
 
-/** 체크포인트 — 루프 엔진은 첫 커밋부터 재개 가능한 상태 머신 (SPEC §5.1).
- *  매 라운드 저장이 계약이다: 탭 회수·중단 후 재개, 체크포인트 로그 = 리플레이 데이터. */
+/** 체크포인트 — 매 라운드 저장하는 재개 가능한 상태 머신 (SPEC §4.2·§5.1.1).
+ *  매 라운드 저장이 계약이다: 탭 회수·중단 후 재개, 체크포인트 로그 = 기록 재생 자료. */
 export interface LoopCheckpoint<A> {
   runId: string;
   packDigest: string;
@@ -54,7 +54,7 @@ export interface LoopCheckpoint<A> {
   champion: A;
   championScore: number;
   championViolations: string[];
-  /** 라운드별 챔피언 스칼라 — 개선 곡선. 하락도 그대로 기록한다 */
+  /** 라운드별 채택 확정 후 챔피언 스칼라 — strict 채택에서는 내려가지 않는다 */
   curve: number[];
   tree: RoundRecord[];
   provenance: ProvenanceEntry[];

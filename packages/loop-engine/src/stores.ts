@@ -16,6 +16,11 @@ export class MemoryCheckpointStore<A> implements CheckpointStore<A> {
     const found = this.map.get(runId);
     return found ? structuredClone(found) : null;
   }
+
+  /** 소유 프로젝트가 runId를 폐기할 때 호출 — 고아 체크포인트를 남기지 않는다 */
+  async delete(runId: string): Promise<void> {
+    this.map.delete(runId);
+  }
 }
 
 const DB_NAME = "harnest";
@@ -57,6 +62,17 @@ export class IndexedDbCheckpointStore<A> implements CheckpointStore<A> {
       const req = tx.objectStore(STORE_NAME).get(runId);
       req.onsuccess = () => resolve((req.result as LoopCheckpoint<A> | undefined) ?? null);
       req.onerror = () => reject(req.error ?? new Error("체크포인트 읽기 실패"));
+    });
+  }
+
+  /** 소유 프로젝트가 runId를 폐기할 때 호출 — 고아 체크포인트를 남기지 않는다 */
+  async delete(runId: string): Promise<void> {
+    const db = await this.open();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      tx.objectStore(STORE_NAME).delete(runId);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error ?? new Error("체크포인트 삭제 실패"));
     });
   }
 }

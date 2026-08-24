@@ -1,48 +1,63 @@
 # Harnest
 
-> 당신이 승인한 기준으로, 될 때까지 스스로 고치는 AI.
-> 기획·철학은 [SPEC.md](SPEC.md) · [PHILOSOPHY.md](PHILOSOPHY.md), 실측 기록은 [experiments/delta-01](experiments/delta-01/PROTOCOL.md).
+> 당신이 승인한 평가 절차로, 정해진 범위 안에서 개선을 측정하는 AI.
 
-## 워킹 스켈레톤 (시간표 템플릿)
+Harnest는 사용자가 채점 절차를 검증하고 승인한 뒤, 그 절차를 바꾸지 않은 채 산출물을 반복 개선하는 브라우저 기반 관제실입니다.
 
-인터뷰(3문항) → 채점 기준 컴파일·승인(동결) → 브라우저 루프 실행(관제실) → 결과. 전부 브라우저에서 완결되며, 백엔드는 있으면 기록하고 없으면 건너뛴다.
+## 현재 기능
 
-### 구조
+- **인수인계 문서**: 실제 질문·답 기록으로 가시 케이스와 숨김 홀드아웃을 만들고, 시험관 검증과 블라인드 캘리브레이션을 거쳐 문서를 개선합니다.
+- **판정 절차 동결**: 기준·게이트·채점 모델·홀드아웃 정책을 다이제스트에 결속하며, 다른 절차의 체크포인트는 재개하지 않습니다.
+- **브라우저 실행**: 컴파일, 승인, 반복 개선, 일시정지·재개가 선택형 백엔드 없이 동작합니다.
+- **결정적 테스트 템플릿**: 시간표 템플릿으로 모델 호출 없이 엔진과 체크포인트를 점검할 수 있습니다.
 
-| 경로 | 내용 |
-|---|---|
-| `packages/contracts` | 계약 타입 — 인터뷰·Evaluation Pack(동결 다이제스트)·루프(체크포인트/채택 규칙). **명세는 산문이 아니라 타입이다** |
-| `packages/loop-engine` | 브라우저 hill-climbing 루프 엔진(독립 배포 예정): 시드 RNG, 매 라운드 체크포인트(IndexedDB), 일시정지·재개, 정체 조기 종료 |
-| `templates/timetable` | 폴더 하나 = 템플릿 하나: 질문·컴파일·결정적 채점기·변이기 |
-| `apps/web` | React SPA — 위저드(라이브 블루프린트)·승인(잠금)·관제실(개선 곡선·실험 기록)·결과 |
-| `apps/api` | FastAPI — 프로젝트 CRUD·결과 업로드(sqlite). 임의 코드 실행 없음 |
+## 모델 경로
 
-### 실행
+| 경로 | 현재 상태 | 데이터 경로 |
+|---|---|---|
+| 모의 모델 | 무료 데모와 결정적 회귀 테스트 | 브라우저 안에서만 실행 |
+| OpenAI · `gpt-5.6-sol` | Responses API BYO 지원. 2026-08-24 CORS와 1라운드 스모크 실측 | 키는 `localStorage`에 저장되고 모델 요청은 브라우저에서 OpenAI로 직행 |
+| Gemini · `gemini-3.7-flash` | Gemini BYO 지원 | 키는 `localStorage`에 저장되고 모델 요청은 브라우저에서 Gemini로 직행 |
 
-Node 22+ 필요 (설치 없다면: [nodejs.org](https://nodejs.org) LTS).
+OpenAI CORS의 정상·401 경로와 스모크 테스트 관측값은 [OpenAI BYO 실측 결과](experiments/byo-cors-openai/RESULT.md)에 있습니다.
+
+API 키와 벤더 모델 호출은 Harnest 서버를 거치지 않습니다. 다만 사용자가 결과 화면에서 **서버에 기록**을 선택하면 질문·답과 결과가 선택형 로컬 API에 전송됩니다.
+
+## 실행
+
+Node 22 이상이 필요합니다.
 
 ```bash
 npm install
-npm run dev            # 웹 — http://localhost:5173
+npm run dev            # http://localhost:5173
 ```
 
-백엔드(선택 — 결과 기록용):
+웹 앱은 백엔드 없이 완결됩니다. 결과 저장 API가 필요할 때만 별도로 실행합니다.
 
 ```bash
-cd apps/api && pip3 install -r requirements.txt && python3 -m uvicorn main:app --port 8000
+cd apps/api
+pip3 install -r requirements.txt
+python3 -m uvicorn main:app --port 8000
 ```
 
-검사:
+TypeScript와 웹 변경을 확인하려면 다음을 실행합니다.
 
 ```bash
-npm run typecheck && npm test          # 계약·엔진·채점기 테스트
-cd apps/api && python3 test_api.py    # API 테스트
+npm run typecheck
+npm test
+npm run build
 ```
 
-### 스켈레톤이 증명하는 계약 (SPEC §10 특례 포함)
+API를 변경했다면 `apps/api`에서 `python3 test_api.py`도 실행합니다.
 
-- 채택은 **스칼라 엄격 개선**일 때만(동점은 챔피언 유지), 게이트 기각 후보는 채택 판정에 진입하지 않는다
-- 개선 곡선에는 후보가 아니라 **채택 확정 후 챔피언 점수**가 기록된다 — 하락도 그대로
-- **매 라운드 체크포인트** 저장: 탭이 죽어도 이어서 재개, 같은 시드는 같은 실행(리플레이)
-- 다른 판정 절차의 체크포인트는 이어받을 수 없다(다이제스트 가드) — 기준 수정은 곧 **재승인**
-- 결정적 전용 면제(검증 리포트·캘리브레이션 "해당 없음")는 숨기지 않고 승인·결과 화면에 표기된다
+## 문서 지도
+
+| 질문 | 정본 |
+|---|---|
+| 지금 무엇이 동작하는가 | 이 `README.md` |
+| 반드시 지켜야 할 제품 규칙은 무엇인가 | [SPEC.md](SPEC.md) |
+| 왜 그런 규칙을 택했는가 | [PHILOSOPHY.md](PHILOSOPHY.md) |
+| 아직 구현하지 않았거나 보류한 것은 무엇인가 | [ROADMAP.md](ROADMAP.md) |
+| 정확한 필드와 실행 계약은 무엇인가 | [`packages/contracts`](packages/contracts)와 테스트 |
+| 실제로 측정했는가 | [`experiments`](experiments) |
+| 저장소에서 어떻게 작업하는가 | [AGENTS.md](AGENTS.md) |
