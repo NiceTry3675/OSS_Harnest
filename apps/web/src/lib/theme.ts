@@ -1,10 +1,13 @@
-/** 테마 — 시스템 설정을 기본으로 쓰되, 사용자가 고르면 그 선택이 이긴다.
- *  선택은 이 브라우저(localStorage)에만 남는다. */
+/** 테마 — 고른 적이 없으면 시스템 설정을 따르고, 한 번 고르면 그 선택이 이긴다.
+ *  선택은 이 브라우저(localStorage)에만 남는다.
+ *
+ *  토글은 지금 보이는 화면의 반대로 바로 넘어간다. 시스템·밝게·어둡게를 순환시키면
+ *  시스템이 이미 밝은 화면일 때 첫 클릭이 아무 변화도 만들지 않아 두 번 눌러야 한다. */
 
 export type ThemeChoice = "system" | "light" | "dark";
+export type Rendered = "light" | "dark";
 
 const KEY = "harnest.theme";
-const ORDER: ThemeChoice[] = ["system", "light", "dark"];
 
 export function readTheme(): ThemeChoice {
   if (typeof localStorage === "undefined") return "system";
@@ -25,18 +28,24 @@ export function saveTheme(choice: ThemeChoice): void {
   applyTheme(choice);
 }
 
-export function nextTheme(current: ThemeChoice): ThemeChoice {
-  return ORDER[(ORDER.indexOf(current) + 1) % ORDER.length];
+/** 지금 화면에 실제로 적용된 테마 — 고른 값이 없으면 시스템 설정을 읽는다 */
+export function resolvedTheme(choice: ThemeChoice = readTheme()): Rendered {
+  if (choice === "light" || choice === "dark") return choice;
+  if (typeof matchMedia !== "function") return "light";
+  return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
-export const THEME_LABEL: Record<ThemeChoice, string> = {
-  system: "시스템 설정을 따름",
+/** 지금 보이는 화면의 반대 */
+export function oppositeTheme(choice: ThemeChoice = readTheme()): Rendered {
+  return resolvedTheme(choice) === "dark" ? "light" : "dark";
+}
+
+export const THEME_LABEL: Record<Rendered, string> = {
   light: "밝은 화면",
   dark: "어두운 화면",
 };
 
-export const THEME_ICON: Record<ThemeChoice, string> = {
-  system: "◐",
+export const THEME_ICON: Record<Rendered, string> = {
   light: "☀",
   dark: "☾",
 };

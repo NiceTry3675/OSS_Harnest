@@ -111,6 +111,12 @@ export interface TemplateEntry {
     >;
   };
   ArtifactView: ComponentType<{ problem: unknown; artifact: unknown }>;
+  /** 산출물을 사람이 바로 여는 파일로 — 결과 화면의 내려받기 버튼이 쓴다.
+   *  JSON 내보내기(기록 전체)와 달리 산출물 하나만 담는다. */
+  exportArtifact?(
+    problem: unknown,
+    artifact: unknown,
+  ): { filename: string; mime: string; text: string };
   /** 개발용 예시 답변(선택) — 개발 서버에서만 노출된다. 프로덕션 빌드에서는 제거된다. */
   devSample?: Record<string, unknown>;
 }
@@ -143,6 +149,18 @@ const timetableEntry: TemplateEntry = {
     };
   },
   devSample: import.meta.env.DEV ? DEV_SAMPLES[timetable.TEMPLATE_ID] : undefined,
+  exportArtifact: (problem, artifact) => {
+    const p = problem as timetable.TimetableProblem;
+    const t = artifact as timetable.Timetable;
+    const rows = t.map((day, i) =>
+      [`${i + 1}일차`, ...day.map((who) => (who === null ? "" : p.staff[who]))].join(","),
+    );
+    return {
+      filename: "근무표.csv",
+      mime: "text/csv;charset=utf-8",
+      text: ["일자,근무1,근무2", ...rows].join("\n"),
+    };
+  },
   ArtifactView: ({ problem, artifact }) => (
     <TimetableGrid
       problem={problem as timetable.TimetableProblem}
@@ -245,6 +263,11 @@ const handoverEntry: TemplateEntry = {
     };
   },
   devSample: import.meta.env.DEV ? DEV_SAMPLES[handover.TEMPLATE_ID] : undefined,
+  exportArtifact: (_problem, artifact) => ({
+    filename: "인수인계-문서.md",
+    mime: "text/markdown;charset=utf-8",
+    text: String(artifact ?? ""),
+  }),
   ArtifactView: ({ artifact }) => <HandoverDocView doc={String(artifact ?? "")} />,
 };
 
