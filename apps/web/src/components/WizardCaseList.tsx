@@ -76,6 +76,9 @@ export function WizardCaseList({
     qRef.current?.focus();
   };
 
+  // 근거 인용 안내는 인용이 있는 첫 카드에서 한 번만 보여준다 — 카드마다 반복하면 소음이다
+  const firstEvidenceIdx = pairs.findIndex((p) => p.evidence !== undefined && p.evidence.length > 0);
+
   // 최소 개수를 채우기 전에는 어느 것이 숨겨질지 확정되지 않는다
   const settled = pairs.length >= minPairs;
   const hidden = settled ? hiddenCount(pairs.length) : 0;
@@ -147,7 +150,6 @@ export function WizardCaseList({
               <div className={`q-item${isHidden ? " is-hidden" : ""}`}>
                 <div className="q-top">
                   <span className="q-no">{i + 1}</span>
-                  <span className="q-text">{p.question || "(질문이 비어 있습니다)"}</span>
                   {isHidden ? <span className="badge muted">숨김</span> : null}
                   {p.needsConfirm ? (
                     <span className="badge">확인 필요</span>
@@ -172,14 +174,14 @@ export function WizardCaseList({
                   </span>
                 </div>
 
-                <details className="q-edit">
-                  <summary>고치기</summary>
+                <div className="q-fields">
                   <div className="pair-field">
                     <label htmlFor={`edit-q-${i}`}>질문</label>
                     <textarea
                       id={`edit-q-${i}`}
                       rows={2}
                       value={p.question}
+                      placeholder="질문을 입력해 주세요"
                       onChange={(e) => update(i, { question: e.target.value })}
                     />
                   </div>
@@ -189,21 +191,18 @@ export function WizardCaseList({
                       id={`edit-a-${i}`}
                       rows={3}
                       value={p.expectedAnswer}
+                      placeholder="답을 입력해 주세요"
                       onChange={(e) => update(i, { expectedAnswer: e.target.value })}
                     />
                   </div>
-                </details>
-
-                {p.expectedAnswer.trim() ? (
-                  <p className="q-ans">{p.expectedAnswer}</p>
-                ) : (
-                  <p className="q-ans q-ans-empty">답이 비어 있습니다 — 고치기를 눌러 채워주세요.</p>
-                )}
+                </div>
                 {p.evidence !== undefined && p.evidence.length > 0 ? (
                   <div style={{ marginTop: 10, paddingLeft: 30 }}>
-                    <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 4 }}>
-                      초안이 근거로 삼은 자료 대목 — 확인할 때 실제 자료와 맞는지 훑어보세요.
-                    </div>
+                    {i === firstEvidenceIdx ? (
+                      <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 4 }}>
+                        초안이 근거로 삼은 자료 대목 — 확인할 때 실제 자료와 맞는지 훑어보세요.
+                      </div>
+                    ) : null}
                     {p.evidence.map((e, k) => (
                       <div
                         key={k}
