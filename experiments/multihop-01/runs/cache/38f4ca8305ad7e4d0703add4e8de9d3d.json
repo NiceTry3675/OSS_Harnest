@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0.5, \"why\": \"The response correctly identifies the POSIX PTY terminal limitation and recommends WSL2, but mischaracterizes Windows support as partial rather than noting it is a Tier 1 supported platform with specific command details.\"}", "tag": "grade:B-1", "model": "gemini-3.7-flash"}

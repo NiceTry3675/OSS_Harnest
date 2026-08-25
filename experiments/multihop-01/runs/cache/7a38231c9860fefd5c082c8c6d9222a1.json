@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately identifies the API key authentication setup for Gemini and the use of stream_options with include_usage for tracking streaming token usage.\"}\n```", "tag": "grade:B-13", "model": "gemini-3.7-flash"}

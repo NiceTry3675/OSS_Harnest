@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response provides generic, hallucinated OpenAI configuration steps rather than the actual Hermes Agent Azure AI Foundry settings (e.g., `hermes setup`, `provider: azure-foundry`, and `ANTHROPIC_FOUNDRY_BASE_URL`).\"}\n```", "tag": "grade:A-9", "model": "gemini-3.7-flash"}

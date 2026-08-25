@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0, \"why\": \"The response identifies the wrong release version (v0.2.0 instead of v2026.4.13).\"}\n```", "tag": "grade:C-3", "model": "gemini-3.7-flash"}

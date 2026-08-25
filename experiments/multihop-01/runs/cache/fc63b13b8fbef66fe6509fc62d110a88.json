@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies isolated tool-based subagent execution, but misses the specific tool name (delegate_task) and the config.yaml delegation settings (delegation.provider and delegation.model).\"}\n```", "tag": "grade:C-5", "model": "gemini-3.7-flash"}

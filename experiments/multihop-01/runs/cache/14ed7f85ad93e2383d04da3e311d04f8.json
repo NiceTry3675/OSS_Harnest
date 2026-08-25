@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly explains why API costs are billed separately from web subscriptions, but it misses the key solution of authenticating via OAuth to use the Pro/Max allowance in Hermes Agent.\"}\n```", "tag": "grade:A-14", "model": "gemini-3.7-flash"}

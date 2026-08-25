@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately covers profile isolation through separated directories and state partitioning, as well as delivering image URLs via Markdown syntax in DingTalk payloads.\"}\n```", "tag": "grade:B-15", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies the Termux dependency group, but gives a generic reason for the hang rather than identifying the specific Camofox postinstall browser binary download.\"}\n```", "tag": "grade:B-11", "model": "gemini-3.7-flash"}

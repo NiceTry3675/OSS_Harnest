@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response accurately explains why reducing toolsets helps smaller models by reducing schema token overhead, but fails to mention the specific Hermes CLI plugin command (`hermes plugins enable observability/langfuse` or `hermes tools`) for enabling tracing.\"}\n```", "tag": "grade:B-5", "model": "gemini-3.7-flash"}

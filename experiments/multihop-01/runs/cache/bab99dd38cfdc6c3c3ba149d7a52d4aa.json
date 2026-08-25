@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1.0, \"why\": \"The response accurately identifies the primary cause (large prompt overhead from tool schemas sent on every call) and includes key solutions like reducing enabled tools.\"}\n```", "tag": "grade:A-1", "model": "gemini-3.7-flash"}

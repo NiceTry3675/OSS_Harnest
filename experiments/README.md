@@ -9,6 +9,9 @@
   캐시 결함으로 폐기된 해석과 델타 05의 최종 관측을 구분한다.
 - [`byo-cors-openai/RESULT.md`](byo-cors-openai/RESULT.md) — OpenAI Responses API의 브라우저
   CORS 정상·401 경로와 OpenAI 프리셋 1라운드 스모크 테스트 결과.
+- [`multihop-01/RESULT.md`](multihop-01/RESULT.md) — AI 케이스 초안의 멀티홉 요구가 무문서
+  정답률을 낮추는지 실측. 소박한 멀티홉 프롬프트는 복합 질문 실패 모드로 역효과, 단일 답
+  강제를 더하면 효과(0.43→0.30).
 
 ## 원장 읽기
 

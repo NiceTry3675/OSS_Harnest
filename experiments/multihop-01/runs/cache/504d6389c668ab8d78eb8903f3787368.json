@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response mentions POSIX and PTY compatibility, but attributes the need to general tool execution rather than the chat tab embedding a full terminal.\"}\n```", "tag": "grade:C-1", "model": "gemini-3.7-flash"}

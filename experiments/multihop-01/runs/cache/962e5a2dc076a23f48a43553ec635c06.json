@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response incorrectly states that plugins go in a root 'plugins/' or 'tools/' directory instead of the specific '~/.hermes/plugins/' directory.\"}\n```", "tag": "grade:C-7", "model": "gemini-3.7-flash"}

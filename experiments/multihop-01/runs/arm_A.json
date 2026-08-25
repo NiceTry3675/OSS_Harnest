@@ -1,0 +1,130 @@
+{
+ "stat": {
+  "n": 15,
+  "nodoc_mean": 0.433,
+  "nodoc_full_rate": 0.2,
+  "nodoc_zero_rate": 0.333
+ },
+ "cases": [
+  {
+   "id": "A-1",
+   "question": "Why are responses so slow when running small local models like Qwen 3.5 4B/9B with Ollama in Hermes?",
+   "answer": "Hermes sends the full tool schema (~45 tools) on every API call, resulting in a large number of input tokens that small 4B–9B models struggle to process quickly. To improve performance, you can disable unused toolsets with `hermes tools`, use a faster quantization, switch to a larger model (32B+), or set `terminal.backend: local` in configuration to reduce container overhead.",
+   "nodoc_score": 1.0,
+   "why": "The response accurately identifies the primary cause (large prompt overhead from tool schemas sent on every call) and includes key solutions like reducing enabled tools.",
+   "response": "In Hermes Agent, slow response times when running small local models (like Qwen 4B/9B) via Ollama typically come down to the following factors:\n\n1. **Large Prompt Overhead (Prefill Latency / TTFT):** Hermes injects extensive system prompts, tool/function schemas, memory, and skill instructions on every call. Processing thousands of prompt tokens locally causes a significant Time-To-First-Token (TTFT) delay before generation starts.\n2. **Multi-Turn Agentic Tool Loops:** Hermes Agent operates in iterative loops (e.g., plan $\\rightarrow$ call tool $\\rightarrow$ parse response $\\rightarrow$ answer). If a task requires 2–4 tool executions, the prefill and generation latency is multiplied for each step.\n3. **Lack of Prompt/KV Caching:** If Ollama does not reuse the KV cache across turns, it re-evaluates the entire accumulated conversation history and tool definitions from scratch on every tool call.\n4. **VRAM Constraints and CPU Offloading:** When context size grows (e.g., 8k–32k tokens), the KV cache expands. If your GPU runs out of VRAM, Ollama automatically offloads layers or the KV cache to system RAM/CPU, causing generation speeds to drop sharply.\n\n### Quick Fixes to Improve Speed:\n* **Reduce enabled tools/skills:** Keep the active toolset minimal to reduce prompt token size.\n* **Ensure full GPU offload:** Check `ollama ps` to verify 100% of the model layers and context fit in VRAM.\n* **Increase `num_ctx` and use fast backends:** Ensure Ollama's `OLLAMA_NUM_PARALLEL` and context settings are tuned for your hardware, or consider using vLLM/SGLang with prefix caching for local hosting."
+  },
+  {
+   "id": "A-2",
+   "question": "Does Hermes Agent support automatic smart model routing to send simple queries to cheaper models?",
+   "answer": "No. Under maintainer policy, Hermes does not support complexity-based automatic model routing, cheap-versus-strong model tiers, or per-turn provider/model overrides. The primary session model and provider are retained. Subagent models can still be configured via `delegation.provider` and `delegation.model` in `config.yaml`, and models can be switched manually using `/model` or CLI flags.",
+   "nodoc_score": 1.0,
+   "why": "The response accurately answers 'no' and explains that Hermes Agent lacks built-in dynamic complexity-based model routing, matching the core facts of the reference answer.",
+   "response": "Based on the project's architecture, **no**, Hermes Agent does not have native, built-in automatic smart model routing to classify query complexity and dynamically route simple tasks to cheaper models.\n\nHermes Agent is designed to run against a single designated model endpoint (e.g., Hermes models hosted locally via vLLM/Ollama or remotely via API providers like OpenRouter/Together). \n\n**Workaround:** You can achieve this behavior externally by pointing Hermes Agent's OpenAI-compatible base URL to a proxy router that handles dynamic model routing (such as LiteLLM Router, RouteLLM, or OpenRouter's auto-routing)."
+  },
+  {
+   "id": "A-3",
+   "question": "Why does my Telegram bot return an HTTP 401 error when configured with a local Ollama endpoint?",
+   "answer": "When `provider` is set to `auto`, Hermes scans environment variables for existing API keys (such as `ANTHROPIC_API_KEY`) and routes requests to the external provider instead of your local Ollama instance. To resolve this, explicitly set `provider: custom` alongside your `base_url` in `~/.hermes/config.yaml` to disable automatic provider detection.",
+   "nodoc_score": 0.0,
+   "why": "The response fails to mention the key cause and fix: automatic provider detection routing to external APIs and setting provider to custom.",
+   "response": "An HTTP 401 (Unauthorized) error in this setup typically stems from one of the following reasons:\n\n1. **Invalid Telegram Bot Token (`TELEGRAM_BOT_TOKEN`)**\n   * The 401 error most commonly comes from Telegram's API (`api.telegram.org`), not Ollama. Verify that your `TELEGRAM_BOT_TOKEN` in your `.env` or configuration file is correct, has no surrounding quotes/whitespace issues, and was not revoked in BotFather.\n\n2. **Missing Dummy API Key for the OpenAI-Compatible Client**\n   * Hermes Agent uses an OpenAI-compatible client library to communicate with local endpoints like Ollama (`http://localhost:11434/v1`).\n   * The client SDK often requires an `api_key` string even if Ollama does not enforce authentication. If left completely empty or unset, the request may fail authorization or default to checking an invalid key. \n   * **Fix:** Set `OPENAI_API_KEY=ollama` (or any placeholder string like `dummy`) in your `.env` file.\n\n3. **Reverse Proxy / Local Auth Layer**\n   * If your Ollama instance is running behind a reverse proxy (e.g., Nginx, Caddy, or an auth tunnel) that requires basic authentication or a bearer token, ensure those credentials are provided in the endpoint URL or request headers."
+  },
+  {
+   "id": "A-4",
+   "question": "Is there a web interface available to use Hermes Agent directly in a browser?",
+   "answer": "Yes. Hermes includes a first-party web dashboard that embeds the full TUI in a browser Chat tab. You can launch it by running `hermes dashboard`, which starts a local web server at `http://127.0.0.1:9119` and opens it in your browser.",
+   "nodoc_score": 0.0,
+   "why": "The response incorrectly claims that Hermes Agent does not have a built-in web interface, directly contradicting the reference answer.",
+   "response": "Hermes Agent is primarily designed as a **command-line interface (CLI) / terminal application and Python framework**, and it does not include an official, built-in browser-based web interface by default.\n\nTo use Hermes Agent via a browser, you typically have to:\n1. Connect it to standard third-party web UIs (such as **Open WebUI**, **LibreChat**, or **Text Generation WebUI**) by hosting the underlying Hermes model with an OpenAI-compatible server (like vLLM, Ollama, or llama.cpp).\n2. Wrap the agent script in a lightweight UI framework like **Gradio** or **Streamlit**."
+  },
+  {
+   "id": "A-5",
+   "question": "Can the Hermes Discord bot process uploaded text and Python code files?",
+   "answer": "Yes. Authorized Discord file uploads are cached by Hermes, and text-readable files—including `.txt` and `.py` scripts—are automatically injected into the agent's prompt.",
+   "nodoc_score": 1.0,
+   "why": "The response accurately answers 'yes' and explains that text and Python file attachments are read and included in the agent's context.",
+   "response": "**Yes**, the Hermes Discord bot can process uploaded text and Python (`.py`) code files. \n\nWhen users attach files to a message in Discord, the bot reads the text content from supported attachments (including `.txt`, `.py`, `.md`, `.json`, and other plain text formats) and includes the contents in the context sent to the agent."
+  },
+  {
+   "id": "A-6",
+   "question": "How should security vulnerabilities in Hermes Agent be reported?",
+   "answer": "Vulnerabilities should not be submitted as public GitHub issues. Instead, report them privately via GitHub Security Advisories or by emailing security@nousresearch.com with the submission details outlined in Section 1 of `SECURITY.md`.",
+   "nodoc_score": 0.5,
+   "why": "The response correctly identifies reporting privately via GitHub Security Advisories and avoiding public issues, but misses the specific email address (security@nousresearch.com) from SECURITY.md.",
+   "response": "Based on standard GitHub practices and typical NousResearch repository guidelines (as a specific security policy document is not provided):\n\n1. **GitHub Private Vulnerability Reporting (Preferred):** Go to the repository at [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent), click on the **Security** tab, and select **\"Report a vulnerability\"** to submit an advisory privately.\n2. **Direct Contact:** If private vulnerability reporting is not enabled, reach out directly to the Nous Research team/maintainers (via their official Discord server or maintainer contact emails) rather than opening a public issue."
+  },
+  {
+   "id": "A-7",
+   "question": "What happens when Hermes hits its tool-call limit, and how can long autonomous tasks continue?",
+   "answer": "When `agent.max_turns` (default 90) is reached, Hermes requests a final response without further tool executions rather than silently failing. You can increase the turn limit using `hermes chat --max-turns <N>` or updating `agent.max_turns` in config. For long multi-turn autonomous work, use the persistent `/goal` command, which persists across sessions and can be resumed with `/goal resume`.",
+   "nodoc_score": 0.5,
+   "why": "The response correctly explains how the limit halts tool execution and can be increased, but it misses the specific `/goal` and `/goal resume` commands for continuing long autonomous tasks.",
+   "response": "In **Hermes Agent** (NousResearch):\n\n### 1. What happens when it hits the tool-call limit\nWhen Hermes reaches the configured tool-call/iteration limit (e.g., `max_iterations` or `max_turns`):\n* The agent halts the execution loop to prevent runaway API calls and infinite loops.\n* It returns its current status, the partial results gathered so far, and a message indicating that the step limit was reached before task completion.\n\n---\n\n### 2. How long autonomous tasks can continue\n* **Resuming via follow-up prompt:** Since conversational and tool execution history is retained in the session context, you can simply send a message like `\"continue\"` or `\"proceed\"` to trigger a new iteration loop starting from where it stopped.\n* **Increasing execution limits:** Increase the `max_iterations` / turn limit configuration parameter before starting or resuming long-running tasks.\n* **File/Memory Checkpointing:** For very long tasks, Hermes can write intermediate outputs, progress logs, or checkpoints to local files/scratchpads using file-system tools, allowing subsequent runs or sessions to resume without context degradation."
+  },
+  {
+   "id": "A-8",
+   "question": "Is native Windows supported without WSL2?",
+   "answer": "Yes. Windows 10/11 is a Tier 1 supported platform installed via the official PowerShell installer (`install.ps1`) without requiring WSL. However, WSL2 is still recommended if you need the embedded POSIX PTY terminal pane in the web dashboard's `/chat` interface.",
+   "nodoc_score": 0.0,
+   "why": "The response incorrectly states that native Windows is not supported without WSL2, directly contradicting the reference answer.",
+   "response": "Based on the project's requirements, **native Windows is not officially supported without WSL2**. \n\nHermes Agent relies on POSIX/Linux-based shell environments and tools for execution, so running on Windows requires **WSL2** (Windows Subsystem for Linux) or Docker. While some basic Python scripts might run, core agent tool execution and bash environment features will not function properly in native Windows (cmd.exe / PowerShell)."
+  },
+  {
+   "id": "A-9",
+   "question": "How do I configure Hermes Agent to connect to Azure AI Foundry?",
+   "answer": "Azure AI Foundry can be configured via `hermes setup`, which auto-detects the `ANTHROPIC_FOUNDRY_BASE_URL` environment variable, or by setting `provider: azure-foundry` directly in your configuration. Claude Code-specific variables like `CLAUDE_CODE_USE_FOUNDRY` and `ANTHROPIC_DEFAULT_OPUS_MODEL` are not used by Hermes.",
+   "nodoc_score": 0.0,
+   "why": "The response provides generic, hallucinated OpenAI configuration steps rather than the actual Hermes Agent Azure AI Foundry settings (e.g., `hermes setup`, `provider: azure-foundry`, and `ANTHROPIC_FOUNDRY_BASE_URL`).",
+   "response": "To configure Hermes Agent to connect to **Azure AI Foundry** (which provides OpenAI-compatible REST endpoints for deployed models), follow these steps:\n\n---\n\n### 1. Retrieve Endpoint Details from Azure AI Foundry\nIn the Azure AI Foundry portal:\n1. Navigate to your project and open your deployed model (under **Deployments**).\n2. Copy the **Target URI (Endpoint)** and **API Key**.\n   * *Note:* If using a serverless model deployment, append `/v1` or `/chat/completions` as needed to make it an OpenAI-compatible base URL (e.g., `https://<your-deployment>.<region>.models.ai.azure.com`).\n\n---\n\n### 2. Configure Hermes Agent\n\nYou can configure the connection via the CLI setup wizard, `.env` file, or `config.yaml`:\n\n#### Option A: Interactive Setup (Recommended)\nRun the setup wizard:\n```bash\npython setup.py\n# or run the agent interactive configuration\n```\nSelect a **Custom / OpenAI-Compatible** provider, then enter:\n* **Base URL:** Your Azure AI Foundry endpoint (e.g., `https://<deployment>.<region>.models.ai.azure.com`)\n* **API Key:** Your Azure API key\n* **Model Name:** The deployment name or model name configured in Foundry\n\n#### Option B: Environment Variables (`.env`)\nAdd the following to your `.env` file in the Hermes Agent root directory:\n\n```env\nOPENAI_BASE_URL=https://<your-deployment-name>.<region>.models.ai.azure.com\nOPENAI_API_KEY=your_azure_ai_foundry_api_key\nMODEL=your_deployment_model_name\n```\n\n#### Option C: `config.yaml`\nIn your `config.yaml` under the provider/model configuration:\n\n```yaml\nprovider: custom # or openai\nbase_url: \"https://<your-deployment-name>.<region>.models.ai.azure.com\"\napi_key: \"your_azure_ai_foundry_api_key\"\nmodel: \"your_deployment_model_name\"\n```\n\n---\n\n*(Note: If using Azure OpenAI Service directly rather than the Foundry Model-as-a-Service endpoint, ensure the base URL matches the Azure OpenAI standard format: `https://<resource-name>.openai.azure.com/openai/deployments/<deployment-name>` with the appropriate `api-version`.)*"
+  },
+  {
+   "id": "A-10",
+   "question": "Can I submit a pull request to add a new memory backend to the core `plugins/memory/` directory?",
+   "answer": "No. In-tree additions to `plugins/memory/` are closed per `CONTRIBUTING.md`. New memory providers must be published as standalone plugins installed to `~/.hermes/plugins/` or via pip entry points implementing the `MemoryProvider` abstract base class (`sync_turn`, `prefetch`, `shutdown`, and optional `post_setup`). Once published, you can submit a documentation PR to list it in the Community plugins section.",
+   "nodoc_score": 0.0,
+   "why": "The response incorrectly states that you can submit an in-tree PR, directly contradicting the ground truth that in-tree additions to plugins/memory/ are closed.",
+   "response": "Based on the project structure and contribution practices for **Hermes Agent**:\n\n**Yes, you generally can.** \n\nTo have your PR accepted, you should ensure that:\n1. **It implements the standard interface:** Your new backend inherits from and adheres to the existing base memory class/interface used across `plugins/memory/`.\n2. **Dependencies are handled cleanly:** Any new external libraries should ideally be optional or added cleanly to dependency configs (e.g., `pyproject.toml` or `requirements.txt`).\n3. **Configuration & Tests:** Include corresponding configuration options (in the config schema/YAML) and test coverage demonstrating that the backend initializes, stores, retrieves, and clears memories properly.\n\n*(Note: If you are introducing heavy or proprietary external dependencies, it is recommended to open an issue or RFC first to confirm the maintainers want that specific backend integrated into the core repository rather than maintained as an external plugin).*"
+  },
+  {
+   "id": "A-11",
+   "question": "How does Hermes Agent handle multi-agent task execution and per-channel personas?",
+   "answer": "Multi-agent coordination is handled via the `delegate_task` tool, which spawns isolated child `AIAgent` instances with their own contexts and toolsets (supporting up to 3 concurrent subagents by default). Per-channel personas are configured using the `channel_prompts` configuration key, which sets distinct system prompts per channel ID across Discord, Telegram, Slack, and Mattermost.",
+   "nodoc_score": 0.5,
+   "why": "The response accurately describes the conceptual architecture for both features but misses the specific implementation details, such as the `delegate_task` tool name and the `channel_prompts` configuration key.",
+   "response": "Based on the architecture of **Hermes Agent** (NousResearch/hermes-agent):\n\n### 1. Multi-Agent Task Execution\n* **Tool-Based Sub-Agent Dispatch:** Hermes Agent uses a coordinator/orchestrator pattern where the primary Hermes model delegates sub-tasks to specialized worker agents via function/tool calling.\n* **Isolated Execution Loops:** Sub-agents run their own dedicated inference loops and scratchpads with task-specific system prompts and scoped tool sets.\n* **Context Aggregation:** Once a sub-agent completes its objective, its output or state is returned as tool output back to the primary agent's context to synthesize the final response.\n\n---\n\n### 2. Per-Channel Personas\n* **Channel-to-Persona Mapping:** Hermes Agent configures personas via channel ID mappings (e.g., in Discord, Slack, or Telegram integration configs). \n* **Dynamic System Prompt Injection:** When an incoming message event is received from a specific channel, the agent router matches the channel ID to its configured profile, injecting distinct system prompts, tone instructions, and tool whitelists.\n* **Scoped Memory & Context:** Conversation history and memory stores can be partitioned per channel/session, ensuring each persona maintains its own context boundary without cross-talk.\n\n*(Note: Specific configuration syntax may vary depending on the platform adapter used, such as Discord bot configs vs. API runtime configs).*"
+  },
+  {
+   "id": "A-12",
+   "question": "How can I view tool call chains, parameters, and outputs like in Langsmith?",
+   "answer": "Hermes provides a bundled, opt-in Langfuse observability integration. You can enable it by running `hermes plugins enable observability/langfuse` or via `hermes tools`, which generates turn-level traces, nested observations, and logs tool inputs and outputs.",
+   "nodoc_score": 0.5,
+   "why": "The response suggests generic observability tools and manual instrumentation including Langfuse, but misses the built-in Hermes plugin and exact enablement command specified in the reference answer.",
+   "response": "To view tool call chains, parameters, and outputs in Hermes Agent:\n\n### 1. Built-in Local Logs & Verbose Mode\n* **Console / Verbose Output:** Run the agent with verbose or debug logging enabled (e.g., using `--verbose` / `-v` if using the CLI, or setting the Python logger level to `DEBUG`). This outputs tool execution steps, JSON-formatted arguments, and tool outputs directly to the terminal.\n* **Trajectory / Session Logs:** Check the session history/trajectory files (often stored locally as JSON in the working directory or cache folder), which record the complete sequence of messages, tool call schemas, parameters, and return values.\n\n### 2. Using Observability & Tracing Platforms (LangSmith / Langfuse / Phoenix)\nHermes Agent does not have a dedicated built-in web UI like LangSmith, but you can integrate external tracing tools:\n* **Langfuse / Arize Phoenix:** Plug in an OpenTelemetry or OpenAI-compatible tracer (e.g., `openinference-instrumentation-openai` or `langfuse` Python SDK) around the LLM client or execution loop.\n* **LangSmith Integration:** You can wrap the underlying model client or Hermes execution calls using the `langsmith` SDK (`@traceable` decorator or LangChain wrappers) to capture the exact tool call chains, parameters, and outputs in the LangSmith dashboard."
+  },
+  {
+   "id": "A-13",
+   "question": "How do I resolve `[Errno 13] Permission denied` errors when running Hermes in Docker on a NAS (such as UGOS Pro, Synology, or unRAID)?",
+   "answer": "You can pass `PUID` and `PGID` (or `HERMES_UID` and `HERMES_GID`) environment variables (for example, `PUID=1000` and `PGID=10`) to the Docker container. Hermes uses these variables at startup to remap its internal runtime user and group permissions to match your host NAS bind-mount storage.",
+   "nodoc_score": 0.5,
+   "why": "The response correctly identifies the UID/GID mismatch issue and offers generic Docker workarounds, but misses Hermes's specific solution of passing PUID/PGID or HERMES_UID/HERMES_GID environment variables.",
+   "response": "`[Errno 13] Permission denied` errors in Docker on a NAS occur due to a mismatch between the UID/GID running the Hermes process inside the container (typically UID `1000`) and the file ownership/permissions of the mounted host directories.\n\nTo resolve this:\n\n1. **Fix directory ownership on the NAS host:**\n   SSH into your NAS and update the ownership of the mounted Hermes directory (e.g., config, workspace, or cache folders) to UID `1000`:\n   ```bash\n   sudo chown -R 1000:1000 /path/to/hermes/mount\n   ```\n\n2. **Adjust file permissions:**\n   Grant read/write permissions to the mounted folder:\n   ```bash\n   sudo chmod -R 775 /path/to/hermes/mount\n   ```\n   *(Or `chmod -R 777` if you want to rule out all permission issues).*\n\n3. **Match User ID in Docker (if applicable):**\n   * If running via `docker run`, specify your NAS user's UID/GID:\n     ```bash\n     docker run --user $(id -u):$(id -g) ...\n     ```\n   * If using `docker-compose.yml`, specify the user:\n     ```yaml\n     user: \"1000:1000\"\n     ```"
+  },
+  {
+   "id": "A-14",
+   "question": "Why am I being charged API token costs for Claude instead of using my Claude Pro/Max subscription?",
+   "answer": "Anthropic bills all third-party API key usage as API billing regardless of whether you have an active Pro or Max subscription. To utilize your Pro or Max subscription allowance with Hermes Agent, authenticate using OAuth rather than entering an API key.",
+   "nodoc_score": 0.5,
+   "why": "The response correctly explains why API costs are billed separately from web subscriptions, but it misses the key solution of authenticating via OAuth to use the Pro/Max allowance in Hermes Agent.",
+   "response": "Anthropic’s **Claude Pro / Max web subscriptions** (for `claude.ai`) and the **Anthropic Developer API** (`console.anthropic.com`) are completely separate billing systems:\n\n1. **Hermes Agent uses the Developer API:** Programmatic tools and AI agents connect to models via API keys, which are billed on a pay-per-token basis through Anthropic's API console (or via providers like OpenRouter).\n2. **Subscriptions do not cover API usage:** Claude Pro/Max subscriptions only grant access to the web interface and official mobile apps on `claude.ai`. Anthropic does not allow web subscriptions to be used for API access.\n\nTo use Hermes Agent without per-token API fees, you can run a local model (e.g., Hermes 3 via Ollama, vLLM, or LM Studio) instead of routing requests to external proprietary APIs."
+  },
+  {
+   "id": "A-15",
+   "question": "Why does Telegram reject messages with an 'Unauthorized user' warning even when `allowed_chats` is configured?",
+   "answer": "`allowed_chats` only specifies allowed group chat IDs, not user authorization. To authorize direct messages from a specific user, configure `allow_from` with the user ID under `telegram:` in `~/.hermes/config.yaml` (which sets `TELEGRAM_ALLOWED_USERS`), use the pairing flow by running `hermes pairing approve telegram <CODE>`, or set `allow_all: true` to allow all users.",
+   "nodoc_score": 0.5,
+   "why": "The response correctly explains the distinction between chat authorization and user authorization, but uses an inaccurate configuration key name (`allowed_users` instead of `allow_from`) and omits the pairing flow solution.",
+   "response": "In Hermes Agent, an **\"Unauthorized user\"** rejection typically occurs because access control checks the sender's individual **Telegram User ID** separately from the **Chat ID**:\n\n1. **`allowed_users` vs. `allowed_chats` mismatch:** `allowed_chats` controls which chats/groups the bot is active in, but message authorization checks whether the sender's specific User ID is present in `allowed_users` (or the configured authorized user list). If your user ID is missing from `allowed_users`, the bot rejects the message.\n2. **Chat ID vs. User ID confusion:** Telegram User IDs (positive integers) are different from group/supergroup Chat IDs (often negative numbers starting with `-` or `-100`). Putting a user ID under `allowed_chats` (or a chat ID under `allowed_users`) will cause authorization to fail.\n3. **Group message authorization:** In group chats allowed by `allowed_chats`, individual members must still be authorized users for the bot to process their commands/messages.\n\n**Fix:** Ensure your personal Telegram User ID (obtained via bots like `@userinfobot`) is explicitly added to the `allowed_users` list in your configuration."
+  }
+ ]
+}

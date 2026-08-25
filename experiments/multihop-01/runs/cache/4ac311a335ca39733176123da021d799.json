@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response identifies the need to configure the provider and vision settings, but specifies incorrect configuration keys instead of `provider: custom` and `supports_vision: true`.\"}\n```", "tag": "grade:C-9", "model": "gemini-3.7-flash"}

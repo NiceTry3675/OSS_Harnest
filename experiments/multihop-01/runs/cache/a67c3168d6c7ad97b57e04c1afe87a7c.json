@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0, \"why\": \"The response incorrectly claims that Hermes Agent does not have a built-in web interface, directly contradicting the reference answer.\"}\n```", "tag": "grade:A-4", "model": "gemini-3.7-flash"}

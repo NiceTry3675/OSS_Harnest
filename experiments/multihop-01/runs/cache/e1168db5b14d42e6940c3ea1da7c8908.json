@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0, \"why\": \"The response incorrectly states that native Windows is not supported without WSL2, directly contradicting the reference answer.\"}\n```", "tag": "grade:A-8", "model": "gemini-3.7-flash"}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0, \"why\": \"The response identifies 'hermes config' instead of the correct CLI command 'hermes tools'.\"}\n```", "tag": "grade:C-6", "model": "gemini-3.7-flash"}

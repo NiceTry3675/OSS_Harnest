@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies reporting privately via GitHub Security Advisories and avoiding public issues, but misses the specific email address (security@nousresearch.com) from SECURITY.md.\"}\n```", "tag": "grade:A-6", "model": "gemini-3.7-flash"}

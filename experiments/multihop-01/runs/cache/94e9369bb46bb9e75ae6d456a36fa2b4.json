@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0.5, \"why\": \"The response correctly describes delegation via isolated child instances using `delegate_task`, but it hallucinates tiered/role-based routing and fails to specify the exact `delegation.provider` and `delegation.model` keys in `config.yaml`.\"}", "tag": "grade:B-3", "model": "gemini-3.7-flash"}

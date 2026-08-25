@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response explains the general concepts of user isolation and channel persona overrides, but misses the specific named configuration mechanisms from the reference answer (gateway profile multiplexing and `channel_prompts`).\"}\n```", "tag": "grade:C-13", "model": "gemini-3.7-flash"}

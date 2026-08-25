@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0, \"why\": \"The response incorrectly states that you can submit an in-tree PR, directly contradicting the ground truth that in-tree additions to plugins/memory/ are closed.\"}\n```", "tag": "grade:A-10", "model": "gemini-3.7-flash"}

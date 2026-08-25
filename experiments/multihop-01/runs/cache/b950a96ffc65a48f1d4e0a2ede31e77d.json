@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0, \"why\": \"The response fails to mention the key cause and fix: automatic provider detection routing to external APIs and setting provider to custom.\"}\n```", "tag": "grade:A-3", "model": "gemini-3.7-flash"}

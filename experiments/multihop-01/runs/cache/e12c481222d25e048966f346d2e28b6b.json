@@ -1,0 +1,1 @@
+{"text": "The command is:\n\n```bash\nhermes config\n```\n*(or running the setup wizard via `hermes setup`)*\n\nIn the interactive configuration menu provided by `hermes config`, you can navigate to toolset settings to toggle/disable tools for small local models, as well as configure and enable plugins like Langfuse observability.", "tag": "resp:C-6", "model": "gemini-3.7-flash"}

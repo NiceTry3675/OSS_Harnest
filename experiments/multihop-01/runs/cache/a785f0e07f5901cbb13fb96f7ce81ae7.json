@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly describes the general concepts of limiting turns and pruning older tool outputs, but misses the specific Hermes mechanisms (`agent.max_turns` and `ContextCompressor`).\"}\n```", "tag": "grade:C-11", "model": "gemini-3.7-flash"}

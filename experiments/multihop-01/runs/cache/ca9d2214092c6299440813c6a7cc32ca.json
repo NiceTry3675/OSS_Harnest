@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response suggests generic observability tools and manual instrumentation including Langfuse, but misses the built-in Hermes plugin and exact enablement command specified in the reference answer.\"}\n```", "tag": "grade:A-12", "model": "gemini-3.7-flash"}

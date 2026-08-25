@@ -1,0 +1,312 @@
+{
+ "stat": {
+  "n": 15,
+  "nodoc_mean": 0.3,
+  "nodoc_full_rate": 0.067,
+  "nodoc_zero_rate": 0.467,
+  "evidence_both_found_rate": 0.933,
+  "evidence_distinct_rate": 0.933
+ },
+ "cases": [
+  {
+   "id": "C-1",
+   "question": "Why is WSL2 still recommended over native Windows when using the web dashboard's chat interface?",
+   "answer": "While native Windows is officially supported, the web dashboard's Chat tab embeds a full terminal that requires a POSIX PTY, making WSL2 preferred for that specific interface pane.",
+   "nodoc_score": 0.5,
+   "why": "The response mentions POSIX and PTY compatibility, but attributes the need to general tool execution rather than the chat tab embedding a full terminal.",
+   "response": "WSL2 is recommended over native Windows primarily because **Hermes Agent's tool execution relies on a POSIX/Linux shell environment**. \n\nWhen interacting via the web dashboard's chat interface, the agent frequently generates and executes Bash commands, scripts, and package installations. WSL2 provides a native Linux kernel and environment, which prevents issues with:\n- Windows vs. Linux path separators and environment variables.\n- Incompatibilities with PowerShell/cmd when the agent generates standard Unix/Bash syntax.\n- Linux-specific dependencies, process management, and terminal emulation (`pty`).",
+   "evidence": [
+    "`website/docs/user-guide/features/web-dashboard.md:70` documents the Dashboard **Chat** tab, which embeds the full Hermes TUI directly in the browser.",
+    "the dashboard `/chat` embedded terminal requires a POSIX PTY, so WSL2 is still preferred for that pane."
+   ],
+   "evidence_check": {
+    "both_found": true,
+    "distinct_issues": true,
+    "sections": [
+     "case-4420",
+     "case-9196"
+    ]
+   }
+  },
+  {
+   "id": "C-2",
+   "question": "What messaging platform file-handling improvements were introduced in release v2026.7.1 for Discord and Matrix?",
+   "answer": "Release v2026.7.1 enabled inbound file attachments (including Python scripts) to be cached and injected into prompts for Discord, while strengthening outbound file delivery for Matrix using m.file media uploads.",
+   "nodoc_score": 0.0,
+   "why": "The response states that it does not have the release notes and only provides generic guesses, missing the specific facts in the reference answer.",
+   "response": "Based on the available information, there are no provided documents or release notes for version **v2026.7.1** of the Hermes Agent repository.\n\n**Best Guess:**\nIn messaging integrations like Discord and Matrix, file-handling improvements typically include:\n* **Multimodal Attachment Ingestion:** Automatically extracting, downloading, and converting user-uploaded images, PDFs, or audio files into the agent's context window.\n* **Matrix Media/E2EE Handling:** Improved resolution of `mxc://` content URIs and decryption of encrypted media attachments.\n* **Discord File Size & Type Handling:** Better handling of Discord's upload size limits, chunked uploads, or support for a broader range of MIME types when the agent sends generated files/artifacts back to channels.",
+   "evidence": [
+    "Commit `4314d451c` (`fix(gateway): accept any inbound file type across all messaging platforms`) made authorized Discord uploads of any file type cacheable and available to the agent.",
+    "`plugins/platforms/matrix/adapter.py:1950` uploads documents as Matrix `m.file` media; `tools/send_message_tool.py:1734-1748` dispatches Matrix media files to that method."
+   ],
+   "evidence_check": {
+    "both_found": true,
+    "distinct_issues": true,
+    "sections": [
+     "case-5047",
+     "case-5537"
+    ]
+   }
+  },
+  {
+   "id": "C-3",
+   "question": "Which release version introduced both multi-arch ARM64 Docker images and the pluggable ContextEngine interface?",
+   "answer": "Both multi-architecture ARM64 Docker support and the pluggable ContextEngine interface were introduced in release v2026.4.13.",
+   "nodoc_score": 0.0,
+   "why": "The response identifies the wrong release version (v0.2.0 instead of v2026.4.13).",
+   "response": "Based on the Hermes Agent release history, both multi-arch ARM64 Docker images and the pluggable `ContextEngine` interface were introduced in **v0.2.0** (or note that if referencing a specific unprovided changelog, **v0.2.0** is the release that overhauled Docker multi-arch builds alongside context-engine abstraction).",
+   "evidence": [
+    "ARM64/v8 support was added in PR #6124 (`18140199c`) and shipped in release **v2026.4.13**.",
+    "`fe7e6c156cf3628ef63fff6acfe4448ffb24faf3` (`feat: add ContextEngine ABC, refactor ContextCompressor to inherit from it`) and is contained in release `v2026.4.13`."
+   ],
+   "evidence_check": {
+    "both_found": true,
+    "distinct_issues": true,
+    "sections": [
+     "case-5554",
+     "case-21567"
+    ]
+   }
+  },
+  {
+   "id": "C-4",
+   "question": "What improvements to Ollama Cloud connectivity and Discord setup were delivered in Hermes Agent v0.15.0 (v2026.5.28)?",
+   "answer": "Hermes Agent v0.15.0 (v2026.5.28) added default routing to https://ollama.com/v1 for Ollama Cloud and introduced the interactive hermes gateway setup wizard for Discord platform credentials.",
+   "nodoc_score": 0.0,
+   "why": "The response states it does not have the release notes and provides speculative generalities rather than the specific factual details in the reference answer.",
+   "response": "The provided context does not contain the specific release notes for **Hermes Agent v0.15.0 (v2026.5.28)**.\n\nBased on the architecture and development roadmap of Hermes Agent, here is the best assessment of improvements typically introduced for these integrations:\n\n* **Ollama Cloud Connectivity:**\n  * **Remote Endpoint & Auth Support:** Added/improved configuration for custom base URLs, Bearer token/API key authentication, and custom headers required to connect to hosted/cloud Ollama instances.\n  * **Network Resilience & Streaming:** Enhanced connection retry logic, configurable timeout handling, and more stable token streaming over remote/SSL-secured Ollama endpoints.\n\n* **Discord Setup:**\n  * **Simplified Onboarding/Setup Wizard:** Streamlined CLI configuration prompts for entering Discord bot tokens, application IDs, and default channel IDs.\n  * **Permission & Channel Management:** Better automated validation of required gateway intents, guild permissions, and improved handling of multi-channel listener configurations and message chunking limits.",
+   "evidence": [
+    "reported Ollama Cloud routing issue is already fixed on main and shipped in v2026.5.28 (Hermes Agent v0.15.0).",
+    "`hermes gateway setup` is registered as a gateway subcommand for configuring messaging platforms: `hermes_cli/subcommands/gateway.py:213`."
+   ],
+   "evidence_check": {
+    "both_found": true,
+    "distinct_issues": true,
+    "sections": [
+     "case-33811",
+     "case-29534"
+    ]
+   }
+  },
+  {
+   "id": "C-5",
+   "question": "How are subagents executed and configured for multi-agent task delegation in Hermes Agent?",
+   "answer": "Subagents are spawned as isolated child AIAgent instances using the delegate_task tool (supporting up to 3 concurrent subagents by default), and their model and provider settings are configured via delegation.provider and delegation.model in config.yaml.",
+   "nodoc_score": 0.5,
+   "why": "The response correctly identifies isolated tool-based subagent execution, but misses the specific tool name (delegate_task) and the config.yaml delegation settings (delegation.provider and delegation.model).",
+   "response": "In **Hermes Agent** (NousResearch/hermes-agent), multi-agent task delegation operates through a tool-calling pattern where a parent agent spawns and orchestrates child subagents.\n\n### 1. Execution\n* **Tool-Driven Spawning:** The parent agent delegates tasks by invoking a delegation tool (e.g., `delegate` or `run_subagent`) with task-specific instructions.\n* **Isolated Execution Loop:** When triggered, the system spins up an independent agent loop with its own context/conversation history. The subagent executes iteratively using its assigned tools until it reaches a final answer or termination condition.\n* **Result Return:** The output/summary of the subagent’s execution is captured and passed back to the parent agent as the return value of the tool call, keeping the parent’s context window uncluttered.\n\n### 2. Configuration\nSubagents are configured either programmatically (via Python classes/dictionaries) or through tool arguments:\n* **System Prompt & Role:** Configured with a focused task prompt or persona distinct from the parent agent.\n* **Tool Scoping:** Assigned a restricted or specialized subset of tools relevant to their specific domain (e.g., code execution, web search).\n* **Model & Generation Parameters:** Can be configured to use specific models, temperature settings, and limits (such as `max_iterations` or token limits) to control recursion and execution depth.",
+   "evidence": [
+    "The supported configuration point for subagents remains `delegation.provider` / `delegation.model` in `config.yaml`.",
+    "**Multi-agent communication** is handled by the `delegate_task` tool:\n- Spawns isolated child AIAgent instances with their own context, toolsets, and terminal sessions"
+   ],
+   "evidence_check": {
+    "both_found": true,
+    "distinct_issues": true,
+    "sections": [
+     "case-33223",
+     "case-11922"
+    ]
+   }
+  },
+  {
+   "id": "C-6",
+   "question": "What CLI command can be used both to disable unneeded toolsets for small local models and to enable the bundled Langfuse observability plugin?",
+   "answer": "The `hermes tools` command can be used to disable unused toolsets to optimize token usage for small local models, and it can also be used to enable the bundled Langfuse plugin.",
+   "nodoc_score": 0.0,
+   "why": "The response identifies 'hermes config' instead of the correct CLI command 'hermes tools'.",
+   "response": "The command is:\n\n```bash\nhermes config\n```\n*(or running the setup wizard via `hermes setup`)*\n\nIn the interactive configuration menu provided by `hermes config`, you can navigate to toolset settings to toggle/disable tools for small local models, as well as configure and enable plugins like Langfuse observability.",
+   "evidence": [
+    "- Reduce toolsets: `hermes tools` → disable toolsets you don't need",
+    "`plugins/observability/langfuse/README.md:3-17` documents enabling it with `hermes tools` or `hermes plugins enable observability/langfuse`."
+   ],
+   "evidence_check": {
+    "both_found": true,
+    "distinct_issues": true,
+    "sections": [
+     "case-1451",
+     "case-12871"
+    ]
+   }
+  },
+  {
+   "id": "C-7",
+   "question": "Where should user-created standalone plugins, such as custom tools or out-of-tree memory providers, be placed?",
+   "answer": "Standalone plugins, including out-of-tree memory providers and custom tools, should be placed in `~/.hermes/plugins/` (or installed via pip) and enabled in `plugins.enabled` or via `hermes plugins enable`.",
+   "nodoc_score": 0.0,
+   "why": "The response incorrectly states that plugins go in a root 'plugins/' or 'tools/' directory instead of the specific '~/.hermes/plugins/' directory.",
+   "response": "In **Hermes Agent**, user-created standalone plugins (such as custom tools, skills, or memory providers) should typically be placed in:\n\n* **`plugins/`** (located at the root of the project/workspace directory) or in a designated `tools/` directory depending on whether it is a tool or a standalone provider module.\n* Alternatively, external or out-of-tree plugin paths can be specified directly in the configuration file (e.g., `config.yaml` or environment configuration) to load plugins from custom paths.\n\n*(Note: If configuring specific third-party plugins, ensure your plugin entry point matches the plugin interface expectations and is enabled in the agent's configuration).*",
+   "evidence": [
+    "Publish as standalone plugin into `~/.hermes/plugins/` or via pip entry point. Must implement `MemoryProvider` ABC (`sync_turn`, `prefetch`, `shutdown`, optional `post_setup`).",
+    "user plugins are scanned from `~/.hermes/plugins` in `hermes_cli/plugins.py:1192`, and standalone/user plugins are opt-in via `plugins.enabled` with a clear `hermes plugins enable ...` message"
+   ],
+   "evidence_check": {
+    "both_found": true,
+    "distinct_issues": true,
+    "sections": [
+     "case-9975",
+     "case-29351"
+    ]
+   }
+  },
+  {
+   "id": "C-8",
+   "question": "What two Telegram-related capabilities were added or improved in release v2026.5.7?",
+   "answer": "Release v2026.5.7 enabled sending MCP tool image results natively to Telegram via MEDIA tags and added session preservation during restarts by marking crash-interrupted conversations as resume_pending.",
+   "nodoc_score": 0.0,
+   "why": "The response does not identify either of the two specific capabilities mentioned in the reference answer (MCP tool image results via MEDIA tags and session preservation/resume_pending).",
+   "response": "Based on the available information (as no document was provided with the prompt), release `v2026.5.7` appears to reference a specific or future release tag not directly in the standard records.\n\nHowever, based on the development roadmap and features of Hermes Agent's Telegram integration, the primary Telegram-related capabilities added/improved typically include:\n\n1. **Voice message / Multimodal audio handling:** Enabling voice message transcription and voice note responses.\n2. **Group chat interaction / Mention handling:** Improved context filtering, `@mention` gating, or streaming message support in Telegram group chats.",
+   "evidence": [
+    "`c8e3e3918509d4c43432ec2cf19ef6a1cfe9cd9c` (`fix(mcp): surface image tool results as MEDIA tags instead of dropping them (#21328)`), shipped in `v2026.5.7`.",
+    "`f1e029251` changed crash/restart handling from blanket suspension to `resume_pending`, preserving the existing conversation instead of wiping it; it shipped in `v2026.5.7`."
+   ],
+   "evidence_check": {
+    "both_found": true,
+    "distinct_issues": true,
+    "sections": [
+     "case-6138",
+     "case-8381"
+    ]
+   }
+  },
+  {
+   "id": "C-9",
+   "question": "How can an OpenAI-compatible vision model running on a custom endpoint be configured so Hermes uses the local base URL and enables native image payloads?",
+   "answer": "Set `provider: custom` to force Hermes to use the local base_url rather than auto-detecting credentials, and configure `supports_vision: true` to enable native vision payloads on custom OpenAI-compatible endpoints.",
+   "nodoc_score": 0.5,
+   "why": "The response identifies the need to configure the provider and vision settings, but specifies incorrect configuration keys instead of `provider: custom` and `supports_vision: true`.",
+   "response": "To configure Hermes Agent to use an OpenAI-compatible vision model on a custom endpoint, configure the environment variables or your `config.yaml` settings as follows:\n\n### 1. Set the Base URL and API Key\nPoint the OpenAI client to your custom endpoint:\n* **Environment Variables:**\n  ```bash\n  export OPENAI_BASE_URL=\"http://localhost:8000/v1\"   # Replace with your custom/local endpoint\n  export OPENAI_API_KEY=\"dummy-key-or-your-key\"\n  ```\n\n### 2. Configure Model and Multimodal/Vision Settings\nIn your agent configuration file (e.g., `config.yaml` or via CLI/initialization parameters):\n* Set the model name to your custom model identifier (e.g., `hermes-3-vision`, `llava`, `qwen2-vl`).\n* Set `provider: openai` (or `custom_openai`).\n* Ensure vision/multimodal features are enabled (e.g., set `vision: true` or `multimodal: true` under the model configuration).\n\nWhen configured this way, Hermes routes requests to your custom `OPENAI_BASE_URL` and formats images into standard OpenAI-compatible vision payloads (e.g., base64 data URLs in `image_url` message blocks).",
+   "evidence": [
+    "Setting `provider: custom` forces Hermes to use your `base_url` instead of auto-detecting from environment variables.",
+    "PR #17936 implements a config-level override. Once merged, setting `supports_vision: true` in your model config should enable native image payloads for Ollama vision models."
+   ],
+   "evidence_check": {
+    "both_found": true,
+    "distinct_issues": true,
+    "sections": [
+     "case-3846",
+     "case-20376"
+    ]
+   }
+  },
+  {
+   "id": "C-10",
+   "question": "Where does Hermes Agent persist user profile information versus skill usage tracking data?",
+   "answer": "User profile attributes and preferences are saved to `USER.md` (using target=\"user\"), while skill execution metrics and timestamps are tracked in `~/.hermes/skills/.usage.json`.",
+   "nodoc_score": 0.0,
+   "why": "The response fails to identify the specific file paths (`USER.md` and `~/.hermes/skills/.usage.json`), instead offering generic and inaccurate guesses.",
+   "response": "In **Hermes Agent** (`NousResearch/hermes-agent`), user profile data and skill usage tracking are persisted in distinct memory/storage layers:\n\n* **User Profile Information:** Persisted in the agent's long-term/episodic memory system (typically stored as a structured `user_profile` file or memory database, such as `user_profile.json` / Markdown files within the agent’s memory directory or `~/.hermes/` state storage).\n* **Skill Usage Tracking Data:** Persisted in the skill registry/telemetry store (typically an SQLite database or execution metadata store tracking skill invocation history, success/failure metrics, and tool execution logs).",
+   "evidence": [
+    "`tools/memory_tool.py:5` and `:280` define `USER.md` as the persistent user-profile store and map `target=\"user\"` to that file",
+    "`tools/skill_usage.py:1` documents the skill usage sidecar at `~/.hermes/skills/.usage.json`, including `use_count`, `view_count`, and timestamps."
+   ],
+   "evidence_check": {
+    "both_found": true,
+    "distinct_issues": true,
+    "sections": [
+     "case-29476",
+     "case-21625"
+    ]
+   }
+  },
+  {
+   "id": "C-11",
+   "question": "How does Hermes Agent prevent runaway conversation loops and manage context window bloat caused by excessive tool outputs?",
+   "answer": "Hermes bounds maximum turns using `agent.max_turns` (defaulting to 90), while `ContextCompressor` prunes and compacts older verbose tool results to prevent token window saturation.",
+   "nodoc_score": 0.5,
+   "why": "The response correctly describes the general concepts of limiting turns and pruning older tool outputs, but misses the specific Hermes mechanisms (`agent.max_turns` and `ContextCompressor`).",
+   "response": "Hermes Agent manages runaway loops and context window bloat through the following mechanisms:\n\n### 1. Preventing Runaway Loops\n* **Maximum Iteration Limits:** The agent loop enforces a configurable maximum turn/step limit (`max_iterations` / `max_steps`). If the model enters a repetitive tool-calling cycle or fails to reach a termination state, the execution terminates automatically after reaching the threshold.\n* **Stop Tokens & End-of-Turn Conditions:** Specific stop tokens and completion checks detect when the model signals task completion or when it produces repetitive empty/invalid tool calls.\n\n### 2. Managing Context Window Bloat\n* **Tool Output Truncation:** Large standard outputs, command logs (e.g., shell/terminal outputs), or API payloads are truncated to a maximum character or token budget before being appended to the conversation history (often keeping the head/tail of the output).\n* **Token Budgeting & Sliding Window:** The context manager monitors total token usage against the model’s context limit, pruning or evicting older intermediate tool outputs/messages while preserving the system instructions, user query, and recent context.\n* **External File Storage:** In some workflows, excessively large outputs (like scraped web pages or large data dumps) are saved to temporary files on disk, passing a summary, preview, or file path back to the context rather than the raw data.",
+   "evidence": [
+    "`agent.max_turns` defaults to 90 and can be changed in config; `hermes chat --max-turns <N>` overrides it for one conversation turn",
+    "`agent/context_compressor.py:1269` prunes/deduplicates old verbose tool results while retaining a token-budgeted recent tail"
+   ],
+   "evidence_check": {
+    "both_found": true,
+    "distinct_issues": true,
+    "sections": [
+     "case-6997",
+     "case-21567"
+    ]
+   }
+  },
+  {
+   "id": "C-12",
+   "question": "How does Hermes Agent automatically handle API keys and token usage tracking when connecting to local backend services like Honcho and OpenAI-compatible providers?",
+   "answer": "Hermes automatically injects \"local\" as a placeholder API key for Honcho connections pointing to localhost/127.0.0.1, and sends `stream_options={\"include_usage\": true}` on streaming OpenAI-compatible requests to ensure token tracking functions.",
+   "nodoc_score": 0.5,
+   "why": "The response mentions using `stream_options={\\",
+   "response": "In **Hermes Agent**, integration with OpenAI-compatible local backends (such as vLLM, Ollama, or LM Studio) and memory services like Honcho is handled through standard OpenAI-compatible API schemas and environment configuration:\n\n### 1. API Key Handling\n* **OpenAI-Compatible Local Providers:** When configuring a custom `base_url` pointing to a local endpoint (e.g., `http://localhost:8000/v1`), Hermes Agent uses standard client configuration. If no real authentication is required by the local server, it uses a placeholder string (such as `\"EMPTY\"` or `\"none\"`) or falls back to an environment variable (`OPENAI_API_KEY` or custom provider keys) to satisfy the client library requirement.\n* **Honcho Integration:** Authentication is resolved via environment variables (e.g., `HONCHO_API_KEY`) or local connection parameters, automatically initializing session contexts and user tracking without requiring hardcoded credentials.\n\n### 2. Token Usage Tracking\n* **API Response Parsing:** Hermes Agent captures the standard `usage` field (`prompt_tokens`, `completion_tokens`, and `total_tokens`) returned by local inference engines in completion/chat response payloads (or via streaming usage chunks like `stream_options={\"include_usage\": True}`).\n* **Agent Loop Aggregation:** Token counts are recorded per turn (including intermediate tool/function calling steps) to track context window consumption and cumulative session costs/usage.\n\n*(Note: If configuring custom local setups, ensure your local backend enables usage reporting in streaming responses if streaming is turned on in the agent configuration.)*",
+   "evidence": [
+    "Injects `\"local\"` as a placeholder API key at SDK-client init time whenever `base_url` points to `localhost`, `127.0.0.1`, or `::1`",
+    "`agent/chat_completion_helpers.py:2222-2229` now sends `stream_options={\"include_usage\": true}` for streaming OpenAI-compatible chat-completions requests"
+   ],
+   "evidence_check": {
+    "both_found": false,
+    "distinct_issues": false,
+    "sections": [
+     null,
+     "case-31559"
+    ]
+   }
+  },
+  {
+   "id": "C-13",
+   "question": "What configuration mechanisms allow Hermes Agent to isolate different user profiles on gateway platforms while also customizing personas per channel?",
+   "answer": "Gateway profile multiplexing isolates credentials, sessions, and memory per user profile under a single gateway process, while `channel_prompts` allows defining distinct system prompt personas for individual channel IDs.",
+   "nodoc_score": 0.5,
+   "why": "The response explains the general concepts of user isolation and channel persona overrides, but misses the specific named configuration mechanisms from the reference answer (gateway profile multiplexing and `channel_prompts`).",
+   "response": "In **Hermes Agent**, user isolation and channel-specific persona customization are handled through session routing, context scoping, and platform configuration mappings:\n\n1. **User Profile & Session Isolation:**\n   * **Scoped Session / User IDs:** Hermes Agent namespaces conversation state and working memory by platform user/thread IDs (e.g., `<platform>_<channel_id>_<user_id>`).\n   * **Isolated Memory Stores:** Ephemeral and long-term memory (e.g., SQLite, vector stores, or flat-file session logs) are partitioned per session/user key, preventing cross-talk and data leakage between different users on the same gateway.\n\n2. **Per-Channel Persona Customization:**\n   * **Channel-to-Persona Mappings:** In the gateway configuration (such as `config.yaml` or environment configuration), channels, guilds, or chat IDs can be mapped to distinct system prompts or persona definitions.\n   * **System Prompt Overrides:** Hermes loads tailored persona prompts and tool availability based on the incoming message's channel ID, allowing the agent to adapt its tone, role, and available capabilities dynamically per channel.",
+   "evidence": [
+    "`gateway/run.py:8455` starts enabled adapters for secondary profiles under each profile's own home and credential scope; `gateway/run.py:8582` stamps inbound events with the owning profile.",
+    "**Per-channel persona/context** is handled by the `channel_prompts` config key:\n- Set distinct ephemeral system prompts per channel/group ID in your platform config"
+   ],
+   "evidence_check": {
+    "both_found": true,
+    "distinct_issues": true,
+    "sections": [
+     "case-10030",
+     "case-11922"
+    ]
+   }
+  },
+  {
+   "id": "C-14",
+   "question": "How do authentication requirements differ between using Google Gemini and Anthropic Claude Pro/Max subscription allowances in Hermes Agent?",
+   "answer": "Google Gemini must be configured with an API key (`GOOGLE_API_KEY` or `GEMINI_API_KEY`) because CLI OAuth was removed, whereas utilizing Anthropic Pro/Max subscription allowances requires OAuth authentication rather than an API key.",
+   "nodoc_score": 1.0,
+   "why": "The response correctly identifies that Google Gemini requires an API key while using Anthropic Pro/Max subscription allowances requires OAuth/session tokens rather than a standard API key.",
+   "response": "In Hermes Agent, authentication differs primarily because **Google Gemini** uses standard API keys for its allowances, whereas **Anthropic Claude Pro/Max subscriptions** cannot be authenticated directly through standard API endpoints:\n\n1. **Google Gemini:**\n   * **Authentication:** Uses a standard API key (e.g., `GEMINI_API_KEY` from Google AI Studio) or Google Cloud Vertex AI credentials.\n   * **Allowance Access:** Free-tier and usage allowances are provided directly through the AI Studio API key without needing web session extraction.\n\n2. **Anthropic Claude (Pro/Max Subscriptions):**\n   * **Authentication:** Standard integration requires an Anthropic Console API key (`ANTHROPIC_API_KEY`), which is billed per token separately from consumer subscriptions.\n   * **Subscription Allowances:** Claude Pro/Max subscription quotas are tied to consumer web accounts, not standard API keys. To use web/subscription allowances rather than the paid API, you must use unofficial session/OAuth tokens (or web proxy wrappers), whereas standard Hermes Agent setup expects an official API key.",
+   "evidence": [
+    "Current supported Gemini setup is Google AI Studio with `GOOGLE_API_KEY` or `GEMINI_API_KEY` (`plugins/model-providers/gemini/__init__.py:51-59`",
+    "To use your Pro/Max subscription allowance through hermes-agent, you need to authenticate via OAuth (not an API key)."
+   ],
+   "evidence_check": {
+    "both_found": true,
+    "distinct_issues": true,
+    "sections": [
+     "case-25055",
+     "case-29539"
+    ]
+   }
+  },
+  {
+   "id": "C-15",
+   "question": "What container configuration and architecture support does the official `nousresearch/hermes-agent` Docker image offer for NAS and ARM devices?",
+   "answer": "The official Docker image publishes multi-architecture manifests covering `linux/amd64` and `linux/arm64` (ARM64/v8), and supports `PUID` and `PGID` environment variables to remap container user permissions on NAS host bind mounts.",
+   "nodoc_score": 0.5,
+   "why": "The response accurately identifies the multi-architecture support (linux/amd64 and linux/arm64), but misses the specific PUID and PGID configuration for NAS permission remapping.",
+   "response": "Based on the Hermes Agent (`NousResearch/hermes-agent`) container setup and standard deployment practices:\n\n### Architecture Support\n* **Multi-Architecture (`linux/amd64` and `linux/arm64`):** The Docker image is built for both standard x86_64 (`amd64`) and ARM64 (`aarch64`) architectures.\n* **ARM & NAS Compatibility:** Native support for ARM-based systems (Apple Silicon, Raspberry Pi 4/5, ARM SBCs) and popular NAS platforms (Synology, QNAP, TrueNAS, Unraid running on either Intel/AMD or ARM64 processors).\n\n---\n\n### Key Container Configuration\n\n1. **Volume Mounts (Persistence):**\n   * Mount a host directory to persist agent state, conversation memory, skills/tools, and workspace files (typically mapped to `~/.hermes` or `/data` inside the container).\n   * Example: `-v /path/to/nas/hermes-data:/app/data`\n\n2. **Environment Variables:**\n   * **LLM Provider Keys / Endpoints:** `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or local endpoint variables (e.g., `OLLAMA_BASE_URL` or `OPENAI_BASE_URL` to connect to self-hosted Ollama/vLLM instances on the NAS/LAN).\n   * **Model Selection:** Specific Hermes/OpenAI-compatible model identifiers.\n\n3. **Execution Modes:**\n   * **Interactive CLI Mode:** Run with `docker run -it` to interact with the agent directly via the terminal.\n   * **Headless/Server Mode:** Run in detached mode (`-d`) with networking configured (bridge or host mode) to allow the container to access network resources, NAS shares, and local LLM endpoints.\n\n*(Note: If deploying via Synology Container Manager or TrueNAS Apps, configure the container using standard Compose/Bridge networking and supply environment variables via the GUI interface.)*",
+   "evidence": [
+    "`48083211ef606f3305c09df576514ac99bc7f594` added `PUID`/`PGID` aliases for `HERMES_UID`/`HERMES_GID`, preserving canonical-variable precedence.",
+    "CI now uses `docker/setup-qemu-action` for cross-compilation and publishes a multi-arch manifest covering `linux/amd64` and `linux/arm64`."
+   ],
+   "evidence_check": {
+    "both_found": true,
+    "distinct_issues": true,
+    "sections": [
+     "case-15290",
+     "case-5554"
+    ]
+   }
+  }
+ ]
+}

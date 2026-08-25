@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly mentions `--max-turns` and that Telegram history is preserved rather than wiped, but it misses the specific `/goal` command system and the `resume_pending` state.\"}\n```", "tag": "grade:B-8", "model": "gemini-3.7-flash"}

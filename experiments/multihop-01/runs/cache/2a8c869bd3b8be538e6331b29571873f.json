@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response grasps the general separation of user memory and persona files, but misses the specific `SOUL.md` file and the `hermes insights` / `.usage.json` mechanism for inspecting skill execution.\"}\n```", "tag": "grade:B-10", "model": "gemini-3.7-flash"}

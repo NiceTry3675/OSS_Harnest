@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response accurately details the Matrix and Email delivery mechanisms (m.file and SMTP multipart attachments) but misses the specific Hermes mechanism of caching base64 content and emitting MEDIA:<path> tags for MCP tools.\"}\n```", "tag": "grade:B-7", "model": "gemini-3.7-flash"}

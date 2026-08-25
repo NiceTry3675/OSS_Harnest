@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.0, \"why\": \"The response does not identify either of the two specific capabilities mentioned in the reference answer (MCP tool image results via MEDIA tags and session preservation/resume_pending).\"}\n```", "tag": "grade:C-8", "model": "gemini-3.7-flash"}

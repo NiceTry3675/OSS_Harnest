@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0.5, \"why\": \"The response explains the correct concepts but guesses generic configuration keys instead of the exact parameters (`allow_from` vs `allowed_chats` and `channel_prompts`).\"}", "tag": "grade:B-12", "model": "gemini-3.7-flash"}

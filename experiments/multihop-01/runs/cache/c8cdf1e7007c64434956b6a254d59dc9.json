@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response includes the local base URL and the 'supports_vision: true' setting, but misses specifying 'provider: custom' to prevent Hermes from scanning environment variables.\"}\n```", "tag": "grade:B-2", "model": "gemini-3.7-flash"}

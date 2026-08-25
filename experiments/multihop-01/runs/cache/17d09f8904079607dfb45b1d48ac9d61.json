@@ -1,0 +1,1 @@
+{"text": "Based on the Hermes Agent release history, both multi-arch ARM64 Docker images and the pluggable `ContextEngine` interface were introduced in **v0.2.0** (or note that if referencing a specific unprovided changelog, **v0.2.0** is the release that overhauled Docker multi-arch builds alongside context-engine abstraction).", "tag": "resp:C-3", "model": "gemini-3.7-flash"}

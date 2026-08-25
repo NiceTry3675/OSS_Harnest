@@ -1,0 +1,1 @@
+{"text": "{\"score\": 0.5, \"why\": \"The response correctly explains how the limit halts tool execution and can be increased, but it misses the specific `/goal` and `/goal resume` commands for continuing long autonomous tasks.\"}", "tag": "grade:A-7", "model": "gemini-3.7-flash"}

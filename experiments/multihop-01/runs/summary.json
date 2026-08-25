@@ -1,0 +1,28 @@
+{
+ "A": {
+  "n": 15,
+  "nodoc_mean": 0.433,
+  "nodoc_full_rate": 0.2,
+  "nodoc_zero_rate": 0.333
+ },
+ "B": {
+  "n": 15,
+  "nodoc_mean": 0.6,
+  "nodoc_full_rate": 0.2,
+  "nodoc_zero_rate": 0.0,
+  "evidence_both_found_rate": 1.0,
+  "evidence_distinct_rate": 1.0
+ },
+ "C": {
+  "n": 15,
+  "nodoc_mean": 0.3,
+  "nodoc_full_rate": 0.067,
+  "nodoc_zero_rate": 0.467,
+  "evidence_both_found_rate": 0.933,
+  "evidence_distinct_rate": 0.933
+ },
+ "delta_A_minus_B": -0.167,
+ "verdict_B": "효과 불충분",
+ "delta_A_minus_C": 0.133,
+ "verdict_C": "효과 있음"
+}

@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response correctly identifies the Ollama Cloud endpoint and the use of a local base URL, but misses the key detail that Hermes automatically injects 'local' as a placeholder API key.\"}\n```", "tag": "grade:B-14", "model": "gemini-3.7-flash"}

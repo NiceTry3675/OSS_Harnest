@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 1, \"why\": \"The response accurately covers the interactive CLI setup command, the required configuration prompts, and how code attachments are extracted and injected directly into the prompt/context.\"}\n```", "tag": "grade:B-6", "model": "gemini-3.7-flash"}

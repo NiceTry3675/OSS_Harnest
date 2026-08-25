@@ -1,0 +1,1 @@
+{"text": "```json\n{\"score\": 0.5, \"why\": \"The response mentions placement in `~/.hermes/plugins/`, but incorrectly states that in-tree core additions are accepted and fails to mention the `hermes plugins enable` command.\"}\n```", "tag": "grade:B-9", "model": "gemini-3.7-flash"}
