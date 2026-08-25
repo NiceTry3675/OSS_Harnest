@@ -450,6 +450,31 @@ describe("생성 출력 토큰 예산", () => {
     });
     expect(optsSeen).toEqual([16_000, 16_000]);
   });
+
+  it("배치 채점 호출에도 케이스 수 연동 maxOutputTokens가 실린다", async () => {
+    // 최대 구성: 30케이스 → 가시 20 — 기본 상한(8192)보다 큰 예산이 필요한 지점
+    const { problem } = await compile(makeSubmission(MAX_CASES), mockJudge);
+    const seen: Array<number | undefined> = [];
+    const llm: LlmClient = {
+      providerId: "mock",
+      model: "테스트-모의",
+      async complete(prompt, opts) {
+        seen.push(opts?.maxOutputTokens);
+        if (prompt.includes("아래 문서만을 근거로")) {
+          return JSON.stringify(
+            problem.visibleCases.map((c) => ({ caseId: c.id, answer: c.expectedAnswer })),
+          );
+        }
+        return JSON.stringify(
+          problem.visibleCases.map((c) => ({ caseId: c.id, score: 1, why: "정답" })),
+        );
+      },
+    };
+
+    await createScorer(problem, llm)("문서");
+    expect(problem.visibleCases).toHaveLength(20);
+    expect(seen).toEqual([20_480, 20_480]);
+  });
 });
 
 describe("withCallBudget", () => {

@@ -174,6 +174,13 @@ function parseBatch<T>(
   return out;
 }
 
+/** 배치 출력 토큰 예산 — 항목 수에 비례한 여유. 명시하지 않으면 클라이언트 기본 상한
+ *  (8192 토큰)이 큰 배치의 JSON 배열을 중간에 잘라 형식 오류로 만든다.
+ *  상한은 초과분에 과금되지 않는 순수 한도라 넉넉해도 비용 부담이 없다. */
+export function batchOutputTokensFor(itemCount: number): number {
+  return Math.max(8192, itemCount * 1024);
+}
+
 /** 배치 호출 공통 경로 — 본 호출 1회 + 형식 수정 재시도 1회 */
 async function completeBatch<T>(
   llm: LlmClient,
@@ -183,13 +190,14 @@ async function completeBatch<T>(
   ids: string[],
   parseItem: (value: Record<string, unknown>) => T,
 ): Promise<Map<string, T>> {
-  const first = await llm.complete(prompt, { temperature: 0 });
+  const maxOutputTokens = batchOutputTokensFor(ids.length);
+  const first = await llm.complete(prompt, { temperature: 0, maxOutputTokens });
   try {
     return parseBatch(first, label, ids, parseItem);
   } catch (error) {
     if (!(error instanceof GradeFormatError)) throw error;
   }
-  const retried = await llm.complete(retryPrompt(first), { temperature: 0 });
+  const retried = await llm.complete(retryPrompt(first), { temperature: 0, maxOutputTokens });
   try {
     return parseBatch(retried, label, ids, parseItem);
   } catch (error) {

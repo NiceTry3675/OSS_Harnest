@@ -7,14 +7,19 @@ import type { LlmClient } from "./runtime";
 
 const MATERIAL = "사내 배포 파이프라인을 관리하는 업무입니다. ".repeat(5);
 
-const sequenceLlm = (outputs: string[]): LlmClient & { prompts: string[] } => {
+const sequenceLlm = (
+  outputs: string[],
+): LlmClient & { prompts: string[]; budgets: Array<number | undefined> } => {
   const prompts: string[] = [];
+  const budgets: Array<number | undefined> = [];
   return {
     providerId: "mock",
     model: "초안-테스트",
     prompts,
-    async complete(prompt) {
+    budgets,
+    async complete(prompt, opts) {
       prompts.push(prompt);
+      budgets.push(opts?.maxOutputTokens);
       return outputs.shift() ?? "";
     },
   };
@@ -68,6 +73,8 @@ describe("draftCases", () => {
     const result = await draftCases(llm, MATERIAL, [], 5);
     expect(result).toHaveLength(5);
     expect(llm.prompts[0]).toContain("생성 개수: 5");
+    // 출력 토큰 예산 — 질문+답 쌍이라 항목당 2배(batchOutputTokensFor(5×2) = 10240)
+    expect(llm.budgets[0]).toBe(10_240);
   });
 
   it("기존 질문과 정규화 기준으로 같은 초안은 제거한다", async () => {

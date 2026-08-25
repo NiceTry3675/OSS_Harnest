@@ -157,7 +157,7 @@ export function ApprovalPage() {
   const staleReport = examinerRun !== null && !validReport;
   const reportFailed = validReport && examinerRun!.report.overall === "fail";
 
-  /** 재검증 쿼터(SPEC §5.2) — 배터리 1회 ≈ 35호출이므로 같은 다이제스트 실행 횟수를 제한한다 */
+  /** 재검증 쿼터(SPEC §5.2) — 배터리 1회도 십여 회 호출이므로 같은 다이제스트 실행 횟수를 제한한다 */
   const attemptsForPack =
     examinerAttempts !== null && pack !== null && examinerAttempts.forDigest === pack.definitionDigest
       ? examinerAttempts.count
@@ -262,7 +262,7 @@ export function ApprovalPage() {
     attemptsForPack > 0 && !quotaExhausted ? (
       <p className="hint" style={{ margin: "6px 0 0" }}>
         검증 실행 {attemptsForPack}/{MAX_EXAMINER_RUNS_PER_DIGEST}회 사용 — 같은 기준에서는 최대{" "}
-        {MAX_EXAMINER_RUNS_PER_DIGEST}회까지 실행할 수 있습니다 (1회당 약 35회 모델 호출).
+        {MAX_EXAMINER_RUNS_PER_DIGEST}회까지 실행할 수 있습니다 (1회당 십여 회의 모델 호출).
       </p>
     ) : null;
 

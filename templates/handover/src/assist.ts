@@ -3,7 +3,13 @@
  *  판정 절차나 루프에 직접 유입되지 않는다. 호출 상한은 SPEC §5.2의 보조 호출 정책을 따른다. */
 
 import { draftCasesPrompt, draftCasesRetryPrompt } from "./prompts";
-import { normalizeQuestion, withCallBudget, withoutCodeFence, type LlmClient } from "./runtime";
+import {
+  batchOutputTokensFor,
+  normalizeQuestion,
+  withCallBudget,
+  withoutCodeFence,
+  type LlmClient,
+} from "./runtime";
 
 /** 클릭 1회 호출 상한 = 본 호출 1 + 형식 재시도 1 (실행 예산 밖의 별도 백스톱).
  *  초안 개수는 호출 수와 무관하므로 따로 상한하지 않는다 — 남은 슬롯 계산은 호출자(위저드) 몫. */
@@ -59,10 +65,12 @@ export async function draftCases(
   const clamped = Math.max(1, Math.floor(count));
   const existingQuestions = existing.map((c) => c.question);
   const budgeted = withCallBudget(llm, ASSIST_CALLS_PER_CLICK);
+  // 초안은 항목당 질문+답 쌍이라 채점 배치보다 길다 — 2항목분 예산으로 절단을 막는다
+  const maxOutputTokens = batchOutputTokensFor(clamped * 2);
 
   const first = await budgeted.complete(
     draftCasesPrompt(material, existingQuestions, clamped),
-    { temperature: 0.7 },
+    { temperature: 0.7, maxOutputTokens },
   );
   let drafted: DraftedCase[];
   try {
@@ -71,7 +79,7 @@ export async function draftCases(
     if (!(error instanceof DraftFormatError)) throw error;
     const retried = await budgeted.complete(
       draftCasesRetryPrompt(material, existingQuestions, clamped, first),
-      { temperature: 0.7 },
+      { temperature: 0.7, maxOutputTokens },
     );
     try {
       drafted = parseDraftedCases(retried);
