@@ -77,12 +77,31 @@ export interface TemplateEntry {
   caseAssist?: {
     /** 초안 버튼 옆 안내 문구 — 템플릿이 소유한다 */
     nudge: string;
+    /** 난이도 슬라이더 선언(선택) — 값의 의미(교차 사실 수 등)는 템플릿이 소유하고,
+     *  위저드는 선언된 범위의 숫자를 draft에 전달만 한다. */
+    difficulty?: {
+      label: string;
+      min: number;
+      max: number;
+      defaultValue: number;
+      /** 슬라이더 배지 문구 — 값의 템플릿별 의미를 사용자에게 설명한다 */
+      describe(value: number): string;
+      hint: string;
+    };
     draft(
       material: string,
       existing: Array<{ question: string; expectedAnswer: string }>,
       count: number,
       llm: LlmClient,
-    ): Promise<Array<{ question: string; expectedAnswer: string }>>;
+      difficulty?: number,
+    ): Promise<
+      Array<{
+        question: string;
+        expectedAnswer: string;
+        /** 근거 인용(멀티홉 초안) — 확인 UI 표시 전용, 제출에 실리지 않는다 */
+        evidence?: Array<{ quote: string; found: boolean }>;
+      }>
+    >;
   };
   ArtifactView: ComponentType<{ problem: unknown; artifact: unknown }>;
 }
@@ -151,8 +170,17 @@ const handoverEntry: TemplateEntry = {
   caseAssist: {
     nudge:
       "AI 초안은 참고 자료에 이미 있는 내용만 재구성합니다. 자료에 없는 지식 — 구두로만 전해지던 규칙, 예외 상황 — 을 직접 추가할수록 검증이 강해집니다.",
-    draft: (material, existing, count, llm) =>
-      handover.draftCases(llm, material, existing, count),
+    // 실측(experiments/multihop-01): 교차 2 + 단일 답 강제가 무문서 정답률을 낮춘다(0.43→0.30)
+    difficulty: {
+      label: "난이도 (교차 사실 수)",
+      min: 1,
+      max: 3,
+      defaultValue: 2,
+      describe: (value) => (value === 1 ? "사실 1개 · 회수형" : `사실 ${value}개 교차`),
+      hint: "2 이상이면 자료의 서로 다른 위치에 있는 사실들을 종합해야만 답할 수 있는 질문을 요구하고, 근거 인용을 초안 카드에 표시합니다.",
+    },
+    draft: (material, existing, count, llm, difficulty) =>
+      handover.draftCases(llm, material, existing, count, difficulty),
   },
   examiner: {
     runBattery: (compiled, llm, onProgress) =>

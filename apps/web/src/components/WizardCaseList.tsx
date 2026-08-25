@@ -10,6 +10,9 @@ export interface CasePair {
   provenance?: "user" | "ai" | "ai_edited";
   /** AI 초안 미확인 — 확인 전에는 스텝 검증에 걸리고 answers에 절대 실리지 않는다 */
   needsConfirm?: boolean;
+  /** 멀티홉 초안의 근거 인용 — 확인용 표시 전용. toAnswers가 싣지 않아 제출·다이제스트에
+   *  절대 유입되지 않는다. found=false는 원료에서 인용을 찾지 못했다는 경고 신호. */
+  evidence?: Array<{ quote: string; found: boolean }>;
 }
 
 /** styles.css의 input과 같은 결 — textarea 전역 스타일이 없어 여기서 공유한다 */
@@ -119,6 +122,29 @@ export function WizardCaseList({
               onChange={(e) => update(i, { expectedAnswer: e.target.value })}
             />
           </div>
+          {p.evidence !== undefined && p.evidence.length > 0 ? (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 4 }}>
+                초안이 근거로 삼은 자료 대목 — 확인할 때 실제 자료와 맞는지 훑어보세요.
+              </div>
+              {p.evidence.map((e, k) => (
+                <div
+                  key={k}
+                  style={{
+                    display: "flex",
+                    alignItems: "baseline",
+                    gap: 6,
+                    fontSize: 12,
+                    color: "var(--ink-2)",
+                    padding: "2px 0",
+                  }}
+                >
+                  {!e.found ? <span className="badge">자료에서 찾을 수 없음</span> : null}
+                  <span style={{ fontStyle: "italic" }}>“{e.quote}”</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
       ))}
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

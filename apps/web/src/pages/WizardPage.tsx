@@ -100,6 +100,10 @@ export function WizardPage() {
   const [assistBusy, setAssistBusy] = useState(false);
   // 클릭 1회에 요청할 초안 개수 — 남은 슬롯까지 자유롭게 고른다(호출은 개수와 무관하게 클릭당 1회)
   const [assistCount, setAssistCount] = useState(3);
+  // 초안 난이도 — 값의 의미는 템플릿의 difficulty 선언이 소유한다
+  const [assistDifficulty, setAssistDifficulty] = useState(
+    () => entry?.caseAssist?.difficulty?.defaultValue ?? 1,
+  );
   const [attachBusy, setAttachBusy] = useState(false);
   const [credentialDrafts, setCredentialDrafts] = useState<Record<ByoProvider, string>>(() => ({
     gemini: getByoCredential("gemini") ?? "",
@@ -262,7 +266,13 @@ export function WizardPage() {
       const existing = pairs
         .filter((p) => p.question.trim() && p.expectedAnswer.trim())
         .map((p) => ({ question: p.question.trim(), expectedAnswer: p.expectedAnswer.trim() }));
-      const drafted = await assist.draft(material, existing, Math.min(assistCount, remaining), client);
+      const drafted = await assist.draft(
+        material,
+        existing,
+        Math.min(assistCount, remaining),
+        client,
+        assist.difficulty ? assistDifficulty : undefined,
+      );
       if (assistChoice !== "mock") {
         // 실패한 자격 증명이 기존의 정상 값을 덮지 않도록 성공한 뒤에만 저장한다.
         persistCredential(assistChoice, credentialFor(assistChoice));
@@ -279,6 +289,7 @@ export function WizardPage() {
           expectedAnswer: d.expectedAnswer,
           provenance: "ai",
           needsConfirm: true,
+          ...(d.evidence !== undefined ? { evidence: d.evidence } : {}),
         };
         const emptyIdx = next.findIndex((p) => !p.question.trim() && !p.expectedAnswer.trim());
         if (emptyIdx >= 0) next[emptyIdx] = pair;
@@ -430,6 +441,33 @@ export function WizardPage() {
                         />
                         <span className="badge muted">{assistEffective}개</span>
                       </div>
+                      {entry.caseAssist.difficulty ? (
+                        <>
+                          <div
+                            style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 10 }}
+                          >
+                            <label htmlFor="assist-difficulty" style={{ margin: 0, fontSize: 13 }}>
+                              {entry.caseAssist.difficulty.label}
+                            </label>
+                            <input
+                              id="assist-difficulty"
+                              type="range"
+                              min={entry.caseAssist.difficulty.min}
+                              max={entry.caseAssist.difficulty.max}
+                              step={1}
+                              value={assistDifficulty}
+                              style={{ width: 140, padding: 0 }}
+                              onChange={(e) => setAssistDifficulty(Number(e.target.value))}
+                            />
+                            <span className="badge muted">
+                              {entry.caseAssist.difficulty.describe(assistDifficulty)}
+                            </span>
+                          </div>
+                          <div className="hint" style={{ marginTop: 4 }}>
+                            {entry.caseAssist.difficulty.hint}
+                          </div>
+                        </>
+                      ) : null}
                       <div style={{ marginTop: 8 }}>
                         <button type="button" disabled={busy} onClick={onDraftCases}>
                           {assistBusy ? "초안 생성 중…" : "AI로 질답 초안 만들기"}

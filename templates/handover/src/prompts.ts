@@ -178,13 +178,29 @@ export function draftCasesPrompt(
   material: string,
   existingQuestions: string[],
   count: number,
+  hops = 1,
 ): string {
   const existingBlock =
     existingQuestions.length > 0
       ? `\n## 이미 입력된 질문 (중복 금지)\n${existingQuestions.map((q) => `- ${q}`).join("\n")}\n`
       : "";
+  // 멀티홉(hops ≥ 2) — 실측(experiments/multihop-01) 교훈: "종합하라"만으로는 모델이
+  // 복합 질문(두 질문을 '그리고'로 병렬 연결)을 만들어 오히려 쉬워진다.
+  // 단일 답 강제 + 교차 필수 + verbatim 근거 인용이 효과의 실체다(arm C).
+  const multihopRules =
+    hops >= 2
+      ? `
+- 질문은 하나여야 하고, 답은 짧은 사실 하나(1~3문장)여야 합니다. 독립된 두 질문을 '그리고'로 잇는 복합 질문은 무효입니다.
+- 답을 도출하려면 자료의 서로 다른 위치(다른 항목·절·단락)에 있는 사실 ${hops}개가 모두 필요해야 합니다. 한 사실만으로 답할 수 있으면 무효입니다.
+- 각 초안에 "evidence"로, 답의 근거가 된 서로 다른 위치의 대목 ${hops}곳을 자료에서 글자 그대로 복사해(각 20~200자) 담으세요.`
+      : "";
+  const schema =
+    hops >= 2
+      ? `[{"question": "<질문>", "expectedAnswer": "<답>", "evidence": ["<자료에서 그대로 복사한 인용>", ...]}]`
+      : `[{"question": "<질문>", "expectedAnswer": "<답>"}]`;
   return `${DRAFT_CASES_MARKER}
 생성 개수: ${count}
+교차 사실 수: ${hops}
 
 당신은 인수인계 문서 검증에 쓸 질문·답 쌍의 초안을 만듭니다.
 아래 참고 자료를 근거로, 이 업무를 넘겨받는 후임자가 실제로 물을 법한 질문과 그 답 ${count}쌍을 작성하세요.
@@ -193,13 +209,13 @@ export function draftCasesPrompt(
 - 답은 자료에 명시된 내용만 근거로 작성하고, 자료에 없는 내용은 지어내지 마세요.
 - 자료 밖의 지식(구두로만 전해지던 규칙, 예외 상황)은 이 초안에 담을 수 없습니다 — 그런 질문은 만들지 마세요.
 - 이미 입력된 질문과 같거나 사실상 같은 질문은 만들지 마세요.
-- 질문은 구체적으로, 답은 간결하고 실행 가능하게 쓰세요.
+- 질문은 구체적으로, 답은 간결하고 실행 가능하게 쓰세요.${multihopRules}
 
 ## 참고 자료
 ${material}
 ${existingBlock}
 설명·코드 펜스 없이 JSON 배열 하나만 출력하세요:
-[{"question": "<질문>", "expectedAnswer": "<답>"}]`;
+${schema}`;
 }
 
 /** 초안 내용은 바꾸지 않고 출력 형식만 한 번 고치게 한다 — graderRetryPrompt와 같은 패턴 */
@@ -208,8 +224,9 @@ export function draftCasesRetryPrompt(
   existingQuestions: string[],
   count: number,
   malformed: string,
+  hops = 1,
 ): string {
-  return `${draftCasesPrompt(material, existingQuestions, count)}
+  return `${draftCasesPrompt(material, existingQuestions, count, hops)}
 
 이전 출력은 형식 검증에 실패했습니다:
 <invalid-output>

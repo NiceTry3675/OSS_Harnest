@@ -17,15 +17,28 @@ export const ASSIST_CALLS_PER_CLICK = 2;
 /** 초안의 근거가 될 최소 자료 분량 */
 export const ASSIST_MIN_MATERIAL_CHARS = 50;
 
+/** 멀티홉 초안의 근거 인용 — 확인 UI 표시 전용이며 제출·다이제스트에 실리지 않는다.
+ *  found는 공백 정규화 부분 문자열 대조 결과(실측 multihop-01: 실존율 93~100%). */
+export interface DraftEvidence {
+  quote: string;
+  found: boolean;
+}
+
 export interface DraftedCase {
   question: string;
   expectedAnswer: string;
+  evidence?: DraftEvidence[];
 }
 
 /** 형식 오류 구분용 모듈 지역 타입 — 위저드 인라인 표시 전용이라 계약 오류로 승격하지 않는다 */
 class DraftFormatError extends Error {}
 
-function parseDraftedCases(raw: string): DraftedCase[] {
+/** 근거 대조용 정규화 — 모델 인용의 공백·개행 차이를 흡수한다 */
+function normalizeForMatch(text: string): string {
+  return text.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function parseDraftedCases(raw: string, hops: number): DraftedCase[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(withoutCodeFence(raw));
@@ -46,16 +59,32 @@ function parseDraftedCases(raw: string): DraftedCase[] {
     if (typeof value.expectedAnswer !== "string" || value.expectedAnswer.trim().length === 0) {
       throw new DraftFormatError("초안의 expectedAnswer는 비어 있지 않은 문자열이어야 합니다.");
     }
-    return { question: value.question.trim(), expectedAnswer: value.expectedAnswer.trim() };
+    const drafted: DraftedCase = {
+      question: value.question.trim(),
+      expectedAnswer: value.expectedAnswer.trim(),
+    };
+    if (hops >= 2) {
+      const quotes = Array.isArray(value.evidence)
+        ? value.evidence.filter((e): e is string => typeof e === "string" && e.trim().length > 0)
+        : [];
+      if (quotes.length < hops) {
+        throw new DraftFormatError(`초안의 evidence는 자료 인용 ${hops}개를 담은 배열이어야 합니다.`);
+      }
+      drafted.evidence = quotes.slice(0, hops).map((quote) => ({ quote: quote.trim(), found: false }));
+    }
+    return drafted;
   });
 }
 
-/** 케이스 초안 생성 — 클릭당 본 호출 1회, 형식 재시도 1회. 기존 질문과 중복은 제거한다. */
+/** 케이스 초안 생성 — 클릭당 본 호출 1회, 형식 재시도 1회. 기존 질문과 중복은 제거한다.
+ *  hops ≥ 2면 서로 다른 위치의 사실 hops개 교차를 요구하고(멀티홉·단일 답 강제),
+ *  근거 인용을 원료와 로컬 대조해 표시용 found를 채운다 — drop 필터가 아니다. */
 export async function draftCases(
   llm: LlmClient,
   material: string,
   existing: DraftedCase[],
   count: number,
+  hops = 1,
 ): Promise<DraftedCase[]> {
   if (material.trim().length < ASSIST_MIN_MATERIAL_CHARS) {
     throw new Error(
@@ -63,26 +92,27 @@ export async function draftCases(
     );
   }
   const clamped = Math.max(1, Math.floor(count));
+  const clampedHops = Math.max(1, Math.floor(hops));
   const existingQuestions = existing.map((c) => c.question);
   const budgeted = withCallBudget(llm, ASSIST_CALLS_PER_CLICK);
-  // 초안은 항목당 질문+답 쌍이라 채점 배치보다 길다 — 2항목분 예산으로 절단을 막는다
-  const maxOutputTokens = batchOutputTokensFor(clamped * 2);
+  // 초안은 항목당 질문+답 쌍이라 채점 배치보다 길다 — 2항목분(근거 포함 시 3항목분) 예산으로 절단을 막는다
+  const maxOutputTokens = batchOutputTokensFor(clamped * (clampedHops >= 2 ? 3 : 2));
 
   const first = await budgeted.complete(
-    draftCasesPrompt(material, existingQuestions, clamped),
+    draftCasesPrompt(material, existingQuestions, clamped, clampedHops),
     { temperature: 0.7, maxOutputTokens },
   );
   let drafted: DraftedCase[];
   try {
-    drafted = parseDraftedCases(first);
+    drafted = parseDraftedCases(first, clampedHops);
   } catch (error) {
     if (!(error instanceof DraftFormatError)) throw error;
     const retried = await budgeted.complete(
-      draftCasesRetryPrompt(material, existingQuestions, clamped, first),
+      draftCasesRetryPrompt(material, existingQuestions, clamped, first, clampedHops),
       { temperature: 0.7, maxOutputTokens },
     );
     try {
-      drafted = parseDraftedCases(retried);
+      drafted = parseDraftedCases(retried, clampedHops);
     } catch (retryError) {
       if (retryError instanceof DraftFormatError) {
         throw new Error(
@@ -90,6 +120,14 @@ export async function draftCases(
         );
       }
       throw retryError;
+    }
+  }
+
+  // 근거 실존 대조 — 표시용 신호일 뿐 초안을 걸러내지 않는다(확인·수정은 사용자 몫)
+  const normalizedMaterial = normalizeForMatch(material);
+  for (const c of drafted) {
+    for (const e of c.evidence ?? []) {
+      e.found = normalizedMaterial.includes(normalizeForMatch(e.quote));
     }
   }
 

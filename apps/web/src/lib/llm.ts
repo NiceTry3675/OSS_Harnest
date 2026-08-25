@@ -812,9 +812,19 @@ export function createAssistMockClient(): LlmClient {
         throw new Error("모의 초안 클라이언트에 초안 요청이 아닌 프롬프트가 들어왔습니다.");
       }
       const count = Math.max(1, Number(prompt.match(/생성 개수: (\d+)/)?.[1] ?? 1));
+      const hops = Math.max(1, Number(prompt.match(/교차 사실 수: (\d+)/)?.[1] ?? 1));
+      // 멀티홉 데모용 근거 인용 — 프롬프트의 참고 자료에서 실제 대목을 잘라 실존 대조를 통과시킨다
+      const material = prompt.match(/## 참고 자료\n([\s\S]*?)\n(?:## |설명·코드 펜스)/)?.[1] ?? "";
+      const snippetAt = (fraction: number): string => {
+        const start = Math.max(0, Math.floor(material.length * fraction) - 15);
+        return material.slice(start, start + 30).trim() || "모의 근거 인용";
+      };
       const pairs = Array.from({ length: count }, (_, i) => ({
         question: `모의 초안 질문 ${i + 1}: 참고 자료의 핵심 절차 ${i + 1}은 무엇인가요?`,
         expectedAnswer: `모의 초안 답 ${i + 1}: 자료에 적힌 절차 ${i + 1}을 따르면 됩니다.`,
+        ...(hops >= 2
+          ? { evidence: Array.from({ length: hops }, (_, k) => snippetAt((k + 1) / (hops + 1))) }
+          : {}),
       }));
       return JSON.stringify(pairs);
     },

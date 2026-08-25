@@ -89,6 +89,69 @@ describe("draftCases", () => {
     expect(llm.prompts[0]).toContain("- 질문 1");
   });
 
+  it("hops 1(기본)은 기존과 동일하다 — 프롬프트에 evidence 요구가 없다", async () => {
+    const llm = sequenceLlm([JSON.stringify([pair(1)])]);
+    await expect(draftCases(llm, MATERIAL, [], 1)).resolves.toEqual([pair(1)]);
+    expect(llm.prompts[0]).toContain("교차 사실 수: 1");
+    expect(llm.prompts[0]).not.toContain("evidence");
+    expect(llm.prompts[0]).not.toContain("복합 질문");
+  });
+
+  it("hops 2는 멀티홉 규칙을 요구하고 근거 인용을 원료와 대조해 표시용 found를 채운다", async () => {
+    const inMaterial = "사내 배포 파이프라인을   관리하는"; // 공백 차이는 정규화로 흡수
+    const notInMaterial = "자료에 없는 지어낸 근거 인용";
+    const llm = sequenceLlm([
+      JSON.stringify([
+        { question: "질문 1", expectedAnswer: "답 1", evidence: [inMaterial, notInMaterial] },
+      ]),
+    ]);
+    const result = await draftCases(llm, MATERIAL, [], 1, 2);
+    expect(llm.prompts[0]).toContain("교차 사실 수: 2");
+    expect(llm.prompts[0]).toContain("복합 질문은 무효");
+    expect(llm.prompts[0]).toContain('"evidence"');
+    expect(result).toEqual([
+      {
+        question: "질문 1",
+        expectedAnswer: "답 1",
+        evidence: [
+          { quote: inMaterial, found: true },
+          { quote: notInMaterial, found: false },
+        ],
+      },
+    ]);
+  });
+
+  it("hops 2에서 evidence가 모자라면 형식 오류로 재시도하고, 재시도까지 실패하면 거부한다", async () => {
+    const ok = JSON.stringify([
+      { question: "질문 1", expectedAnswer: "답 1", evidence: ["근거 A", "근거 B"] },
+    ]);
+    const recovered = sequenceLlm([JSON.stringify([pair(1)]), ok]);
+    const result = await draftCases(recovered, MATERIAL, [], 1, 2);
+    expect(result[0].evidence).toHaveLength(2);
+    expect(recovered.prompts).toHaveLength(2);
+    expect(recovered.prompts[1]).toContain("<invalid-output>");
+
+    const failed = sequenceLlm([
+      JSON.stringify([pair(1)]),
+      JSON.stringify([{ question: "질문 1", expectedAnswer: "답 1", evidence: ["하나뿐"] }]),
+    ]);
+    await expect(draftCases(failed, MATERIAL, [], 1, 2)).rejects.toThrow(
+      "초안 출력을 해석할 수 없습니다",
+    );
+    expect(failed.prompts.length).toBeLessThanOrEqual(ASSIST_CALLS_PER_CLICK);
+  });
+
+  it("hops 2는 근거 분량을 고려해 출력 토큰 예산을 3항목분으로 늘린다", async () => {
+    const llm = sequenceLlm([
+      JSON.stringify([
+        { question: "질문 1", expectedAnswer: "답 1", evidence: ["근거 A", "근거 B"] },
+      ]),
+    ]);
+    await draftCases(llm, MATERIAL, [], 5, 2);
+    // batchOutputTokensFor(5×2) = 10240 (기존 테스트) → 5×3은 그보다 커야 한다
+    expect(llm.budgets[0]).toBeGreaterThan(10_240);
+  });
+
   it("참고 자료가 너무 짧으면 모델을 호출하지 않고 거부한다", async () => {
     const llm = sequenceLlm([]);
     await expect(
