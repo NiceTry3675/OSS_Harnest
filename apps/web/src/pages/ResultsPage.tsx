@@ -22,6 +22,7 @@ import {
   needsRestoredHoldoutRecovery,
   serializeProjectExport,
 } from "../lib/project-export";
+import { setFlowStep } from "../lib/flowStep";
 import { CurveChart } from "../components/CurveChart";
 import { countCaseProvenance } from "../lib/case-provenance";
 
@@ -63,6 +64,10 @@ function caseGrade(score: number | undefined): string {
 }
 
 export function ResultsPage() {
+  useEffect(() => {
+    setFlowStep(6); // 결과
+  }, []);
+
   const {
     compiled,
     approvedDigest,

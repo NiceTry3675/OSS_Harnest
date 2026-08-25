@@ -6,6 +6,7 @@ import type { ComponentType } from "react";
 import type {
   CalibrationPairSpec,
   EvaluationPack,
+  ExaminerCheckResult,
   InterviewSubmission,
   JudgeProvider,
   Question,
@@ -69,6 +70,8 @@ export interface TemplateEntry {
       compiled: CompiledGeneric,
       llm: LlmClient,
       onProgress?: (message: string) => void,
+      /** 검사 하나가 끝날 때마다 — 화면이 결과를 기다리지 않고 바로 표시한다 */
+      onCheck?: (check: ExaminerCheckResult) => void,
     ): Promise<ExaminerRunGeneric>;
     buildPairs(run: ExaminerRunGeneric, pack: EvaluationPack): CalibrationPairSpec[];
   };
@@ -161,12 +164,13 @@ const handoverEntry: TemplateEntry = {
       handover.draftCases(llm, material, existing, count),
   },
   examiner: {
-    runBattery: (compiled, llm, onProgress) =>
+    runBattery: (compiled, llm, onProgress, onCheck) =>
       handover.runExaminerBattery(
         compiled.problem as handover.HandoverProblem,
         compiled.pack,
         llm,
         onProgress,
+        onCheck,
       ),
     buildPairs: (run, pack) =>
       handover.buildCalibrationPairs(run as handover.ExaminerRun, pack),

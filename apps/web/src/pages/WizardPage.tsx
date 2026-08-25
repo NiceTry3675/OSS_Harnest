@@ -30,6 +30,7 @@ import {
   validate,
   type DraftValue,
 } from "../lib/wizard-form";
+import { setFlowStep } from "../lib/flowStep";
 import { useProject } from "../state";
 
 const ROLE_LABEL: Record<Question["role"], string> = {
@@ -106,6 +107,7 @@ export function WizardPage() {
   // 단계가 바뀌면 맨 위에서 시작한다 — 긴 목록 중간에서 열리면 어디인지 알 수 없다
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "auto" });
+    setFlowStep(Math.min(step, 2)); // 자료·질문·모델
   }, [step]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -330,7 +332,7 @@ export function WizardPage() {
 
   return (
     <div className="wizard">
-      <div className="wizard-grid">
+      <div className={`wizard-grid${isLast ? " is-wide" : ""}`}>
         <div className="wizard-main route-swap" key={step}>
           <div className="wizard-tags">
             <span className="eyebrow">
@@ -535,10 +537,7 @@ export function WizardPage() {
             </div>
 
             {isLast && entry.needsModel ? (
-              <div
-                className="field"
-                style={{ borderTop: "1px solid var(--border)", paddingTop: 14 }}
-              >
+              <div className="field judge-block">
                 <label className="q-big" style={{ fontSize: "var(--t-h2)" }}>
                   무엇으로 채점할까요?
                 </label>
@@ -607,8 +606,17 @@ export function WizardPage() {
 
             {error ? <div className="error" style={{ marginBottom: 12 }}>{error}</div> : null}
 
-            {step > 0 ? (
-              <div style={{ display: "flex", gap: 8 }}>
+            <div className="wizard-nav">
+              {isLast ? (
+                <button type="submit" className="primary wizard-go-wide" disabled={busy}>
+                  {submitting
+                    ? judgeChoice === "mock"
+                      ? "확인 중…"
+                      : "모델 연결 확인 중…"
+                    : (q.nextLabel ?? "작성 완료 — 승인 화면으로")}
+                </button>
+              ) : null}
+              {step > 0 ? (
                 <button
                   type="button"
                   disabled={busy}
@@ -619,28 +627,24 @@ export function WizardPage() {
                 >
                   이전 단계로
                 </button>
-              </div>
-            ) : null}
+              ) : null}
+            </div>
           </form>
         </div>
 
-        <div className="wizard-side">
-          <WizardBlueprint entry={entry} answers={liveAnswers} judge={judge} />
-          <button
-            type="submit"
-            form="wizard-form"
-            className="primary wizard-go"
-            disabled={busy}
-          >
-            {isLast
-              ? submitting
-                ? judgeChoice === "mock"
-                  ? "확인 중…"
-                  : "모델 연결 확인 중…"
-                : (q.nextLabel ?? "작성 완료 — 승인 화면으로")
-              : (q.nextLabel ?? "다음")}
-          </button>
-        </div>
+        {isLast ? null : (
+          <div className="wizard-side">
+            <WizardBlueprint entry={entry} answers={liveAnswers} judge={judge} />
+            <button
+              type="submit"
+              form="wizard-form"
+              className="primary wizard-go"
+              disabled={busy}
+            >
+              {q.nextLabel ?? "다음"}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

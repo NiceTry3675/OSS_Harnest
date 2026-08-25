@@ -28,7 +28,7 @@ export function ScoreHero({
   const progress = maxRounds > 0 ? Math.min(1, round / maxRounds) : 0;
 
   return (
-    <div className="card card-hero score-hero">
+    <div className="score-hero">
       <div className="score-hero-main">
         <div className="score-hero-label">현재 점수</div>
         <div className="score-hero-value">

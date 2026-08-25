@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { TEMPLATES } from "../templates";
 import { useProject } from "../state";
 import { IntroTour, markTourSeen, tourSeen } from "../components/IntroTour";
+import { setFlowStep } from "../lib/flowStep";
 import { useCountUp } from "../lib/useCountUp";
 
 /** 처음 만든 문서와 마지막 문서의 점수 — 홈에서 반복 재생하는 예시 수치.
@@ -43,6 +44,7 @@ export function HomePage() {
   const picks = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    setFlowStep(-1); // 홈은 흐름 밖
     if (!tourSeen()) setTour(true);
   }, []);
 

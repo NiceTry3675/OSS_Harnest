@@ -21,6 +21,8 @@ import {
   type ExaminerCheckId,
   type ExaminerVerdict,
 } from "@harnest/contracts";
+import type { ExaminerCheckResult } from "@harnest/contracts";
+import { setFlowStep } from "../lib/flowStep";
 import { SealPanel } from "../components/SealPanel";
 import { useProject } from "../state";
 import { getTemplate, type TemplateEntry } from "../templates";
@@ -39,6 +41,80 @@ const CHECK_LABEL: Record<ExaminerCheckId, string> = {
   stability: "안정성 (재채점이 흔들리지 않는가)",
   hack_resistance: "꼼수 내성 (알려진 꼼수 4종)",
 };
+
+/** 시험 카드에 쓰는 짧은 이름과 설명. 표의 긴 라벨(CHECK_LABEL)은 그대로 둔다. */
+const CHECK_CARD: Record<ExaminerCheckId, { name: string; desc: string; cue: string }> = {
+  ordering: {
+    name: "순서를 지키는가",
+    desc: "더 좋은 문서에 더 높은 점수를 주는지",
+    cue: "품질 사다리",
+  },
+  discrimination: {
+    name: "차이를 가려내는가",
+    desc: "비슷한 문서 사이를 구분하는지",
+    cue: "품질 사다리",
+  },
+  stability: {
+    name: "같은 답에 같은 점수인가",
+    desc: "같은 문서를 다시 채점해도 흔들리지 않는지",
+    cue: "안정성",
+  },
+  hack_resistance: {
+    name: "꼼수에 속지 않는가",
+    desc: "길게 늘이거나 베껴 쓴 문서를 걸러내는지",
+    cue: "꼼수",
+  },
+};
+
+const CHECK_ORDER: ExaminerCheckId[] = [
+  "ordering",
+  "discrimination",
+  "stability",
+  "hack_resistance",
+];
+
+const VERDICT_CLASS: Record<ExaminerVerdict, string> = {
+  pass: "is-pass",
+  warn: "is-warn",
+  fail: "is-fail",
+};
+
+/** 검증이 도는 동안 보여주는 카드 — 진행 메시지로 지금 어느 시험인지 표시한다 */
+function CheckCards({
+  checks,
+  progress,
+}: {
+  checks: ReadonlyArray<{ id: ExaminerCheckId; verdict: ExaminerVerdict; note: string }> | null;
+  progress: string;
+}) {
+  return (
+    <div className="test-grid">
+      {CHECK_ORDER.map((id) => {
+        const done = checks?.find((c) => c.id === id) ?? null;
+        const running = !done && progress.includes(CHECK_CARD[id].cue);
+        const cls = done ? VERDICT_CLASS[done.verdict] : running ? "is-running" : "";
+        return (
+          <div key={id} className={`test ${cls}`} title={done ? done.note : undefined}>
+            <b>{CHECK_CARD[id].name}</b>
+            <p>{CHECK_CARD[id].desc}</p>
+            <span className="test-state">
+              {done ? (
+                `${done.verdict === "pass" ? "✓ " : ""}${VERDICT_LABEL[done.verdict]}`
+              ) : running ? (
+                <>
+                  <span className="spin" aria-hidden="true" />
+                  시험하는 중
+                </>
+              ) : (
+                "대기"
+              )}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function VerdictBadge({ verdict }: { verdict: ExaminerVerdict }) {
   return (
@@ -129,6 +205,8 @@ export function ApprovalPage() {
 
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState("");
+  // 검증이 도는 동안 하나씩 도착하는 검사 결과 — 카드가 즉시 색을 바꾼다
+  const [liveChecks, setLiveChecks] = useState<ExaminerCheckResult[]>([]);
   const [batteryError, setBatteryError] = useState<string | null>(null);
   const [keyInput, setKeyInput] = useState("");
   const [choices, setChoices] = useState<(AbChoice | null)[] | null>(null);
@@ -191,6 +269,11 @@ export function ApprovalPage() {
   }
 
   const approved = approvedAt !== null && approvedDigest === pack.definitionDigest;
+
+  // 승인 화면은 두 칸이다 — 검증하는 동안이 4번째, 잠근 뒤가 5번째
+  useEffect(() => {
+    setFlowStep(approved ? 4 : 3);
+  }, [approved]);
   approvedRef.current = approved;
   const jp = pack.judgeProcedure;
   const hp = pack.holdoutPolicy;
@@ -211,7 +294,10 @@ export function ApprovalPage() {
     noteExaminerAttempt(startedDigest);
     setRunning(true);
     try {
-      const run = await entry.examiner.runBattery(compiled, llm, setProgress);
+      setLiveChecks([]);
+      const run = await entry.examiner.runBattery(compiled, llm, setProgress, (c) =>
+        setLiveChecks((prev) => [...prev.filter((p) => p.id !== c.id), c]),
+      );
       // 실행 중 기준이 재컴파일·승인됐거나 화면을 떠났다면 이 결과는 현재 승인 증거가 아니다.
       if (
         !activeRef.current ||
@@ -434,14 +520,20 @@ export function ApprovalPage() {
                   안정성, 그리고 알려진 꼼수 4종(장황함·통째 베끼기·날조·아첨)에 대한 내성.
                 </p>
                 {running ? (
-                  <p className="hint" style={{ margin: 0 }}>검증 중… {progress}</p>
+                  <>
+                    <CheckCards checks={liveChecks} progress={progress} />
+                    <p className="hint">{progress}</p>
+                  </>
                 ) : quotaExhausted ? (
                   quotaExhaustedBox
                 ) : (
                   <>
-                    <button className="primary" onClick={() => void runBattery()}>
-                      검증 실행
-                    </button>
+                    <CheckCards checks={null} progress={progress} />
+                    <div style={{ marginTop: 16 }}>
+                      <button className="primary" onClick={() => void runBattery()}>
+                        검증 실행
+                      </button>
+                    </div>
                     {quotaHint}
                   </>
                 )}
@@ -456,21 +548,7 @@ export function ApprovalPage() {
                     {examinerRun!.report.judge.model}
                   </span>
                 </div>
-                <table className="grid">
-                  <tbody>
-                    {examinerRun!.report.checks.map((c) => (
-                      <tr key={c.id}>
-                        <th style={{ textAlign: "left", whiteSpace: "nowrap" }}>
-                          {CHECK_LABEL[c.id]}
-                        </th>
-                        <td style={{ textAlign: "left", width: 64 }}>
-                          <VerdictBadge verdict={c.verdict} />
-                        </td>
-                        <td style={{ textAlign: "left" }}>{c.note}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <CheckCards checks={examinerRun!.report.checks} progress="" />
                 {!approved && !failedCalibration ? (
                   <div style={{ marginTop: 10 }}>
                     {reportFailed ? (

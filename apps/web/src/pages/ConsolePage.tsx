@@ -24,6 +24,7 @@ import { getTemplate, type TemplateRuntime } from "../templates";
 import { setByoKey } from "../lib/llm";
 import { markUnavailableRestoredHoldout } from "../lib/project-snapshot";
 import { isHoldoutPhasePending, isHoldoutSettled } from "../lib/project-export";
+import { setFlowStep } from "../lib/flowStep";
 import { ScoreHero } from "../components/ScoreHero";
 import { CurveChart } from "../components/CurveChart";
 import { ExperimentTree } from "../components/ExperimentTree";
@@ -56,6 +57,10 @@ function holdoutLabel(result: HoldoutEvaluation, phase: string): string {
 }
 
 export function ConsolePage() {
+  useEffect(() => {
+    setFlowStep(5); // 실행
+  }, []);
+
   const {
     templateId,
     compiled,
@@ -439,19 +444,21 @@ export function ConsolePage() {
         </div>
       )}
 
-      <div className="card">
-        <CurveChart
-          curve={checkpoint?.curve ?? []}
-          adopted={adopted}
-          // 실행 중에만 축을 최대 회차로 고정한다 — 끝난 뒤에는 빈 오른쪽을 남기지 않는다
-          xMax={status === "running" ? compiled.loopSpec.maxRounds : undefined}
-          live={status === "running"}
-        />
-      </div>
-
-      <div className="card">
-        <h2 className="deck-h">실험 기록</h2>
-        <ExperimentTree tree={checkpoint?.tree ?? []} />
+      {/* 점수·곡선은 왼쪽, 회차 기록은 오른쪽 — 한 화면에서 같이 읽힌다 */}
+      <div className="deck">
+        <div className="deck-main">
+          <CurveChart
+            curve={checkpoint?.curve ?? []}
+            adopted={adopted}
+            // 실행 중에만 축을 최대 회차로 고정한다 — 끝난 뒤에는 빈 오른쪽을 남기지 않는다
+            xMax={status === "running" ? compiled.loopSpec.maxRounds : undefined}
+            live={status === "running"}
+          />
+        </div>
+        <div className="deck-side">
+          <h2 className="deck-h">시도한 기록</h2>
+          <ExperimentTree tree={checkpoint?.tree ?? []} />
+        </div>
       </div>
     </div>
   );
