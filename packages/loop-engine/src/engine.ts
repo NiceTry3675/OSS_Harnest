@@ -1,7 +1,7 @@
 /** 루프 엔진 구현 — 계약은 ./index.ts 문서 주석 (SPEC §5.1.1).
  *  엔진은 scorer/pack을 수정할 어떤 경로도 갖지 않는다: 옵션으로 받은 함수를 호출만 한다. */
 
-import type { LoopCheckpoint, ProvenanceType } from "@harnest/contracts";
+import { SCORE_CEILING, type LoopCheckpoint, type ProvenanceType } from "@harnest/contracts";
 import type { LoopHandle, LoopRunOptions } from "./index";
 
 export interface SeededRng {
@@ -91,6 +91,16 @@ export function createLoopRun<A>(opts: LoopRunOptions<A>): LoopHandle {
       let sinceAdoption = 0;
       for (let i = c.tree.length - 1; i >= 0 && !c.tree[i].adopted; i--) sinceAdoption++;
 
+      // 척도 상한 도달 = 엄격 개선 채택이 불가능 — 라운드 0 만점·재개 시점 모두 즉시 종료
+      if (c.championScore >= SCORE_CEILING) {
+        c.status = "done";
+        c.doneReason = "ceiling";
+        note(c, "ceiling_stop", `척도 상한 ${SCORE_CEILING}점 도달 — 추가 채택 불가, 조기 종료`);
+        c.rngState = rng.state;
+        await commit(c);
+        return;
+      }
+
       while (c.round < spec.maxRounds) {
         if (pauseRequested) {
           c.status = "paused";
@@ -136,7 +146,11 @@ export function createLoopRun<A>(opts: LoopRunOptions<A>): LoopHandle {
         if (adopted) note(c, "adopted", `챔피언 교체: ${prevScore}점 → ${result.total}점`);
 
         sinceAdoption = adopted ? 0 : sinceAdoption + 1;
-        if (sinceAdoption >= spec.plateauRounds) {
+        if (c.championScore >= SCORE_CEILING) {
+          c.status = "done";
+          c.doneReason = "ceiling";
+          note(c, "ceiling_stop", `척도 상한 ${SCORE_CEILING}점 도달 — 추가 채택 불가, 조기 종료`);
+        } else if (sinceAdoption >= spec.plateauRounds) {
           c.status = "done";
           c.doneReason = "plateau";
           note(c, "plateau_stop", `연속 ${sinceAdoption}라운드 미채택 — 정체 종료`);

@@ -3,6 +3,9 @@
 
 export type AdoptionRule = "scalar_strict";
 
+/** 동결 스칼라 척도의 상한. 챔피언이 도달하면 엄격 개선 채택이 더는 불가능하다 */
+export const SCORE_CEILING = 100;
+
 export interface LoopSpec {
   maxRounds: number;
   /** 연속 미채택이 이 수에 달하면 정체 조기 종료 */
@@ -32,7 +35,7 @@ export interface RoundRecord {
 
 export type ProvenanceType =
   | "run_started" | "round" | "adopted" | "paused" | "resumed"
-  | "finished" | "plateau_stop";
+  | "finished" | "plateau_stop" | "ceiling_stop";
 
 /** 읽기는 자유·기록되지 않는다. 기록되는 것은 결과에 영향을 주는 사건뿐 (SPEC §3 원칙 7) */
 export interface ProvenanceEntry {
@@ -49,7 +52,7 @@ export interface LoopCheckpoint<A> {
   runId: string;
   packDigest: string;
   status: LoopStatus;
-  doneReason?: "max_rounds" | "plateau";
+  doneReason?: "max_rounds" | "plateau" | "ceiling";
   round: number;
   champion: A;
   championScore: number;

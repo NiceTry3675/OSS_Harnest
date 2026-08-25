@@ -46,14 +46,14 @@ async function fixture() {
     doneReason: "max_rounds",
     round: 1,
     champion: "완료",
-    championScore: 100,
+    championScore: 90,
     championViolations: [],
-    curve: [80, 100],
+    curve: [80, 90],
     tree: [
       {
         round: 1,
-        candidateScore: 100,
-        championScore: 100,
+        candidateScore: 90,
+        championScore: 90,
         adopted: true,
         gateRejected: false,
         violations: [],

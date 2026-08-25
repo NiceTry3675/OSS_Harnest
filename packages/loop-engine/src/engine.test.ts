@@ -129,6 +129,56 @@ describe("createLoopRun", () => {
     expect(last.provenance.some((p) => p.type === "plateau_stop")).toBe(true);
   });
 
+  it("챔피언이 척도 상한 100점에 도달하면 즉시 조기 종료한다 (ceiling)", async () => {
+    const candidates = [70, 100];
+    let generated = 0;
+    const events: LoopCheckpoint<number>[] = [];
+    const handle = createLoopRun<number>({
+      runId: "ceiling",
+      pack,
+      spec: makeSpec({ maxRounds: 10 }),
+      scorer: (a) => ok(a),
+      generate: () => candidates[generated++],
+      initial: () => 40,
+      store: new MemoryCheckpointStore<number>(),
+      onEvent: (cp) => events.push(cp),
+    });
+    await handle.start();
+
+    const last = events[events.length - 1];
+    expect(last.status).toBe("done");
+    expect(last.doneReason).toBe("ceiling");
+    expect(last.round).toBe(2); // 100점 채택 라운드에서 멈춘다
+    expect(generated).toBe(2); // 이후 generate 호출이 없다
+    expect(last.curve).toEqual([40, 70, 100]);
+    expect(last.provenance.some((p) => p.type === "ceiling_stop")).toBe(true);
+  });
+
+  it("라운드 0 원샷이 이미 100점이면 라운드를 돌지 않고 종료한다", async () => {
+    let generateCalls = 0;
+    const store = new MemoryCheckpointStore<number>();
+    await createLoopRun<number>({
+      runId: "ceiling-r0",
+      pack,
+      spec: makeSpec({ maxRounds: 10 }),
+      scorer: () => ok(100),
+      generate: (champion) => {
+        generateCalls++;
+        return champion;
+      },
+      initial: () => 0,
+      store,
+      onEvent: () => {},
+    }).start();
+
+    const final = await store.load("ceiling-r0");
+    expect(final?.status).toBe("done");
+    expect(final?.doneReason).toBe("ceiling");
+    expect(final?.round).toBe(0);
+    expect(final?.tree).toEqual([]);
+    expect(generateCalls).toBe(0);
+  });
+
   it("곡선은 후보 점수가 아니라 채택 확정 후 챔피언 점수를 기록한다", async () => {
     const candidates = [20, 15, 30];
     let i = 0;

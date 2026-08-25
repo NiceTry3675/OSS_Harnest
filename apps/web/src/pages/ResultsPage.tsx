@@ -33,6 +33,7 @@ const PROVENANCE_LABEL: Record<ProvenanceType, string> = {
   resumed: "재개",
   finished: "완료",
   plateau_stop: "정체 종료",
+  ceiling_stop: "상한 도달 종료",
 };
 
 function fmt(n: number): string {
@@ -211,8 +212,21 @@ export function ResultsPage() {
         </div>
         <div style={{ fontSize: 13, color: "var(--ink-3)", marginTop: 4 }}>
           총 {checkpoint.round}라운드
-          {checkpoint.doneReason === "plateau" ? " · 정체로 조기 종료" : ""}
+          {checkpoint.doneReason === "plateau"
+            ? " · 정체로 조기 종료"
+            : checkpoint.doneReason === "ceiling"
+              ? " · 척도 상한(100점) 도달로 조기 종료"
+              : ""}
         </div>
+        {checkpoint.doneReason === "ceiling" && (
+          <p className="hint" style={{ marginTop: 8, marginBottom: 0 }}>
+            척도 상한에 도달해 이 기준으로는 더 측정할 개선이 없습니다. 이른 만점은 대개 개선
+            여력보다 판정 절차의 변별력 부족 신호입니다 — 게이트가 실제로 물리는지, 케이스가
+            산출물 없이도 풀리지 않는지, 채점이 지나치게 관대하지 않은지 점검해 보세요. 홀드아웃을
+            측정했다면 그 점수와의 간극이 좋은 단서입니다. 기준을 조이면 재검증·재승인 후 새
+            실행으로 다시 측정할 수 있습니다.
+          </p>
+        )}
         <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <button onClick={exportJson} disabled={!recordReady}>JSON 내보내기</button>
           {exported === "ok" && <span className="badge">JSON 내보냄</span>}

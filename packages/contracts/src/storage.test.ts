@@ -356,6 +356,39 @@ describe("ProjectExportEnvelope", () => {
     );
   });
 
+  it("척도 상한 도달 실행은 ceiling으로만 종료하고, ceiling은 100점에서만 유효하다", async () => {
+    const pack = await makePack("deterministic");
+    const input = exportInput(pack, noHoldout);
+    input.result.checkpoint.championScore = 100;
+    input.result.checkpoint.curve = [50, 100];
+    input.result.checkpoint.tree[0] = {
+      round: 1,
+      candidateScore: 100,
+      championScore: 100,
+      adopted: true,
+      gateRejected: false,
+      violations: [],
+    };
+    input.result.checkpoint.doneReason = "ceiling";
+    const ceiling = await createProjectExportEnvelope(input);
+    expect(await projectExportIssues(ceiling)).toEqual([]);
+
+    const wrongReason = structuredClone(ceiling);
+    wrongReason.result.checkpoint.doneReason = "max_rounds";
+    expect((await projectExportIssues(wrongReason)).map((entry) => entry.path)).toContain(
+      "result.checkpoint.doneReason",
+    );
+
+    const notAtCeiling = structuredClone(ceiling);
+    notAtCeiling.result.checkpoint.championScore = 99;
+    notAtCeiling.result.checkpoint.curve = [50, 99];
+    notAtCeiling.result.checkpoint.tree[0].candidateScore = 99;
+    notAtCeiling.result.checkpoint.tree[0].championScore = 99;
+    expect((await projectExportIssues(notAtCeiling)).map((entry) => entry.path)).toContain(
+      "result.checkpoint.doneReason",
+    );
+  });
+
   it("auto_tail 채점은 동결 caseId 집합과 정확히 같고 중복이 없어야 한다", async () => {
     const pack = await makePack("llm");
     const valid = await createProjectExportEnvelope(exportInput(pack, scoredHoldout));

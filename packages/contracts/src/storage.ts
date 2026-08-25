@@ -14,7 +14,7 @@ import {
   type ExaminerReport,
 } from "./examiner";
 import type { InterviewSubmission } from "./interview";
-import type { LoopCheckpoint, LoopSpec } from "./loop";
+import { SCORE_CEILING, type LoopCheckpoint, type LoopSpec } from "./loop";
 import { digestScope, type EvaluationPack } from "./pack";
 
 export const PROJECT_EXPORT_KIND = "harnest.project-export" as const;
@@ -274,7 +274,7 @@ function checkpointIssues(
   }
 
   const scoreIssue = (value: number, path: string): void => {
-    if (!Number.isFinite(value) || value < 0 || value > 100) {
+    if (!Number.isFinite(value) || value < 0 || value > SCORE_CEILING) {
       issues.push(issue(path, "점수는 0 이상 100 이하의 유한한 수여야 합니다."));
     }
   };
@@ -358,6 +358,14 @@ function checkpointIssues(
         ),
       );
     }
+    if (checkpoint.championScore >= SCORE_CEILING) {
+      issues.push(
+        issue(
+          `${checkpointPath}.doneReason`,
+          "척도 상한에 도달한 실행은 ceiling으로 종료해야 합니다.",
+        ),
+      );
+    }
   } else if (checkpoint.doneReason === "plateau") {
     if (validPlateauRounds && trailingRejections !== spec.plateauRounds) {
       issues.push(
@@ -367,8 +375,27 @@ function checkpointIssues(
         ),
       );
     }
+    if (checkpoint.championScore >= SCORE_CEILING) {
+      issues.push(
+        issue(
+          `${checkpointPath}.doneReason`,
+          "척도 상한에 도달한 실행은 ceiling으로 종료해야 합니다.",
+        ),
+      );
+    }
+  } else if (checkpoint.doneReason === "ceiling") {
+    if (checkpoint.championScore < SCORE_CEILING) {
+      issues.push(
+        issue(
+          `${checkpointPath}.doneReason`,
+          "ceiling 종료는 챔피언 점수가 척도 상한에 도달해야 합니다.",
+        ),
+      );
+    }
   } else {
-    issues.push(issue(`${checkpointPath}.doneReason`, "완료 사유는 max_rounds 또는 plateau여야 합니다."));
+    issues.push(
+      issue(`${checkpointPath}.doneReason`, "완료 사유는 max_rounds, plateau 또는 ceiling이어야 합니다."),
+    );
   }
 
   return issues;
