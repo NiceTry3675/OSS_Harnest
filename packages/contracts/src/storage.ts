@@ -729,7 +729,7 @@ export async function projectExportIssues(
       issues.push(issue("project.evaluation.calibration", "결정적 전용 Pack에는 캘리브레이션을 붙이지 않습니다."));
     }
   } else {
-    if (!(["gemini", "openai", "mock"] as const).includes(pack.judgeProcedure.judge.provider)) {
+    if (!(["gemini", "vertex", "openai", "mock"] as const).includes(pack.judgeProcedure.judge.provider)) {
       issues.push(
         issue(
           "project.evaluation.pack.judgeProcedure.judge.provider",

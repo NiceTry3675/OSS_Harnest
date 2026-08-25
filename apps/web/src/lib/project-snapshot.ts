@@ -1,6 +1,6 @@
 /** 브라우저 프로젝트 스냅샷 — 새로고침이 승인·캘리브레이션 불변식을 우회하지 못하게 한다.
  *  Evaluation Pack 정식 저장 계약이 아니라 단일 브라우저의 임시 영속화 계층이며,
- *  API 키는 이 타입과 저장 경로에 존재하지 않는다(SPEC §3 원칙 1, §7). */
+ *  벤더 자격 증명과 access token은 이 타입과 저장 경로에 존재하지 않는다(SPEC §3 원칙 1, §7). */
 
 import type { CalibrationResult, LoopCheckpoint } from "@harnest/contracts";
 import type {

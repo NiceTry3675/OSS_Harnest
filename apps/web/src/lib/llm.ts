@@ -1,5 +1,5 @@
-/** LLM 클라이언트 — 기본은 BYO 원칙: 키는 이 브라우저(localStorage)에만 머물고,
- *  요청은 벤더 API로 직행한다. 우리 서버로는 키도 본문도 가지 않는다 (SPEC §3 원칙 1).
+/** LLM 클라이언트 — 기본은 BYO 원칙: 자격 증명은 이 브라우저(localStorage)에만 머물고,
+ *  요청은 벤더 API로 직행한다. 우리 서버로는 자격 증명도 본문도 가지 않는다 (SPEC §3 원칙 1).
  *  관리자가 서버에 공유 키를 설정했을 때만 예외로 /proxy/*를 거치는 보조 경로가
  *  있다 — createSharedOpenAIClient/createSharedGeminiClient, 아래쪽 참고. */
 
@@ -7,15 +7,18 @@ import type { CaseDef, JudgeProvider } from "@harnest/contracts";
 import { DRAFT_CASES_MARKER, type HandoverProblem, type LlmClient } from "@harnest/template-handover";
 
 export type ByoProvider = Exclude<JudgeProvider, "mock">;
+export type SharedProvider = Extract<JudgeProvider, "gemini" | "openai">;
 
 export const PROVIDER_LABEL: Record<JudgeProvider, string> = {
   gemini: "Gemini",
+  vertex: "Vertex AI",
   openai: "OpenAI",
   mock: "모의",
 };
 
 const KEY_STORAGE: Record<ByoProvider, string> = {
   gemini: "harnest.byo.gemini",
+  vertex: "harnest.byo.vertex",
   openai: "harnest.byo.openai",
 };
 // 긴 문서 생성(분량 상한 최대 20,000자 → 출력 수만 토큰)은 수 분이 걸릴 수 있어 5분 여유를 둔다.
@@ -32,17 +35,75 @@ export interface LlmRequestOptions {
 }
 
 export type GeminiClientOptions = LlmRequestOptions;
+export type VertexClientOptions = LlmRequestOptions;
 export type OpenAIClientOptions = LlmRequestOptions;
 
 const CONNECTION_TEST_PROMPT = "연결 확인 요청입니다. OK라고만 응답하세요.";
+const GOOGLE_OAUTH_TOKEN_URI = "https://oauth2.googleapis.com/token";
+const GOOGLE_CLOUD_SCOPE = "https://www.googleapis.com/auth/cloud-platform";
+const VERTEX_LOCATION = "global";
 
-export function getByoKey(provider: ByoProvider): string | null {
+export function getByoCredential(provider: ByoProvider): string | null {
   return localStorage.getItem(KEY_STORAGE[provider]);
 }
 
-export function setByoKey(provider: ByoProvider, key: string | null): void {
-  if (key) localStorage.setItem(KEY_STORAGE[provider], key);
+export function setByoCredential(provider: ByoProvider, credential: string | null): void {
+  if (credential) localStorage.setItem(KEY_STORAGE[provider], credential);
   else localStorage.removeItem(KEY_STORAGE[provider]);
+}
+
+export interface VertexServiceAccountCredential {
+  type: "service_account";
+  project_id: string;
+  private_key_id: string;
+  private_key: string;
+  client_email: string;
+  token_uri: typeof GOOGLE_OAUTH_TOKEN_URI;
+}
+
+function requiredString(value: Record<string, unknown>, field: string): string {
+  const found = value[field];
+  if (typeof found !== "string" || found.trim().length === 0) {
+    throw new Error(`Vertex 서비스 계정 JSON의 ${field} 필드가 필요합니다.`);
+  }
+  return found.trim();
+}
+
+/** 외부 credential 설정의 임의 endpoint를 신뢰하지 않고 서비스 계정 JSON의 최소 필드만 보존한다. */
+export function parseVertexServiceAccount(raw: string): VertexServiceAccountCredential {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("Vertex 서비스 계정 JSON을 해석할 수 없습니다.");
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("Vertex 서비스 계정 JSON은 객체여야 합니다.");
+  }
+  const value = parsed as Record<string, unknown>;
+  if (value.type !== "service_account") {
+    throw new Error("Vertex 자격 증명은 type이 service_account인 JSON이어야 합니다.");
+  }
+  const tokenUri = value.token_uri;
+  if (tokenUri !== undefined && tokenUri !== GOOGLE_OAUTH_TOKEN_URI) {
+    throw new Error("Vertex 서비스 계정 token_uri는 Google OAuth 공식 주소여야 합니다.");
+  }
+  const privateKey = requiredString(value, "private_key");
+  if (!/^-----BEGIN PRIVATE KEY-----[\s\S]+-----END PRIVATE KEY-----$/.test(privateKey)) {
+    throw new Error("Vertex 서비스 계정 private_key가 PKCS#8 PEM 형식이 아닙니다.");
+  }
+  return {
+    type: "service_account",
+    project_id: requiredString(value, "project_id"),
+    private_key_id: requiredString(value, "private_key_id"),
+    private_key: privateKey,
+    client_email: requiredString(value, "client_email"),
+    token_uri: GOOGLE_OAUTH_TOKEN_URI,
+  };
+}
+
+export function normalizeVertexServiceAccount(raw: string): string {
+  return JSON.stringify(parseVertexServiceAccount(raw));
 }
 
 async function responseExcerpt(response: Response): Promise<string> {
@@ -130,6 +191,205 @@ export function createGeminiClient(
         clearTimeout(timeout);
         const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
         if (typeof text !== "string") throw new Error("Gemini 응답에 텍스트 없음");
+        return text;
+      }
+      throw lastError;
+    },
+  };
+}
+
+function base64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function base64UrlJson(value: unknown): string {
+  return base64Url(new TextEncoder().encode(JSON.stringify(value)));
+}
+
+function pemBytes(pem: string): ArrayBuffer {
+  const encoded = pem
+    .replace("-----BEGIN PRIVATE KEY-----", "")
+    .replace("-----END PRIVATE KEY-----", "")
+    .replace(/\s+/g, "");
+  try {
+    return Uint8Array.from(atob(encoded), (char) => char.charCodeAt(0)).buffer as ArrayBuffer;
+  } catch {
+    throw new Error("Vertex 서비스 계정 private_key의 base64를 해석할 수 없습니다.");
+  }
+}
+
+async function serviceAccountAssertion(
+  credential: VertexServiceAccountCredential,
+): Promise<string> {
+  let key: CryptoKey;
+  try {
+    key = await crypto.subtle.importKey(
+      "pkcs8",
+      pemBytes(credential.private_key),
+      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("Vertex 서비스 계정")) throw error;
+    throw new Error("Vertex 서비스 계정 private_key로 JWT 서명 키를 만들 수 없습니다.");
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const unsigned = `${base64UrlJson({ alg: "RS256", typ: "JWT", kid: credential.private_key_id })}.${base64UrlJson({
+    iss: credential.client_email,
+    scope: GOOGLE_CLOUD_SCOPE,
+    aud: GOOGLE_OAUTH_TOKEN_URI,
+    iat: now,
+    exp: now + 3600,
+  })}`;
+  let signature: ArrayBuffer;
+  try {
+    signature = await crypto.subtle.sign(
+      "RSASSA-PKCS1-v1_5",
+      key,
+      new TextEncoder().encode(unsigned),
+    );
+  } catch {
+    throw new Error("Vertex 서비스 계정 JWT 서명에 실패했습니다.");
+  }
+  return `${unsigned}.${base64Url(new Uint8Array(signature))}`;
+}
+
+type VertexTokenResponse = {
+  access_token?: unknown;
+  expires_in?: unknown;
+};
+
+/** Vertex AI 브라우저 직행 어댑터. 서비스 계정 private key는 서명에만 사용하고,
+ *  Google OAuth에는 서명된 assertion, Vertex에는 단기 access token만 전송한다. */
+export function createVertexClient(
+  rawCredential: string | VertexServiceAccountCredential,
+  model = "gemini-3.7-flash",
+  options: VertexClientOptions = {},
+): LlmClient {
+  const credential =
+    typeof rawCredential === "string"
+      ? parseVertexServiceAccount(rawCredential)
+      : parseVertexServiceAccount(JSON.stringify(rawCredential));
+  const timeoutMs = Math.max(1, options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const maxAttempts = Math.max(1, Math.floor(options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS));
+  const retryBaseMs = Math.max(0, options.retryBaseMs ?? DEFAULT_RETRY_BASE_MS);
+  let accessToken: { value: string; expiresAt: number } | null = null;
+
+  const issueAccessToken = async (signal: AbortSignal): Promise<string> => {
+    if (accessToken !== null && accessToken.expiresAt - Date.now() > 60_000) {
+      return accessToken.value;
+    }
+    const assertion = await serviceAccountAssertion(credential);
+    const body = new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion,
+    });
+    const response = await fetch(GOOGLE_OAUTH_TOKEN_URI, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+      signal,
+    });
+    if (!response.ok) {
+      const excerpt = await responseExcerpt(response);
+      throw new Error(`Vertex OAuth HTTP ${response.status}${excerpt ? `: ${excerpt}` : ""}`);
+    }
+    let data: VertexTokenResponse;
+    try {
+      data = (await response.json()) as VertexTokenResponse;
+    } catch {
+      throw new Error("Vertex OAuth 토큰 응답 JSON을 해석할 수 없습니다.");
+    }
+    if (typeof data.access_token !== "string" || data.access_token.length === 0) {
+      throw new Error("Vertex OAuth 응답에 access_token이 없습니다.");
+    }
+    const expiresIn =
+      typeof data.expires_in === "number" && Number.isFinite(data.expires_in)
+        ? Math.max(1, data.expires_in)
+        : 3600;
+    accessToken = { value: data.access_token, expiresAt: Date.now() + expiresIn * 1000 };
+    return accessToken.value;
+  };
+
+  return {
+    providerId: "vertex",
+    model,
+    async complete(prompt, opts) {
+      const body = JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: opts?.temperature ?? 0.7,
+          maxOutputTokens: opts?.maxOutputTokens ?? 8192,
+        },
+      });
+      const project = encodeURIComponent(credential.project_id);
+      const modelId = encodeURIComponent(model);
+      const url = `https://aiplatform.googleapis.com/v1/projects/${project}/locations/${VERTEX_LOCATION}/publishers/google/models/${modelId}:generateContent`;
+      let lastError: Error = new Error("LLM 호출 실패");
+
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+        let res: Response;
+        try {
+          const token = await issueAccessToken(controller.signal);
+          res = await fetch(url, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body,
+            signal: controller.signal,
+          });
+        } catch (error) {
+          clearTimeout(timeout);
+          lastError = controller.signal.aborted
+            ? new Error(`Vertex AI 요청 시간 초과 (${timeoutMs}ms)`)
+            : error instanceof Error && error.message.startsWith("Vertex")
+              ? error
+              : new Error(
+                  `Vertex AI 네트워크 오류: ${error instanceof Error ? error.message : String(error)}`,
+                );
+          const status = Number(lastError.message.match(/HTTP (\d{3})/)?.[1] ?? 0);
+          const retryable = status === 0 || status === 429 || status >= 500;
+          if (!retryable || attempt + 1 >= maxAttempts) throw lastError;
+          await wait(retryBaseMs * (attempt + 1));
+          continue;
+        }
+
+        if (!res.ok) {
+          const excerpt = await responseExcerpt(res);
+          clearTimeout(timeout);
+          lastError = new Error(`Vertex AI HTTP ${res.status}${excerpt ? `: ${excerpt}` : ""}`);
+          if (res.status === 401) accessToken = null;
+          const retryable = res.status === 401 || res.status === 429 || res.status >= 500;
+          if (!retryable || attempt + 1 >= maxAttempts) throw lastError;
+          await wait(retryBaseMs * (attempt + 1));
+          continue;
+        }
+
+        let data: {
+          candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+        };
+        try {
+          data = (await res.json()) as typeof data;
+        } catch {
+          clearTimeout(timeout);
+          if (controller.signal.aborted) {
+            lastError = new Error(`Vertex AI 요청 시간 초과 (${timeoutMs}ms)`);
+            if (attempt + 1 >= maxAttempts) throw lastError;
+            await wait(retryBaseMs * (attempt + 1));
+            continue;
+          }
+          throw new Error("Vertex AI 응답 JSON을 해석할 수 없습니다.");
+        }
+        clearTimeout(timeout);
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (typeof text !== "string") throw new Error("Vertex AI 응답에 텍스트 없음");
         return text;
       }
       throw lastError;
@@ -261,12 +521,12 @@ function resolveApiBase(apiBase?: string): string {
 
 export async function fetchSharedProviders(
   apiBase?: string,
-): Promise<Partial<Record<ByoProvider, boolean>>> {
+): Promise<Partial<Record<SharedProvider, boolean>>> {
   try {
     const res = await fetch(`${resolveApiBase(apiBase)}/config`);
     if (!res.ok) return {};
     const data = (await res.json()) as {
-      sharedProviders?: Partial<Record<ByoProvider, boolean>>;
+      sharedProviders?: Partial<Record<SharedProvider, boolean>>;
     };
     return data.sharedProviders ?? {};
   } catch {
@@ -274,19 +534,19 @@ export async function fetchSharedProviders(
   }
 }
 
-let sharedProvidersCache: Partial<Record<ByoProvider, boolean>> = {};
+let sharedProvidersCache: Partial<Record<SharedProvider, boolean>> = {};
 
 /** 앱 시작 시, 그리고 위저드가 열릴 때 다시 불러 캐시를 채운다. createLlm()은
  *  동기 함수라 호출 시점에 이 캐시를 그대로 읽는다 — 최신 값을 보장하지는
  *  않지만, 위저드를 거쳐야 그 지점에 도달하므로 실질적으로는 늦지 않는다. */
 export async function loadSharedProviders(
   apiBase?: string,
-): Promise<Partial<Record<ByoProvider, boolean>>> {
+): Promise<Partial<Record<SharedProvider, boolean>>> {
   sharedProvidersCache = await fetchSharedProviders(apiBase);
   return sharedProvidersCache;
 }
 
-export function hasSharedKey(provider: ByoProvider): boolean {
+export function hasSharedKey(provider: SharedProvider): boolean {
   return sharedProvidersCache[provider] === true;
 }
 
@@ -460,6 +720,17 @@ export function createSharedGeminiClient(
   };
 }
 
+export function createByoClient(
+  provider: ByoProvider,
+  credential: string,
+  model: string,
+  options: LlmRequestOptions = {},
+): LlmClient {
+  if (provider === "openai") return createOpenAIClient(credential, model, options);
+  if (provider === "vertex") return createVertexClient(credential, model, options);
+  return createGeminiClient(credential, model, options);
+}
+
 function connectionTestError(provider: ByoProvider, error: unknown): Error {
   const label = PROVIDER_LABEL[provider];
   const detail = error instanceof Error ? error.message : String(error);
@@ -467,10 +738,18 @@ function connectionTestError(provider: ByoProvider, error: unknown): Error {
   const status = statusMatch ? Number(statusMatch[1]) : null;
 
   if (status === 401) {
-    return new Error(`${label} API 키 인증 실패(HTTP 401). 키를 확인해 주세요.`);
+    return new Error(
+      provider === "vertex"
+        ? `${label} 서비스 계정 인증 실패(HTTP 401). 자격 증명을 확인해 주세요.`
+        : `${label} API 키 인증 실패(HTTP 401). 키를 확인해 주세요.`,
+    );
   }
   if (status === 403) {
-    return new Error(`${label} 모델 접근 권한 없음(HTTP 403). 계정과 모델 권한을 확인해 주세요.`);
+    return new Error(
+      provider === "vertex"
+        ? `${label} 접근 권한 없음(HTTP 403). Vertex AI API와 roles/aiplatform.user 권한을 확인해 주세요.`
+        : `${label} 모델 접근 권한 없음(HTTP 403). 계정과 모델 권한을 확인해 주세요.`,
+    );
   }
   if (status === 404) {
     return new Error(
@@ -479,6 +758,11 @@ function connectionTestError(provider: ByoProvider, error: unknown): Error {
   }
   if (status === 429) {
     return new Error(`${label} 요청 한도 초과(HTTP 429). 쿼터와 결제 상태를 확인해 주세요.`);
+  }
+  if (provider === "vertex" && detail.includes("OAuth HTTP 400")) {
+    return new Error(
+      `${label} 서비스 계정 토큰 발급 실패(HTTP 400). 키 상태와 시스템 시각을 확인해 주세요.`,
+    );
   }
   if (status !== null && status >= 500) {
     return new Error(`${label} 서버 오류(HTTP ${status}). 잠시 후 다시 시도해 주세요.`);
@@ -495,11 +779,11 @@ function connectionTestError(provider: ByoProvider, error: unknown): Error {
   return new Error(`${label} 연결 테스트 실패: ${detail}`);
 }
 
-/** 승인 전 BYO fail-fast. 재시도 없이 정확히 한 번만 호출하며, 성공한 키만 저장 대상으로 삼는다.
+/** 승인 전 BYO fail-fast. 재시도 없이 정확히 한 번만 호출하며, 성공한 자격 증명만 저장 대상으로 삼는다.
  *  OpenAI 401의 상태가 CORS로 가려지는 경우에는 인증 실패로 단정하지 않는다(SPEC §8). */
 export async function testByoConnection(
   provider: ByoProvider,
-  apiKey: string,
+  credential: string,
   model: string,
 ): Promise<void> {
   const options: LlmRequestOptions = {
@@ -507,10 +791,7 @@ export async function testByoConnection(
     maxAttempts: 1,
     retryBaseMs: 0,
   };
-  const client =
-    provider === "openai"
-      ? createOpenAIClient(apiKey, model, options)
-      : createGeminiClient(apiKey, model, options);
+  const client = createByoClient(provider, credential, model, options);
 
   try {
     await client.complete(CONNECTION_TEST_PROMPT, { temperature: 0, maxOutputTokens: 16 });
@@ -543,7 +824,7 @@ export function createAssistMockClient(): LlmClient {
 /** 공유 키 fail-fast — BYO와 같은 원칙(SPEC §8)을 공유 키 경로에도 적용한다.
  *  관리자 키가 만료·소진됐을 수 있으므로, 승인 화면으로 넘어가기 전에 한 번 확인한다. */
 export async function testSharedConnection(
-  provider: ByoProvider,
+  provider: SharedProvider,
   model: string,
   apiBase?: string,
 ): Promise<void> {

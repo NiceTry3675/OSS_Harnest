@@ -24,7 +24,14 @@ import {
 import { useProject } from "../state";
 import { getTemplate, type TemplateEntry } from "../templates";
 import { countCaseProvenance } from "../lib/case-provenance";
-import { PROVIDER_LABEL, setByoKey } from "../lib/llm";
+import { ProviderCredentialInput } from "../components/ProviderCredentialInput";
+import {
+  getByoCredential,
+  normalizeVertexServiceAccount,
+  PROVIDER_LABEL,
+  setByoCredential,
+  testByoConnection,
+} from "../lib/llm";
 
 const VERDICT_LABEL: Record<ExaminerVerdict, string> = { pass: "통과", warn: "주의", fail: "실패" };
 const VERDICT_COLOR: Record<ExaminerVerdict, string> = {
@@ -129,7 +136,21 @@ export function ApprovalPage() {
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState("");
   const [batteryError, setBatteryError] = useState<string | null>(null);
-  const [keyInput, setKeyInput] = useState("");
+  const [credentialInput, setCredentialInput] = useState(() => {
+    const procedure = compiled?.pack.judgeProcedure;
+    if (
+      procedure?.kind === "case_answering" &&
+      procedure.judge.provider !== "mock" &&
+      procedure.judge.provider !== "vertex"
+    ) {
+      return getByoCredential(procedure.judge.provider) ?? "";
+    }
+    return "";
+  });
+  const [credentialBusy, setCredentialBusy] = useState(false);
+  const [storedVertexCredential, setStoredVertexCredential] = useState<string | null>(() =>
+    getByoCredential("vertex"),
+  );
   const [choices, setChoices] = useState<(AbChoice | null)[] | null>(null);
 
   const pack = compiled?.pack ?? null;
@@ -232,12 +253,28 @@ export function ApprovalPage() {
     }
   };
 
-  const saveKeyAndRetry = (): void => {
-    const key = keyInput.trim();
-    if (key.length > 0 && jp.kind === "case_answering" && jp.judge.provider !== "mock") {
-      setByoKey(jp.judge.provider, key);
+  const saveCredentialAndRetry = async (): Promise<void> => {
+    if (jp.kind !== "case_answering" || jp.judge.provider === "mock") return;
+    const provider = jp.judge.provider;
+    const raw = credentialInput.trim();
+    setCredentialBusy(true);
+    try {
+      if (raw) {
+        await testByoConnection(provider, raw, jp.judge.model);
+        const saved = provider === "vertex" ? normalizeVertexServiceAccount(raw) : raw;
+        setByoCredential(provider, saved);
+        if (provider === "vertex") {
+          setStoredVertexCredential(saved);
+          setCredentialInput("");
+        }
+      }
+      setBatteryError(null);
+      await runBattery();
+    } catch (error) {
+      setBatteryError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCredentialBusy(false);
     }
-    void runBattery();
   };
 
   const batteryErrorBox =
@@ -245,14 +282,28 @@ export function ApprovalPage() {
       <div style={{ marginTop: 10 }}>
         <p className="error" style={{ margin: "0 0 8px" }}>{batteryError}</p>
         {jp.kind === "case_answering" && jp.judge.provider !== "mock" ? (
-          <div style={{ display: "flex", gap: 8 }}>
-            <input
-              type="password"
-              placeholder="채점 모델 API 키"
-              value={keyInput}
-              onChange={(e) => setKeyInput(e.target.value)}
+          <div style={{ display: "grid", gap: 8 }}>
+            <ProviderCredentialInput
+              provider={jp.judge.provider}
+              value={credentialInput}
+              storedCredential={
+                jp.judge.provider === "vertex" ? storedVertexCredential : null
+              }
+              idPrefix="approval-retry"
+              disabled={credentialBusy}
+              onChange={setCredentialInput}
+              onDelete={() => {
+                const provider = jp.judge.provider;
+                if (provider === "mock") return;
+                setByoCredential(provider, null);
+                setCredentialInput("");
+                if (provider === "vertex") setStoredVertexCredential(null);
+              }}
+              onError={setBatteryError}
             />
-            <button onClick={saveKeyAndRetry}>저장 후 다시 검증</button>
+            <button disabled={credentialBusy} onClick={() => void saveCredentialAndRetry()}>
+              {credentialBusy ? "연결 확인 중…" : "연결 확인 후 다시 검증"}
+            </button>
           </div>
         ) : null}
       </div>

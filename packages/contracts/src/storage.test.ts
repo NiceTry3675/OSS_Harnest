@@ -445,7 +445,7 @@ describe("ProjectExportEnvelope", () => {
 
     Object.assign(input, { internal: sentinel });
     Object.assign(input.project, { draft: sentinel });
-    Object.assign(input.project.interview, { apiKey: sentinel });
+    Object.assign(input.project.interview, { apiKey: sentinel, private_key: sentinel });
     Object.assign(input.project.evaluation, { artifacts: sentinel });
     Object.assign(input.project.evaluation.pack, { apiKey: sentinel });
     Object.assign(input.project.evaluation.pack.judgeProcedure, { internal: sentinel });
@@ -457,7 +457,7 @@ describe("ProjectExportEnvelope", () => {
     Object.assign(input.project.evaluation.approval, { actor: sentinel });
     Object.assign(input.project.loopSpec, { debug: sentinel });
     Object.assign(input.result, { transient: sentinel });
-    Object.assign(input.result.checkpoint, { apiKey: sentinel });
+    Object.assign(input.result.checkpoint, { apiKey: sentinel, access_token: sentinel });
     Object.assign(input.result.checkpoint.tree[0], { rawCandidate: sentinel });
     input.result.checkpoint.provenance.push({
       at: now,
@@ -533,6 +533,30 @@ describe("ProjectExportEnvelope", () => {
     expect(paths).toContain("project.evaluation.pack.packVersion");
     expect(paths).toContain("project.evaluation.pack.templateId");
     expect(paths).toContain("project.evaluation.pack.judgeProcedure.judge.model");
+  });
+
+  it("Vertex provider는 지원하고 알 수 없는 provider는 거부한다", async () => {
+    const pack = await makePack("llm");
+    if (pack.judgeProcedure.kind !== "case_answering") throw new Error("fixture 오류");
+    pack.judgeProcedure.judge = { provider: "vertex", model: "gemini-3.7-flash" };
+    pack.definitionDigest = await sha256Canonical(digestScope(pack));
+    const input = exportInput(pack, scoredHoldout);
+    if (input.project.evaluation.examinerReport === null) throw new Error("fixture 오류");
+    input.project.evaluation.examinerReport.judge = {
+      provider: "vertex",
+      model: "gemini-3.7-flash",
+    };
+    const vertexEnvelope = await createProjectExportEnvelope(input);
+    const vertexPaths = (await projectExportIssues(vertexEnvelope)).map((entry) => entry.path);
+    expect(vertexPaths).not.toContain("project.evaluation.pack.judgeProcedure.judge.provider");
+
+    const broken = structuredClone(vertexEnvelope) as ProjectExportEnvelope<string>;
+    if (broken.project.evaluation.pack.judgeProcedure.kind !== "case_answering") {
+      throw new Error("fixture 오류");
+    }
+    Object.assign(broken.project.evaluation.pack.judgeProcedure.judge, { provider: "unknown" });
+    const brokenPaths = (await projectExportIssues(broken)).map((entry) => entry.path);
+    expect(brokenPaths).toContain("project.evaluation.pack.judgeProcedure.judge.provider");
   });
 
   it("실패 증거나 진행 중 체크포인트를 정식 완료 기록으로 만들지 않는다", async () => {

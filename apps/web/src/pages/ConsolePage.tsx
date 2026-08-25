@@ -21,11 +21,17 @@ import {
 } from "@harnest/loop-engine";
 import { useProject, type HoldoutEvaluation, type HoldoutScores } from "../state";
 import { getTemplate, type TemplateRuntime } from "../templates";
-import { setByoKey } from "../lib/llm";
+import {
+  getByoCredential,
+  normalizeVertexServiceAccount,
+  setByoCredential,
+  testByoConnection,
+} from "../lib/llm";
 import { markUnavailableRestoredHoldout } from "../lib/project-snapshot";
 import { isHoldoutPhasePending, isHoldoutSettled } from "../lib/project-export";
 import { CurveChart } from "../components/CurveChart";
 import { ExperimentTree } from "../components/ExperimentTree";
+import { ProviderCredentialInput } from "../components/ProviderCredentialInput";
 
 const STATUS_LABEL: Record<string, string> = {
   idle: "대기",
@@ -81,7 +87,21 @@ export function ConsolePage() {
 
   /** 실행 준비(모델 구성) 실패 — 카드로 표시하고 키 저장 후 재시도할 수 있다 */
   const [setupError, setSetupError] = useState<string | null>(null);
-  const [keyInput, setKeyInput] = useState("");
+  const [credentialInput, setCredentialInput] = useState(() => {
+    const procedure = compiled?.pack.judgeProcedure;
+    if (
+      procedure?.kind === "case_answering" &&
+      procedure.judge.provider !== "mock" &&
+      procedure.judge.provider !== "vertex"
+    ) {
+      return getByoCredential(procedure.judge.provider) ?? "";
+    }
+    return "";
+  });
+  const [credentialBusy, setCredentialBusy] = useState(false);
+  const [storedVertexCredential, setStoredVertexCredential] = useState<string | null>(() =>
+    getByoCredential("vertex"),
+  );
   const [retryTick, setRetryTick] = useState(0);
   /** 실행 중 오류 — 체크포인트가 남아 있으므로 재시도는 start() 재호출로 이어서 진행 */
   const [runError, setRunError] = useState<string | null>(null);
@@ -325,14 +345,28 @@ export function ConsolePage() {
       if (handleRef.current === handle) setRunError(describeRunError(e));
     });
   };
-  const retrySetup = () => {
-    const key = keyInput.trim();
+  const retrySetup = async (): Promise<void> => {
+    const raw = credentialInput.trim();
     const jp = compiled.pack.judgeProcedure;
-    if (key.length > 0 && jp.kind === "case_answering" && jp.judge.provider !== "mock") {
-      setByoKey(jp.judge.provider, key);
+    setCredentialBusy(true);
+    try {
+      if (raw && jp.kind === "case_answering" && jp.judge.provider !== "mock") {
+        await testByoConnection(jp.judge.provider, raw, jp.judge.model);
+        const saved =
+          jp.judge.provider === "vertex" ? normalizeVertexServiceAccount(raw) : raw;
+        setByoCredential(jp.judge.provider, saved);
+        if (jp.judge.provider === "vertex") {
+          setStoredVertexCredential(saved);
+          setCredentialInput("");
+        }
+      }
+      setSetupError(null);
+      setRetryTick((t) => t + 1);
+    } catch (error) {
+      setSetupError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCredentialBusy(false);
     }
-    setSetupError(null);
-    setRetryTick((t) => t + 1);
   };
 
   return (
@@ -348,27 +382,39 @@ export function ConsolePage() {
         <div className="card" style={{ borderColor: "var(--bad)" }}>
           <p className="error" style={{ marginTop: 0 }}>{setupError}</p>
           <div className="field">
-            <label htmlFor="byo-key">채점 모델 API 키</label>
-            <input
-              id="byo-key"
-              type="password"
-              placeholder="승인된 채점 모델의 API 키를 입력하세요"
-              value={keyInput}
-              onChange={(e) => setKeyInput(e.target.value)}
-            />
-            <p className="hint">
-              키는 이 브라우저(localStorage)에만 저장되고 벤더 API로 직행합니다 — 우리 서버로는
-              가지 않습니다.
-            </p>
+            <label>채점 모델 자격 증명</label>
+            {compiled.pack.judgeProcedure.kind === "case_answering" &&
+            compiled.pack.judgeProcedure.judge.provider !== "mock" ? (
+              <ProviderCredentialInput
+                provider={compiled.pack.judgeProcedure.judge.provider}
+                value={credentialInput}
+                storedCredential={
+                  compiled.pack.judgeProcedure.judge.provider === "vertex"
+                    ? storedVertexCredential
+                    : null
+                }
+                idPrefix="console-retry"
+                disabled={credentialBusy}
+                onChange={setCredentialInput}
+                onDelete={() => {
+                  const provider = compiled.pack.judgeProcedure;
+                  if (provider.kind !== "case_answering" || provider.judge.provider === "mock") return;
+                  setByoCredential(provider.judge.provider, null);
+                  setCredentialInput("");
+                  if (provider.judge.provider === "vertex") setStoredVertexCredential(null);
+                }}
+                onError={setSetupError}
+              />
+            ) : null}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <button className="primary" onClick={retrySetup}>
-              저장 후 다시 시도
+            <button className="primary" disabled={credentialBusy} onClick={() => void retrySetup()}>
+              {credentialBusy ? "연결 확인 중…" : "연결 확인 후 다시 시도"}
             </button>
             <button onClick={() => navigate("/wizard")}>기준 다시 만들기</button>
           </div>
           <p className="hint" style={{ marginBottom: 0 }}>
-            키 없이 사용하려면 기준을 처음부터 다시 만들어 모의 모델로 승인해 주세요 — 승인된
+            자격 증명 없이 사용하려면 기준을 처음부터 다시 만들어 모의 모델로 승인해 주세요 — 승인된
             판정 절차는 여기서 바꿀 수 없습니다.
           </p>
         </div>

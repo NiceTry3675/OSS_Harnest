@@ -19,10 +19,13 @@ Harnest는 사용자가 채점 절차를 검증하고 승인한 뒤, 그 절차�
 | 모의 모델 | 무료 데모와 결정적 회귀 테스트 | 브라우저 안에서만 실행 |
 | OpenAI · `gpt-5.6-sol` | Responses API BYO 지원. 2026-08-24 CORS와 1라운드 스모크 실측 | 키는 `localStorage`에 저장되고 모델 요청은 브라우저에서 OpenAI로 직행 |
 | Gemini · `gemini-3.7-flash` | Gemini BYO 지원 | 키는 `localStorage`에 저장되고 모델 요청은 브라우저에서 Gemini로 직행 |
+| Vertex AI · `gemini-3.7-flash` | 서비스 계정 JSON BYO 지원, `global` 고정 | 서비스 계정은 `localStorage`에 저장되고 브라우저가 Google OAuth 토큰을 발급받아 Vertex AI로 직행 |
 
 OpenAI CORS의 정상·401 경로와 스모크 테스트 관측값은 [OpenAI BYO 실측 결과](experiments/byo-cors-openai/RESULT.md)에 있습니다.
 
-API 키와 벤더 모델 호출은 기본적으로 Harnest 서버를 거치지 않습니다. 다만 사용자가 결과 화면에서
+BYO API 키·Vertex 서비스 계정과 벤더 모델 호출은 기본적으로 Harnest 서버를 거치지 않습니다.
+Vertex 경로에서는 private key로 브라우저 안에서 JWT를 서명하고, 서명된 assertion만 Google OAuth에
+보내 단기 access token을 받습니다. 다만 사용자가 결과 화면에서
 **서버에 기록**을 선택하면 입력, 승인된 Pack·검증 근거, 실행 결과·홀드아웃의 JSON 기록이
 FastAPI 저장 API에 전송됩니다. 서버 기록은 UTF-8 JSON 1 MiB까지이며, 같은 계약 형식은 서버
 없이 파일로 내보낼 수 있습니다. 현재 봉투는 완료 결과의 감사·보관용이고 가져오기·진행 재개

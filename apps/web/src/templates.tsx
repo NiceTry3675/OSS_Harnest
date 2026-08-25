@@ -19,14 +19,14 @@ import type { LlmClient } from "@harnest/template-handover";
 import { TimetableGrid } from "./components/TimetableGrid";
 import { HandoverDocView } from "./components/HandoverDocView";
 import {
-  createGeminiClient,
+  createByoClient,
   createMockClient,
-  createOpenAIClient,
   createSharedGeminiClient,
   createSharedOpenAIClient,
-  getByoKey,
+  getByoCredential,
   hasSharedKey,
   PROVIDER_LABEL,
+  type SharedProvider,
 } from "./lib/llm";
 
 export interface TemplateRuntime {
@@ -133,15 +133,13 @@ const handoverEntry: TemplateEntry = {
       return createMockClient(compiled.problem as handover.HandoverProblem);
     }
     const provider = jp.judge.provider;
-    const key = getByoKey(provider);
-    if (key) {
-      return provider === "openai"
-        ? createOpenAIClient(key, jp.judge.model)
-        : createGeminiClient(key, jp.judge.model);
+    const credential = getByoCredential(provider);
+    if (credential) {
+      return createByoClient(provider, credential, jp.judge.model);
     }
     // BYO 키가 없으면 관리자가 서버에 둔 공유 키로 대체한다(있을 때만).
     // 이 경로는 요청이 Harnest 서버(/proxy/*)를 거친다 — README·SPEC의 공유 키 절 참고.
-    if (hasSharedKey(provider)) {
+    if (provider !== "vertex" && hasSharedKey(provider as SharedProvider)) {
       return provider === "openai"
         ? createSharedOpenAIClient(jp.judge.model)
         : createSharedGeminiClient(jp.judge.model);

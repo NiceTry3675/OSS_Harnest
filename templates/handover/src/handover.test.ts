@@ -142,6 +142,12 @@ describe("compile", () => {
       judgeModel: "gpt-5.6-sol",
     });
     expect(c.pack.definitionDigest).not.toBe(b.pack.definitionDigest);
+
+    const vertex = await compile(makeSubmission(6), {
+      judgeProvider: "vertex",
+      judgeModel: "gemini-3.7-flash",
+    });
+    expect(vertex.pack.definitionDigest).not.toBe(b.pack.definitionDigest);
   });
 
   it("케이스 provenance는 컴파일을 통과해 가시·홀드아웃 케이스에 유지된다", async () => {

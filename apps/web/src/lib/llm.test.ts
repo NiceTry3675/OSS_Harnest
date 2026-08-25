@@ -18,8 +18,11 @@ import {
   createGeminiClient,
   createMockClient,
   createOpenAIClient,
-  getByoKey,
-  setByoKey,
+  createVertexClient,
+  getByoCredential,
+  normalizeVertexServiceAccount,
+  parseVertexServiceAccount,
+  setByoCredential,
   testByoConnection,
 } from "./llm";
 
@@ -42,7 +45,7 @@ const problem: HandoverProblem = {
 describe("BYO 키 저장", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("Gemini와 OpenAI 키를 서로 다른 localStorage 슬롯에 보관한다", () => {
+  it("Gemini·Vertex·OpenAI 자격 증명을 서로 다른 localStorage 슬롯에 보관한다", () => {
     const values = new Map<string, string>();
     vi.stubGlobal("localStorage", {
       getItem: (key: string) => values.get(key) ?? null,
@@ -50,14 +53,17 @@ describe("BYO 키 저장", () => {
       removeItem: (key: string) => values.delete(key),
     });
 
-    setByoKey("gemini", "gemini-key");
-    setByoKey("openai", "openai-key");
-    expect(getByoKey("gemini")).toBe("gemini-key");
-    expect(getByoKey("openai")).toBe("openai-key");
+    setByoCredential("gemini", "gemini-key");
+    setByoCredential("vertex", "vertex-credential");
+    setByoCredential("openai", "openai-key");
+    expect(getByoCredential("gemini")).toBe("gemini-key");
+    expect(getByoCredential("vertex")).toBe("vertex-credential");
+    expect(getByoCredential("openai")).toBe("openai-key");
 
-    setByoKey("openai", null);
-    expect(getByoKey("openai")).toBeNull();
-    expect(getByoKey("gemini")).toBe("gemini-key");
+    setByoCredential("openai", null);
+    expect(getByoCredential("openai")).toBeNull();
+    expect(getByoCredential("gemini")).toBe("gemini-key");
+    expect(getByoCredential("vertex")).toBe("vertex-credential");
   });
 });
 
@@ -196,6 +202,160 @@ const openAISuccessResponse = (...texts: string[]): Response =>
       ],
     }),
   }) as Response;
+
+async function vertexCredential(): Promise<string> {
+  const pair = await crypto.subtle.generateKey(
+    {
+      name: "RSASSA-PKCS1-v1_5",
+      modulusLength: 1024,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: "SHA-256",
+    },
+    true,
+    ["sign", "verify"],
+  );
+  const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey));
+  let binary = "";
+  for (const byte of pkcs8) binary += String.fromCharCode(byte);
+  const encoded = btoa(binary).match(/.{1,64}/g)?.join("\n") ?? "";
+  return JSON.stringify({
+    type: "service_account",
+    project_id: "vertex-project",
+    private_key_id: "key-id",
+    private_key: `-----BEGIN PRIVATE KEY-----\n${encoded}\n-----END PRIVATE KEY-----`,
+    client_email: "harnest@vertex-project.iam.gserviceaccount.com",
+    token_uri: "https://oauth2.googleapis.com/token",
+    client_x509_cert_url: "https://example.invalid/ignored",
+  });
+}
+
+function decodeJwtPart(encoded: string): Record<string, unknown> {
+  const padded = encoded.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(encoded.length / 4) * 4, "=");
+  const binary = atob(padded);
+  return JSON.parse(new TextDecoder().decode(Uint8Array.from(binary, (char) => char.charCodeAt(0)))) as Record<string, unknown>;
+}
+
+const tokenResponse = (accessToken = "vertex-token", expiresIn = 3600): Response =>
+  ({
+    ok: true,
+    status: 200,
+    json: async () => ({ access_token: accessToken, expires_in: expiresIn, token_type: "Bearer" }),
+  }) as Response;
+
+describe("Vertex 서비스 계정 어댑터", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("서비스 계정 JSON을 엄격히 검증하고 필요한 필드만 정규화한다", async () => {
+    const raw = await vertexCredential();
+    const parsed = parseVertexServiceAccount(raw);
+    expect(parsed.project_id).toBe("vertex-project");
+    expect(parsed.client_email).toBe("harnest@vertex-project.iam.gserviceaccount.com");
+    expect(normalizeVertexServiceAccount(raw)).not.toContain("client_x509_cert_url");
+
+    expect(() => parseVertexServiceAccount("not-json")).toThrow("해석할 수 없습니다");
+    expect(() => parseVertexServiceAccount(JSON.stringify({ type: "authorized_user" }))).toThrow(
+      "service_account",
+    );
+    expect(() =>
+      parseVertexServiceAccount(
+        JSON.stringify({ ...JSON.parse(raw), token_uri: "https://evil.invalid/token" }),
+      ),
+    ).toThrow("Google OAuth 공식 주소");
+    expect(() =>
+      parseVertexServiceAccount(JSON.stringify({ ...JSON.parse(raw), project_id: "" })),
+    ).toThrow("project_id");
+  });
+
+  it("RS256 JWT를 OAuth 토큰으로 교환하고 global Vertex 요청에 Bearer 토큰을 쓴다", async () => {
+    const raw = await vertexCredential();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(tokenResponse())
+      .mockResolvedValueOnce(successResponse("Vertex 응답"))
+      .mockResolvedValueOnce(successResponse("캐시 응답"));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = createVertexClient(raw, "gemini-3.7-flash", { retryBaseMs: 0 });
+
+    await expect(
+      client.complete("요청 본문", { temperature: 0, maxOutputTokens: 64 }),
+    ).resolves.toBe("Vertex 응답");
+    await expect(client.complete("두 번째 요청")).resolves.toBe("캐시 응답");
+
+    expect(client.providerId).toBe("vertex");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const [oauthUrl, oauthInit] = fetchMock.mock.calls[0];
+    expect(oauthUrl).toBe("https://oauth2.googleapis.com/token");
+    expect(oauthInit?.headers).toEqual({ "Content-Type": "application/x-www-form-urlencoded" });
+    const oauthBody = oauthInit?.body as URLSearchParams;
+    expect(oauthBody.get("grant_type")).toBe("urn:ietf:params:oauth:grant-type:jwt-bearer");
+    const assertion = oauthBody.get("assertion")!;
+    const [header, payload, signature] = assertion.split(".");
+    expect(decodeJwtPart(header)).toMatchObject({ alg: "RS256", typ: "JWT", kid: "key-id" });
+    expect(decodeJwtPart(payload)).toMatchObject({
+      iss: "harnest@vertex-project.iam.gserviceaccount.com",
+      scope: "https://www.googleapis.com/auth/cloud-platform",
+      aud: "https://oauth2.googleapis.com/token",
+    });
+    expect(signature.length).toBeGreaterThan(0);
+
+    const [vertexUrl, vertexInit] = fetchMock.mock.calls[1];
+    expect(vertexUrl).toBe(
+      "https://aiplatform.googleapis.com/v1/projects/vertex-project/locations/global/publishers/google/models/gemini-3.7-flash:generateContent",
+    );
+    expect(vertexInit?.headers).toEqual({
+      Authorization: "Bearer vertex-token",
+      "Content-Type": "application/json",
+    });
+    expect(JSON.parse(String(vertexInit?.body))).toMatchObject({
+      contents: [{ role: "user", parts: [{ text: "요청 본문" }] }],
+      generationConfig: { temperature: 0, maxOutputTokens: 64 },
+    });
+  });
+
+  it("만료 60초 전에는 access token을 갱신한다", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-25T00:00:00Z"));
+    const raw = await vertexCredential();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(tokenResponse("token-1", 120))
+      .mockResolvedValueOnce(successResponse("첫 응답"))
+      .mockResolvedValueOnce(tokenResponse("token-2", 120))
+      .mockResolvedValueOnce(successResponse("둘째 응답"));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = createVertexClient(raw, "gemini-test", { retryBaseMs: 0 });
+
+    await client.complete("첫 요청");
+    vi.setSystemTime(new Date("2026-08-25T00:01:01Z"));
+    await client.complete("둘째 요청");
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls[3][1]?.headers).toMatchObject({ Authorization: "Bearer token-2" });
+  });
+
+  it("OAuth와 Vertex 권한 오류를 연결 테스트에서 구분한다", async () => {
+    const raw = await vertexCredential();
+    const oauthFailure = vi.fn(async () => errorResponse(400, "invalid_grant"));
+    vi.stubGlobal("fetch", oauthFailure);
+    await expect(testByoConnection("vertex", raw, "gemini-test")).rejects.toThrow(
+      "토큰 발급 실패(HTTP 400)",
+    );
+    expect(oauthFailure).toHaveBeenCalledTimes(1);
+
+    const permissionFailure = vi
+      .fn()
+      .mockResolvedValueOnce(tokenResponse())
+      .mockResolvedValueOnce(errorResponse(403, "PERMISSION_DENIED"));
+    vi.stubGlobal("fetch", permissionFailure);
+    await expect(testByoConnection("vertex", raw, "gemini-test")).rejects.toThrow(
+      "roles/aiplatform.user",
+    );
+  });
+});
 
 describe("Gemini 오류 분류", () => {
   afterEach(() => {

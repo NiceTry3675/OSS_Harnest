@@ -10,17 +10,20 @@ import type { LlmClient } from "@harnest/template-handover";
 import { getTemplate } from "../templates";
 import { WizardBlueprint } from "../components/WizardBlueprint";
 import { WizardCaseList, textareaStyle, type CasePair } from "../components/WizardCaseList";
+import { ProviderCredentialInput } from "../components/ProviderCredentialInput";
 import { appendFileTexts, extractFileText, FILE_ACCEPT } from "../lib/attachText";
 import {
+  createByoClient,
   createAssistMockClient,
-  createGeminiClient,
-  createOpenAIClient,
-  getByoKey,
+  getByoCredential,
   loadSharedProviders,
-  setByoKey,
+  normalizeVertexServiceAccount,
+  PROVIDER_LABEL,
+  setByoCredential,
   testByoConnection,
   testSharedConnection,
   type ByoProvider,
+  type SharedProvider,
 } from "../lib/llm";
 import {
   CASE_MAX_DEFAULT,
@@ -42,7 +45,15 @@ type JudgeChoice = "mock" | ByoProvider;
 const JUDGE_MODEL: Record<JudgeChoice, string> = {
   mock: "모의 모델",
   gemini: "gemini-3.7-flash",
+  vertex: "gemini-3.7-flash",
   openai: "gpt-5.6-sol",
+};
+
+const PROVIDER_OPTION_LABEL: Record<JudgeChoice, string> = {
+  mock: "모의 모델 (무료 · 데모용 결정적 채점)",
+  gemini: "Gemini (BYO 키 — 키는 이 브라우저에만 저장됩니다)",
+  vertex: "Vertex AI · Gemini 3.7 Flash (서비스 계정 JSON — 브라우저 직행)",
+  openai: "OpenAI · GPT-5.6 Sol (BYO 키 — 브라우저 직행)",
 };
 
 export function WizardPage() {
@@ -90,11 +101,15 @@ export function WizardPage() {
   // 클릭 1회에 요청할 초안 개수 — 남은 슬롯까지 자유롭게 고른다(호출은 개수와 무관하게 클릭당 1회)
   const [assistCount, setAssistCount] = useState(3);
   const [attachBusy, setAttachBusy] = useState(false);
-  const [keyDrafts, setKeyDrafts] = useState<Record<ByoProvider, string>>(() => ({
-    gemini: getByoKey("gemini") ?? "",
-    openai: getByoKey("openai") ?? "",
+  const [credentialDrafts, setCredentialDrafts] = useState<Record<ByoProvider, string>>(() => ({
+    gemini: getByoCredential("gemini") ?? "",
+    vertex: "",
+    openai: getByoCredential("openai") ?? "",
   }));
-  const [sharedProviders, setSharedProviders] = useState<Partial<Record<ByoProvider, boolean>>>(
+  const [storedVertexCredential, setStoredVertexCredential] = useState<string | null>(() =>
+    getByoCredential("vertex"),
+  );
+  const [sharedProviders, setSharedProviders] = useState<Partial<Record<SharedProvider, boolean>>>(
     {},
   );
 
@@ -135,6 +150,30 @@ export function WizardPage() {
   const isLast = step === questions.length - 1;
 
   const busy = submitting || assistBusy || attachBusy;
+
+  const sharedAvailable = (provider: ByoProvider): boolean =>
+    provider !== "vertex" && sharedProviders[provider] === true;
+
+  const credentialFor = (provider: ByoProvider): string => {
+    const draft = credentialDrafts[provider].trim();
+    return provider === "vertex" ? draft || storedVertexCredential || "" : draft;
+  };
+
+  const persistCredential = (provider: ByoProvider, raw: string): void => {
+    const saved = provider === "vertex" ? normalizeVertexServiceAccount(raw) : raw.trim();
+    setByoCredential(provider, saved);
+    if (provider === "vertex") {
+      setStoredVertexCredential(saved);
+      setCredentialDrafts((current) => ({ ...current, vertex: "" }));
+    }
+  };
+
+  const deleteCredential = (provider: ByoProvider): void => {
+    setByoCredential(provider, null);
+    setCredentialDrafts((current) => ({ ...current, [provider]: "" }));
+    if (provider === "vertex") setStoredVertexCredential(null);
+    setError(null);
+  };
 
   // AI 초안 슬라이더 범위 — 남은 슬롯을 넘겨 요청할 수 없다(빈 행은 채울 슬롯으로 계산)
   const casePairs =
@@ -200,15 +239,21 @@ export function WizardPage() {
     if (assistChoice === "mock") {
       client = createAssistMockClient();
     } else {
-      const key = keyDrafts[assistChoice].trim();
-      if (!key) {
-        setError(`${assistChoice === "openai" ? "OpenAI" : "Gemini"} API 키를 입력해 주세요.`);
+      const credential = credentialFor(assistChoice);
+      if (!credential) {
+        setError(`${PROVIDER_LABEL[assistChoice]} 자격 증명을 입력해 주세요.`);
         return;
       }
-      client =
-        assistChoice === "openai"
-          ? createOpenAIClient(key, JUDGE_MODEL.openai)
-          : createGeminiClient(key, JUDGE_MODEL.gemini);
+      try {
+        client = createByoClient(assistChoice, credential, JUDGE_MODEL[assistChoice]);
+      } catch (credentialError) {
+        setError(
+          credentialError instanceof Error
+            ? credentialError.message
+            : "모델 자격 증명을 해석하지 못했습니다.",
+        );
+        return;
+      }
     }
 
     setAssistBusy(true);
@@ -219,8 +264,8 @@ export function WizardPage() {
         .map((p) => ({ question: p.question.trim(), expectedAnswer: p.expectedAnswer.trim() }));
       const drafted = await assist.draft(material, existing, Math.min(assistCount, remaining), client);
       if (assistChoice !== "mock") {
-        // 실패한 키가 기존의 정상 키를 덮지 않도록 성공한 뒤에만 저장한다.
-        setByoKey(assistChoice, keyDrafts[assistChoice].trim());
+        // 실패한 자격 증명이 기존의 정상 값을 덮지 않도록 성공한 뒤에만 저장한다.
+        persistCredential(assistChoice, credentialFor(assistChoice));
       }
       if (drafted.length === 0) {
         setError("새 초안이 없습니다 — 모두 기존 질문과 중복이었습니다.");
@@ -259,23 +304,23 @@ export function WizardPage() {
       return;
     }
     if (entry!.needsModel && judgeChoice !== "mock") {
-      const key = keyDrafts[judgeChoice].trim();
-      if (!key && !sharedProviders[judgeChoice]) {
-        setError(`${judgeChoice === "openai" ? "OpenAI" : "Gemini"} API 키를 입력해 주세요.`);
+      const credential = credentialFor(judgeChoice);
+      if (!credential && !sharedAvailable(judgeChoice)) {
+        setError(`${PROVIDER_LABEL[judgeChoice]} 자격 증명을 입력해 주세요.`);
         return;
       }
     }
     setSubmitting(true);
     try {
       if (entry!.needsModel && judgeChoice !== "mock") {
-        const key = keyDrafts[judgeChoice].trim();
-        if (key) {
-          await testByoConnection(judgeChoice, key, JUDGE_MODEL[judgeChoice]);
-          // 실패한 키가 기존의 정상 키를 덮지 않도록 성공한 뒤에만 저장한다.
-          setByoKey(judgeChoice, key);
+        const credential = credentialFor(judgeChoice);
+        if (credential) {
+          await testByoConnection(judgeChoice, credential, JUDGE_MODEL[judgeChoice]);
+          // 실패한 자격 증명이 기존의 정상 값을 덮지 않도록 성공한 뒤에만 저장한다.
+          persistCredential(judgeChoice, credential);
         } else {
           // 키를 비워 뒀고 관리자 공유 키가 있는 경우 — 그 경로도 승인 전에 한 번 확인한다.
-          await testSharedConnection(judgeChoice, JUDGE_MODEL[judgeChoice]);
+          await testSharedConnection(judgeChoice as SharedProvider, JUDGE_MODEL[judgeChoice]);
         }
       }
       const answers = toAnswers(questions, draft);
@@ -323,7 +368,7 @@ export function WizardPage() {
                     <div style={{ marginTop: 12, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
                       <label>AI 초안 도우미 (선택)</label>
                       <div style={{ display: "grid", gap: 6, fontSize: 14 }}>
-                        {(["mock", "gemini", "openai"] as const).map((choice) => (
+                        {(["mock", "gemini", "vertex", "openai"] as const).map((choice) => (
                           <label
                             key={choice}
                             style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}
@@ -340,24 +385,29 @@ export function WizardPage() {
                             />
                             {choice === "mock"
                               ? "모의 모델 (무료 · 데모용 결정적 초안)"
-                              : choice === "gemini"
-                                ? "Gemini (BYO 키 — 키는 이 브라우저에만 저장됩니다)"
-                                : "OpenAI · GPT-5.6 Sol (BYO 키 — 브라우저 직행)"}
+                              : PROVIDER_OPTION_LABEL[choice]}
                           </label>
                         ))}
                       </div>
                       {assistChoice !== "mock" ? (
                         <div style={{ marginTop: 8 }}>
-                          <input
-                            type="password"
-                            value={keyDrafts[assistChoice]}
-                            placeholder={`${assistChoice === "openai" ? "OpenAI" : "Gemini"} API 키`}
-                            autoComplete="off"
-                            onChange={(e) => {
-                              const value = e.target.value;
-                              setKeyDrafts((current) => ({ ...current, [assistChoice]: value }));
+                          <ProviderCredentialInput
+                            provider={assistChoice}
+                            value={credentialDrafts[assistChoice]}
+                            storedCredential={
+                              assistChoice === "vertex" ? storedVertexCredential : null
+                            }
+                            idPrefix="assist"
+                            disabled={busy}
+                            onChange={(value) => {
+                              setCredentialDrafts((current) => ({
+                                ...current,
+                                [assistChoice]: value,
+                              }));
                               setError(null);
                             }}
+                            onDelete={() => deleteCredential(assistChoice)}
+                            onError={setError}
                           />
                         </div>
                       ) : null}
@@ -447,65 +497,53 @@ export function WizardPage() {
               >
                 <label>채점 모델 선택</label>
                 <div style={{ display: "grid", gap: 6, fontSize: 14 }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
-                    <input
-                      type="radio"
-                      name="judge-model"
-                      style={{ width: "auto" }}
-                      checked={judgeChoice === "mock"}
-                      onChange={() => {
-                        setJudgeChoice("mock");
-                        setError(null);
-                      }}
-                    />
-                    모의 모델 (무료 · 데모용 결정적 채점)
-                  </label>
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
-                    <input
-                      type="radio"
-                      name="judge-model"
-                      style={{ width: "auto" }}
-                      checked={judgeChoice === "gemini"}
-                      onChange={() => {
-                        setJudgeChoice("gemini");
-                        setError(null);
-                      }}
-                    />
-                    Gemini (BYO 키 — 키는 이 브라우저에만 저장됩니다)
-                  </label>
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
-                    <input
-                      type="radio"
-                      name="judge-model"
-                      style={{ width: "auto" }}
-                      checked={judgeChoice === "openai"}
-                      onChange={() => {
-                        setJudgeChoice("openai");
-                        setError(null);
-                      }}
-                    />
-                    OpenAI · GPT-5.6 Sol (BYO 키 — 브라우저 직행)
-                  </label>
+                  {(["mock", "gemini", "vertex", "openai"] as const).map((choice) => (
+                    <label
+                      key={choice}
+                      style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}
+                    >
+                      <input
+                        type="radio"
+                        name="judge-model"
+                        style={{ width: "auto" }}
+                        checked={judgeChoice === choice}
+                        onChange={() => {
+                          setJudgeChoice(choice);
+                          setError(null);
+                        }}
+                      />
+                      {PROVIDER_OPTION_LABEL[choice]}
+                    </label>
+                  ))}
                 </div>
                 {judgeChoice !== "mock" ? (
                   <div style={{ marginTop: 8 }}>
-                    <input
-                      type="password"
-                      value={keyDrafts[judgeChoice]}
-                      placeholder={
-                        sharedProviders[judgeChoice]
-                          ? `${judgeChoice === "openai" ? "OpenAI" : "Gemini"} API 키 (선택 — 비우면 관리자 공유 키 사용)`
-                          : `${judgeChoice === "openai" ? "OpenAI" : "Gemini"} API 키`
+                    <ProviderCredentialInput
+                      provider={judgeChoice}
+                      value={credentialDrafts[judgeChoice]}
+                      storedCredential={
+                        judgeChoice === "vertex" ? storedVertexCredential : null
                       }
-                      autoComplete="off"
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        setKeyDrafts((current) => ({ ...current, [judgeChoice]: value }));
+                      sharedAvailable={sharedAvailable(judgeChoice)}
+                      idPrefix="judge"
+                      disabled={busy}
+                      onChange={(value) => {
+                        setCredentialDrafts((current) => ({
+                          ...current,
+                          [judgeChoice]: value,
+                        }));
                         setError(null);
                       }}
+                      onDelete={() => deleteCredential(judgeChoice)}
+                      onError={setError}
                     />
                     <div className="hint">
-                      {keyDrafts[judgeChoice].trim() || !sharedProviders[judgeChoice] ? (
+                      {judgeChoice === "vertex" ? (
+                        <>
+                          private key는 localStorage에서 JWT 서명에만 쓰이고, 서명된 assertion은
+                          Google OAuth로, 모델 요청은 Vertex AI로 직접 전송됩니다.
+                        </>
+                      ) : credentialDrafts[judgeChoice].trim() || !sharedAvailable(judgeChoice) ? (
                         <>
                           키는 이 브라우저(localStorage)에만 저장되고, 요청은{" "}
                           {judgeChoice === "openai" ? "OpenAI" : "Gemini"} API로 직접 전송됩니다.

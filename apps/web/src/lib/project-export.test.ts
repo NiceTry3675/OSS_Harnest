@@ -66,7 +66,7 @@ async function fixture() {
 }
 
 describe("결과 기록 내보내기", () => {
-  it("승인 순간 digest를 사용하고 내부 상태·API 키를 허용 목록 밖에 둔다", async () => {
+  it("승인 순간 digest를 사용하고 내부 상태·벤더 자격 증명을 허용 목록 밖에 둔다", async () => {
     const { compiled, checkpoint, pack } = await fixture();
     const envelope = await buildProjectExport({
       compiled,
