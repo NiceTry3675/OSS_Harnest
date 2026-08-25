@@ -29,7 +29,6 @@ import {
   getByoCredential,
   hasSharedKey,
   PROVIDER_LABEL,
-  type SharedProvider,
 } from "./lib/llm";
 
 export interface TemplateRuntime {
@@ -178,7 +177,7 @@ const handoverEntry: TemplateEntry = {
     }
     // BYO 키가 없으면 관리자가 서버에 둔 공유 키로 대체한다(있을 때만).
     // 이 경로는 요청이 Harnest 서버(/proxy/*)를 거친다 — README·SPEC의 공유 키 절 참고.
-    if (provider !== "vertex" && hasSharedKey(provider as SharedProvider)) {
+    if ((provider === "openai" || provider === "gemini") && hasSharedKey(provider)) {
       return provider === "openai"
         ? createSharedOpenAIClient(jp.judge.model)
         : createSharedGeminiClient(jp.judge.model);

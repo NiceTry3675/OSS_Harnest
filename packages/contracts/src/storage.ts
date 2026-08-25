@@ -15,7 +15,7 @@ import {
 } from "./examiner";
 import type { InterviewSubmission } from "./interview";
 import { SCORE_CEILING, type LoopCheckpoint, type LoopSpec } from "./loop";
-import { digestScope, type EvaluationPack } from "./pack";
+import { digestScope, JUDGE_PROVIDERS, type EvaluationPack } from "./pack";
 
 export const PROJECT_EXPORT_KIND = "harnest.project-export" as const;
 export const PROJECT_EXPORT_VERSION = 1 as const;
@@ -756,7 +756,7 @@ export async function projectExportIssues(
       issues.push(issue("project.evaluation.calibration", "결정적 전용 Pack에는 캘리브레이션을 붙이지 않습니다."));
     }
   } else {
-    if (!(["gemini", "vertex", "openai", "mock"] as const).includes(pack.judgeProcedure.judge.provider)) {
+    if (!JUDGE_PROVIDERS.includes(pack.judgeProcedure.judge.provider)) {
       issues.push(
         issue(
           "project.evaluation.pack.judgeProcedure.judge.provider",

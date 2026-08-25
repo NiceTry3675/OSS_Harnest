@@ -6,20 +6,29 @@
 import type { CaseDef, JudgeProvider } from "@harnest/contracts";
 import { DRAFT_CASES_MARKER, type HandoverProblem, type LlmClient } from "@harnest/template-handover";
 
-export type ByoProvider = Exclude<JudgeProvider, "mock">;
+/** 기존 UI가 이미 직접 렌더링하는 공급자. 새 자동 판별 UI가 합쳐질 때 제거할 호환 별칭이다. */
+export type ByoProvider = Extract<JudgeProvider, "gemini" | "vertex" | "openai">;
+/** 자격 증명 또는 로컬 endpoint로 직접 연결할 수 있는 전체 공급자. */
+export type CredentialProvider = Exclude<JudgeProvider, "mock">;
 export type SharedProvider = Extract<JudgeProvider, "gemini" | "openai">;
 
 export const PROVIDER_LABEL: Record<JudgeProvider, string> = {
   gemini: "Gemini",
   vertex: "Vertex AI",
   openai: "OpenAI",
+  anthropic: "Claude",
+  openrouter: "OpenRouter",
+  ollama: "Ollama",
   mock: "모의",
 };
 
-const KEY_STORAGE: Record<ByoProvider, string> = {
+const KEY_STORAGE: Record<CredentialProvider, string> = {
   gemini: "harnest.byo.gemini",
   vertex: "harnest.byo.vertex",
   openai: "harnest.byo.openai",
+  anthropic: "harnest.byo.anthropic",
+  openrouter: "harnest.byo.openrouter",
+  ollama: "harnest.byo.ollama",
 };
 // 긴 문서 생성(분량 상한 최대 20,000자 → 출력 수만 토큰)은 수 분이 걸릴 수 있어 5분 여유를 둔다.
 // 연결 테스트는 fail-fast 목적이라 별도의 짧은 상한(CONNECTION_TEST_TIMEOUT_MS)을 유지한다.
@@ -37,17 +46,20 @@ export interface LlmRequestOptions {
 export type GeminiClientOptions = LlmRequestOptions;
 export type VertexClientOptions = LlmRequestOptions;
 export type OpenAIClientOptions = LlmRequestOptions;
+export type AnthropicClientOptions = LlmRequestOptions;
+export type OpenRouterClientOptions = LlmRequestOptions;
+export type OllamaClientOptions = LlmRequestOptions;
 
 const CONNECTION_TEST_PROMPT = "연결 확인 요청입니다. OK라고만 응답하세요.";
 const GOOGLE_OAUTH_TOKEN_URI = "https://oauth2.googleapis.com/token";
 const GOOGLE_CLOUD_SCOPE = "https://www.googleapis.com/auth/cloud-platform";
 const VERTEX_LOCATION = "global";
 
-export function getByoCredential(provider: ByoProvider): string | null {
+export function getByoCredential(provider: CredentialProvider): string | null {
   return localStorage.getItem(KEY_STORAGE[provider]);
 }
 
-export function setByoCredential(provider: ByoProvider, credential: string | null): void {
+export function setByoCredential(provider: CredentialProvider, credential: string | null): void {
   if (credential) localStorage.setItem(KEY_STORAGE[provider], credential);
   else localStorage.removeItem(KEY_STORAGE[provider]);
 }
@@ -104,6 +116,107 @@ export function parseVertexServiceAccount(raw: string): VertexServiceAccountCred
 
 export function normalizeVertexServiceAccount(raw: string): string {
   return JSON.stringify(parseVertexServiceAccount(raw));
+}
+
+export interface DetectedCredential {
+  provider: CredentialProvider;
+  /** Vertex는 최소 필드 JSON, Ollama는 정규화한 base URL, 나머지는 trim한 API 키다. */
+  normalizedCredential: string;
+}
+
+export type CredentialDetection =
+  | { status: "detected"; value: DetectedCredential }
+  | { status: "unknown"; reason: string };
+
+/** Ollama는 서버가 아니라 브라우저가 직접 접근한다. /api 경로는 클라이언트가 붙이므로 base URL만 보존한다. */
+export function normalizeOllamaBaseUrl(raw: string): string {
+  let candidate = raw.trim();
+  if (/^ollama:\/\//i.test(candidate)) candidate = `http://${candidate.slice("ollama://".length)}`;
+  if (/^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(candidate)) {
+    candidate = `http://${candidate}`;
+  }
+  let url: URL;
+  try {
+    url = new URL(candidate);
+  } catch {
+    throw new Error("Ollama 경로는 http://localhost:11434 같은 URL이어야 합니다.");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Ollama 경로는 HTTP 또는 HTTPS URL이어야 합니다.");
+  }
+  if (url.username || url.password || url.search || url.hash) {
+    throw new Error("Ollama 경로에는 사용자 정보, 쿼리 또는 프래그먼트를 넣을 수 없습니다.");
+  }
+  const pathname = url.pathname.replace(/\/+$/, "").replace(/\/api$/i, "");
+  url.pathname = pathname || "/";
+  return url.toString().replace(/\/$/, "");
+}
+
+function looksLikeOllamaEndpoint(value: string): boolean {
+  if (/^ollama:\/\//i.test(value)) return true;
+  if (/^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(value)) return true;
+  try {
+    const url = new URL(value);
+    return (
+      url.port === "11434" ||
+      url.hostname.toLowerCase().includes("ollama") ||
+      /\/api\/?$/i.test(url.pathname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 입력을 외부로 보내지 않고 형식만으로 공급자를 판별한다.
+ * 접두사가 겹치거나 알려지지 않은 키는 여러 벤더에 시험 전송하지 않고 unknown으로 남긴다.
+ */
+export function detectByoCredential(raw: string): CredentialDetection {
+  const value = raw.trim();
+  if (!value) return { status: "unknown", reason: "자격 증명 또는 Ollama 경로가 비어 있습니다." };
+
+  if (value.startsWith("{")) {
+    try {
+      return {
+        status: "detected",
+        value: { provider: "vertex", normalizedCredential: normalizeVertexServiceAccount(value) },
+      };
+    } catch (error) {
+      return {
+        status: "unknown",
+        reason: error instanceof Error ? error.message : "Vertex 서비스 계정 JSON이 올바르지 않습니다.",
+      };
+    }
+  }
+  if (/^sk-or-v1-[A-Za-z0-9_-]{12,}$/.test(value)) {
+    return { status: "detected", value: { provider: "openrouter", normalizedCredential: value } };
+  }
+  if (/^sk-ant-[A-Za-z0-9_-]{12,}$/.test(value)) {
+    return { status: "detected", value: { provider: "anthropic", normalizedCredential: value } };
+  }
+  if (/^AIza[A-Za-z0-9_-]{20,}$/.test(value)) {
+    return { status: "detected", value: { provider: "gemini", normalizedCredential: value } };
+  }
+  if (/^sk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{12,}$/.test(value)) {
+    return { status: "detected", value: { provider: "openai", normalizedCredential: value } };
+  }
+  if (looksLikeOllamaEndpoint(value)) {
+    try {
+      return {
+        status: "detected",
+        value: { provider: "ollama", normalizedCredential: normalizeOllamaBaseUrl(value) },
+      };
+    } catch (error) {
+      return {
+        status: "unknown",
+        reason: error instanceof Error ? error.message : "Ollama 경로가 올바르지 않습니다.",
+      };
+    }
+  }
+  return {
+    status: "unknown",
+    reason: "지원하는 공급자의 고유한 키 형식 또는 Ollama 경로로 판별할 수 없습니다.",
+  };
 }
 
 async function responseExcerpt(response: Response): Promise<string> {
@@ -507,6 +620,186 @@ export function createOpenAIClient(
   };
 }
 
+type DirectJsonRequest = {
+  url: string;
+  headers: Record<string, string>;
+  body: unknown;
+};
+
+function createDirectJsonClient(
+  providerId: CredentialProvider,
+  label: string,
+  model: string,
+  options: LlmRequestOptions,
+  requestFor: (
+    prompt: string,
+    completeOptions?: { temperature?: number; maxOutputTokens?: number },
+  ) => DirectJsonRequest,
+  outputText: (data: unknown) => string | null,
+): LlmClient {
+  const timeoutMs = Math.max(1, options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const maxAttempts = Math.max(1, Math.floor(options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS));
+  const retryBaseMs = Math.max(0, options.retryBaseMs ?? DEFAULT_RETRY_BASE_MS);
+
+  return {
+    providerId,
+    model,
+    async complete(prompt, completeOptions) {
+      const request = requestFor(prompt, completeOptions);
+      let lastError: Error = new Error("LLM 호출 실패");
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+        let response: Response;
+        try {
+          response = await fetch(request.url, {
+            method: "POST",
+            headers: request.headers,
+            body: JSON.stringify(request.body),
+            signal: controller.signal,
+          });
+        } catch (error) {
+          clearTimeout(timeout);
+          lastError = controller.signal.aborted
+            ? new Error(`${label} 요청 시간 초과 (${timeoutMs}ms)`)
+            : new Error(
+                `${label} 네트워크/CORS 오류: ${error instanceof Error ? error.message : String(error)}`,
+              );
+          if (attempt + 1 >= maxAttempts) throw lastError;
+          await wait(retryBaseMs * (attempt + 1));
+          continue;
+        }
+        if (!response.ok) {
+          const excerpt = await responseExcerpt(response);
+          clearTimeout(timeout);
+          lastError = new Error(`${label} HTTP ${response.status}${excerpt ? `: ${excerpt}` : ""}`);
+          const retryable = response.status === 429 || response.status >= 500;
+          if (!retryable || attempt + 1 >= maxAttempts) throw lastError;
+          await wait(retryBaseMs * (attempt + 1));
+          continue;
+        }
+
+        let data: unknown;
+        try {
+          data = await response.json();
+        } catch {
+          clearTimeout(timeout);
+          if (controller.signal.aborted) {
+            lastError = new Error(`${label} 요청 시간 초과 (${timeoutMs}ms)`);
+            if (attempt + 1 >= maxAttempts) throw lastError;
+            await wait(retryBaseMs * (attempt + 1));
+            continue;
+          }
+          throw new Error(`${label} 응답 JSON을 해석할 수 없습니다.`);
+        }
+        clearTimeout(timeout);
+        const text = outputText(data);
+        if (typeof text === "string" && text.length > 0) return text;
+        throw new Error(`${label} 응답에 텍스트가 없습니다.`);
+      }
+      throw lastError;
+    },
+  };
+}
+
+/** Claude Messages API 브라우저 직행 어댑터. 키는 Anthropic 이외의 호스트로 전송하지 않는다. */
+export function createAnthropicClient(
+  apiKey: string,
+  model: string,
+  options: AnthropicClientOptions = {},
+): LlmClient {
+  return createDirectJsonClient(
+    "anthropic",
+    "Claude",
+    model,
+    options,
+    (prompt, completeOptions) => ({
+      url: "https://api.anthropic.com/v1/messages",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+      },
+      body: {
+        model,
+        messages: [{ role: "user", content: prompt }],
+        temperature: completeOptions?.temperature ?? 0.7,
+        max_tokens: completeOptions?.maxOutputTokens ?? 8192,
+      },
+    }),
+    (data) => {
+      const content = (data as { content?: Array<{ type?: string; text?: string }> }).content ?? [];
+      const text = content
+        .filter((part) => part.type === "text" && typeof part.text === "string")
+        .map((part) => part.text!)
+        .join("");
+      return text || null;
+    },
+  );
+}
+
+/** OpenRouter의 OpenAI 호환 Chat Completions 경로. */
+export function createOpenRouterClient(
+  apiKey: string,
+  model: string,
+  options: OpenRouterClientOptions = {},
+): LlmClient {
+  return createDirectJsonClient(
+    "openrouter",
+    "OpenRouter",
+    model,
+    options,
+    (prompt, completeOptions) => ({
+      url: "https://openrouter.ai/api/v1/chat/completions",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: {
+        model,
+        messages: [{ role: "user", content: prompt }],
+        temperature: completeOptions?.temperature ?? 0.7,
+        max_tokens: completeOptions?.maxOutputTokens ?? 8192,
+      },
+    }),
+    (data) => {
+      const content = (data as { choices?: Array<{ message?: { content?: unknown } }> }).choices?.[0]
+        ?.message?.content;
+      return typeof content === "string" ? content : null;
+    },
+  );
+}
+
+/** 로컬 Ollama Chat API. endpoint는 사용자 브라우저에서 직접 호출되고 Harnest 서버를 거치지 않는다. */
+export function createOllamaClient(
+  endpoint: string,
+  model: string,
+  options: OllamaClientOptions = {},
+): LlmClient {
+  const baseUrl = normalizeOllamaBaseUrl(endpoint);
+  return createDirectJsonClient(
+    "ollama",
+    "Ollama",
+    model,
+    options,
+    (prompt, completeOptions) => ({
+      url: `${baseUrl}/api/chat`,
+      headers: { "Content-Type": "application/json" },
+      body: {
+        model,
+        messages: [{ role: "user", content: prompt }],
+        stream: false,
+        options: {
+          temperature: completeOptions?.temperature ?? 0.7,
+          num_predict: completeOptions?.maxOutputTokens ?? 8192,
+        },
+      },
+    }),
+    (data) => {
+      const content = (data as { message?: { content?: unknown } }).message?.content;
+      return typeof content === "string" ? content : null;
+    },
+  );
+}
+
 // ── 공유 키 판정(관리자가 서버에 둔 키) ──────────────────────────────────
 // BYO가 기본 경로다. 관리자가 자기 키를 Lambda에 설정했을 때만, 사용자가 키를
 // 안 넣어도 그 벤더를 쓸 수 있게 하는 보조 경로다. 이 경로는 요청이 벤더로
@@ -720,18 +1013,267 @@ export function createSharedGeminiClient(
   };
 }
 
+export interface AvailableModel {
+  id: string;
+  label: string;
+  source: "api" | "catalog";
+  createdAt?: string;
+  contextWindow?: number;
+  maxOutputTokens?: number;
+  ownedBy?: string;
+}
+
+export interface DetectedModelCatalog {
+  provider: CredentialProvider;
+  models: AvailableModel[];
+}
+
+const VERTEX_MODEL_CATALOG: AvailableModel[] = [
+  { id: "gemini-3.7-flash", label: "Gemini 3.7 Flash", source: "catalog" },
+  { id: "gemini-3.6-flash", label: "Gemini 3.6 Flash", source: "catalog" },
+  { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash", source: "catalog" },
+  { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro Preview", source: "catalog" },
+  { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro", source: "catalog" },
+  { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", source: "catalog" },
+];
+
+async function fetchModelJson(
+  url: string,
+  headers: Record<string, string>,
+  label: string,
+  timeoutMs: number,
+): Promise<unknown> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(url, { headers, signal: controller.signal });
+  } catch (error) {
+    clearTimeout(timeout);
+    if (controller.signal.aborted) throw new Error(`${label} 모델 목록 요청 시간 초과 (${timeoutMs}ms)`);
+    throw new Error(
+      `${label} 모델 목록 네트워크/CORS 오류: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (!response.ok) {
+    const excerpt = await responseExcerpt(response);
+    clearTimeout(timeout);
+    throw new Error(`${label} 모델 목록 HTTP ${response.status}${excerpt ? `: ${excerpt}` : ""}`);
+  }
+  try {
+    return await response.json();
+  } catch {
+    throw new Error(`${label} 모델 목록 응답 JSON을 해석할 수 없습니다.`);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function cleanModels(models: AvailableModel[]): AvailableModel[] {
+  const unique = new Map<string, AvailableModel>();
+  for (const model of models) {
+    const id = model.id.trim();
+    if (id) unique.set(id, { ...model, id, label: model.label.trim() || id });
+  }
+  return [...unique.values()].sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/** 자격 증명으로 접근 가능한 모델(버전) 목록을 조회한다. Vertex는 공개 API 목록 대신 검증된 카탈로그를 반환한다. */
+export async function listAvailableModels(
+  provider: CredentialProvider,
+  credential: string,
+  options: Pick<LlmRequestOptions, "requestTimeoutMs"> = {},
+): Promise<AvailableModel[]> {
+  const timeoutMs = Math.max(1, options.requestTimeoutMs ?? CONNECTION_TEST_TIMEOUT_MS);
+  if (provider === "vertex") {
+    parseVertexServiceAccount(credential);
+    return VERTEX_MODEL_CATALOG.map((model) => ({ ...model }));
+  }
+  if (provider === "openai") {
+    const data = (await fetchModelJson(
+      "https://api.openai.com/v1/models",
+      { Authorization: `Bearer ${credential}` },
+      "OpenAI",
+      timeoutMs,
+    )) as { data?: Array<{ id?: unknown; created?: unknown; owned_by?: unknown }> };
+    return cleanModels(
+      (data.data ?? [])
+        .filter((model) => typeof model.id === "string")
+        .map((model) => ({
+          id: String(model.id),
+          label: String(model.id),
+          source: "api" as const,
+          ...(typeof model.created === "number"
+            ? { createdAt: new Date(model.created * 1000).toISOString() }
+            : {}),
+          ...(typeof model.owned_by === "string" ? { ownedBy: model.owned_by } : {}),
+        })),
+    );
+  }
+  if (provider === "gemini") {
+    const data = (await fetchModelJson(
+      "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000",
+      { "x-goog-api-key": credential },
+      "Gemini",
+      timeoutMs,
+    )) as {
+      models?: Array<{
+        name?: unknown;
+        displayName?: unknown;
+        inputTokenLimit?: unknown;
+        outputTokenLimit?: unknown;
+        supportedGenerationMethods?: unknown;
+      }>;
+    };
+    return cleanModels(
+      (data.models ?? [])
+        .filter(
+          (model) =>
+            typeof model.name === "string" &&
+            Array.isArray(model.supportedGenerationMethods) &&
+            model.supportedGenerationMethods.includes("generateContent"),
+        )
+        .map((model) => ({
+          id: String(model.name).replace(/^models\//, ""),
+          label: typeof model.displayName === "string" ? model.displayName : String(model.name),
+          source: "api" as const,
+          ...(typeof model.inputTokenLimit === "number"
+            ? { contextWindow: model.inputTokenLimit }
+            : {}),
+          ...(typeof model.outputTokenLimit === "number"
+            ? { maxOutputTokens: model.outputTokenLimit }
+            : {}),
+        })),
+    );
+  }
+  if (provider === "anthropic") {
+    const data = (await fetchModelJson(
+      "https://api.anthropic.com/v1/models?limit=1000",
+      {
+        "x-api-key": credential,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+      },
+      "Claude",
+      timeoutMs,
+    )) as {
+      data?: Array<{
+        id?: unknown;
+        display_name?: unknown;
+        created_at?: unknown;
+        max_input_tokens?: unknown;
+        max_tokens?: unknown;
+      }>;
+    };
+    return cleanModels(
+      (data.data ?? [])
+        .filter((model) => typeof model.id === "string")
+        .map((model) => ({
+          id: String(model.id),
+          label: typeof model.display_name === "string" ? model.display_name : String(model.id),
+          source: "api" as const,
+          ...(typeof model.created_at === "string" ? { createdAt: model.created_at } : {}),
+          ...(typeof model.max_input_tokens === "number"
+            ? { contextWindow: model.max_input_tokens }
+            : {}),
+          ...(typeof model.max_tokens === "number" ? { maxOutputTokens: model.max_tokens } : {}),
+        })),
+    );
+  }
+  if (provider === "openrouter") {
+    const data = (await fetchModelJson(
+      "https://openrouter.ai/api/v1/models",
+      { Authorization: `Bearer ${credential}` },
+      "OpenRouter",
+      timeoutMs,
+    )) as { data?: Array<{ id?: unknown; name?: unknown; context_length?: unknown; created?: unknown }> };
+    return cleanModels(
+      (data.data ?? [])
+        .filter((model) => typeof model.id === "string")
+        .map((model) => ({
+          id: String(model.id),
+          label: typeof model.name === "string" ? model.name : String(model.id),
+          source: "api" as const,
+          ...(typeof model.context_length === "number" ? { contextWindow: model.context_length } : {}),
+          ...(typeof model.created === "number"
+            ? { createdAt: new Date(model.created * 1000).toISOString() }
+            : {}),
+        })),
+    );
+  }
+
+  const baseUrl = normalizeOllamaBaseUrl(credential);
+  const data = (await fetchModelJson(`${baseUrl}/api/tags`, {}, "Ollama", timeoutMs)) as {
+    models?: Array<{
+      name?: unknown;
+      model?: unknown;
+      modified_at?: unknown;
+      details?: { parameter_size?: unknown; quantization_level?: unknown };
+    }>;
+  };
+  return cleanModels(
+    (data.models ?? [])
+      .filter((model) => typeof model.model === "string" || typeof model.name === "string")
+      .map((model) => {
+        const id = typeof model.model === "string" ? model.model : String(model.name);
+        const details = [model.details?.parameter_size, model.details?.quantization_level]
+          .filter((value): value is string => typeof value === "string")
+          .join(" · ");
+        return {
+          id,
+          label: details ? `${id} (${details})` : id,
+          source: "api" as const,
+          ...(typeof model.modified_at === "string" ? { createdAt: model.modified_at } : {}),
+        };
+      }),
+  );
+}
+
+/** 공급자 선택 없이 자격 증명/경로를 판별하고 해당 모델 목록을 조회한다. */
+export async function detectAndListModels(
+  rawCredential: string,
+  options: Pick<LlmRequestOptions, "requestTimeoutMs"> = {},
+): Promise<DetectedModelCatalog> {
+  const detection = detectByoCredential(rawCredential);
+  if (detection.status === "unknown") throw new Error(detection.reason);
+  const { provider, normalizedCredential } = detection.value;
+  return {
+    provider,
+    models: await listAvailableModels(provider, normalizedCredential, options),
+  };
+}
+
 export function createByoClient(
-  provider: ByoProvider,
+  provider: CredentialProvider,
   credential: string,
   model: string,
   options: LlmRequestOptions = {},
 ): LlmClient {
   if (provider === "openai") return createOpenAIClient(credential, model, options);
   if (provider === "vertex") return createVertexClient(credential, model, options);
+  if (provider === "anthropic") return createAnthropicClient(credential, model, options);
+  if (provider === "openrouter") return createOpenRouterClient(credential, model, options);
+  if (provider === "ollama") return createOllamaClient(credential, model, options);
   return createGeminiClient(credential, model, options);
 }
 
-function connectionTestError(provider: ByoProvider, error: unknown): Error {
+/** 공급자 선택 없이 판별한 자격 증명으로 선택 모델 클라이언트를 만든다. */
+export function createDetectedByoClient(
+  rawCredential: string,
+  model: string,
+  options: LlmRequestOptions = {},
+): LlmClient {
+  const detection = detectByoCredential(rawCredential);
+  if (detection.status === "unknown") throw new Error(detection.reason);
+  return createByoClient(
+    detection.value.provider,
+    detection.value.normalizedCredential,
+    model,
+    options,
+  );
+}
+
+function connectionTestError(provider: CredentialProvider, error: unknown): Error {
   const label = PROVIDER_LABEL[provider];
   const detail = error instanceof Error ? error.message : String(error);
   const statusMatch = detail.match(/HTTP (\d{3})/);
@@ -782,7 +1324,7 @@ function connectionTestError(provider: ByoProvider, error: unknown): Error {
 /** 승인 전 BYO fail-fast. 재시도 없이 정확히 한 번만 호출하며, 성공한 자격 증명만 저장 대상으로 삼는다.
  *  OpenAI 401의 상태가 CORS로 가려지는 경우에는 인증 실패로 단정하지 않는다(SPEC §8). */
 export async function testByoConnection(
-  provider: ByoProvider,
+  provider: CredentialProvider,
   credential: string,
   model: string,
 ): Promise<void> {
@@ -798,6 +1340,21 @@ export async function testByoConnection(
   } catch (error) {
     throw connectionTestError(provider, error);
   }
+}
+
+/** 공급자 선택 없이 판별한 뒤, 사용자가 선택한 모델로 1콜 연결 테스트를 수행한다. */
+export async function testDetectedByoConnection(
+  rawCredential: string,
+  model: string,
+): Promise<CredentialProvider> {
+  const detection = detectByoCredential(rawCredential);
+  if (detection.status === "unknown") throw new Error(detection.reason);
+  await testByoConnection(
+    detection.value.provider,
+    detection.value.normalizedCredential,
+    model,
+  );
+  return detection.value.provider;
 }
 
 /** 케이스 초안 보조 전용 모의 클라이언트 — 케이스 입력 스텝에는 아직 compiled problem이

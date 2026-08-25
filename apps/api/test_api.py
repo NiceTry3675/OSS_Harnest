@@ -406,6 +406,46 @@ def run() -> None:
     assert r.status_code == 200, r.text
     assert r.content == raw_llm_export
 
+    # 새 BYO 공급자도 Pack·시험관 리포트의 동일 provider/model 결속을 유지해 저장한다.
+    for provider, model in (
+        ("vertex", "gemini-3.7-flash"),
+        ("anthropic", "claude-test"),
+        ("openrouter", "anthropic/claude-test"),
+        ("ollama", "qwen:test"),
+    ):
+        provider_export = json.loads(json.dumps(llm_export, ensure_ascii=False))
+        evaluation = provider_export["project"]["evaluation"]
+        evaluation["pack"]["judgeProcedure"]["judge"] = {
+            "provider": provider,
+            "model": model,
+        }
+        provider_scope = dict(evaluation["pack"])
+        provider_scope.pop("definitionDigest")
+        provider_digest = hashlib.sha256(
+            json.dumps(
+                provider_scope,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        evaluation["pack"]["definitionDigest"] = provider_digest
+        evaluation["examinerReport"]["forDigest"] = provider_digest
+        evaluation["examinerReport"]["judge"] = {
+            "provider": provider,
+            "model": model,
+        }
+        evaluation["calibration"]["forDigest"] = provider_digest
+        evaluation["approval"]["forDigest"] = provider_digest
+        provider_export["result"]["checkpoint"]["packDigest"] = provider_digest
+        provider_export["result"]["checkpoint"]["runId"] = f"run-{provider}"
+        r = client.post(
+            "/exports",
+            content=json.dumps(provider_export, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        assert r.status_code == 201, f"{provider}: {r.text}"
+
     # 중복 키, 미지원 버전, 불완전한 골격과 잘못된 귀속은 저장하지 않는다.
     with sqlite3.connect(_tmp.name) as conn:
         export_count_before = conn.execute(

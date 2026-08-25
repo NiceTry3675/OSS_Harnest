@@ -568,22 +568,23 @@ describe("ProjectExportEnvelope", () => {
     expect(paths).toContain("project.evaluation.pack.judgeProcedure.judge.model");
   });
 
-  it("Vertex provider는 지원하고 알 수 없는 provider는 거부한다", async () => {
-    const pack = await makePack("llm");
-    if (pack.judgeProcedure.kind !== "case_answering") throw new Error("fixture 오류");
-    pack.judgeProcedure.judge = { provider: "vertex", model: "gemini-3.7-flash" };
-    pack.definitionDigest = await sha256Canonical(digestScope(pack));
-    const input = exportInput(pack, scoredHoldout);
-    if (input.project.evaluation.examinerReport === null) throw new Error("fixture 오류");
-    input.project.evaluation.examinerReport.judge = {
-      provider: "vertex",
-      model: "gemini-3.7-flash",
-    };
-    const vertexEnvelope = await createProjectExportEnvelope(input);
-    const vertexPaths = (await projectExportIssues(vertexEnvelope)).map((entry) => entry.path);
-    expect(vertexPaths).not.toContain("project.evaluation.pack.judgeProcedure.judge.provider");
+  it("모든 BYO provider는 지원하고 알 수 없는 provider는 거부한다", async () => {
+    let validEnvelope: ProjectExportEnvelope<string> | null = null;
+    for (const provider of ["vertex", "anthropic", "openrouter", "ollama"] as const) {
+      const pack = await makePack("llm");
+      if (pack.judgeProcedure.kind !== "case_answering") throw new Error("fixture 오류");
+      pack.judgeProcedure.judge = { provider, model: `${provider}-model` };
+      pack.definitionDigest = await sha256Canonical(digestScope(pack));
+      const input = exportInput(pack, scoredHoldout);
+      if (input.project.evaluation.examinerReport === null) throw new Error("fixture 오류");
+      input.project.evaluation.examinerReport.judge = { provider, model: `${provider}-model` };
+      validEnvelope = await createProjectExportEnvelope(input);
+      const paths = (await projectExportIssues(validEnvelope)).map((entry) => entry.path);
+      expect(paths).not.toContain("project.evaluation.pack.judgeProcedure.judge.provider");
+    }
+    if (validEnvelope === null) throw new Error("fixture 오류");
 
-    const broken = structuredClone(vertexEnvelope) as ProjectExportEnvelope<string>;
+    const broken = structuredClone(validEnvelope) as ProjectExportEnvelope<string>;
     if (broken.project.evaluation.pack.judgeProcedure.kind !== "case_answering") {
       throw new Error("fixture 오류");
     }
