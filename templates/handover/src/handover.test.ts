@@ -4,7 +4,15 @@
 
 import { describe, expect, it } from "vitest";
 import { GradeFormatError, type CaseDef, type InterviewSubmission } from "@harnest/contracts";
-import { compile, MAX_CALLS_PER_RUN, MAX_CASES, MIN_CASES, TEMPLATE_ID, type CompileOptions } from "./index";
+import {
+  compile,
+  MAX_CALLS_PER_RUN,
+  MAX_CASES,
+  MIN_CASES,
+  TEMPLATE_ID,
+  type CompileOptions,
+  type HandoverProblem,
+} from "./index";
 import { mutatePrompt, oneshotPrompt } from "./prompts";
 import {
   CallBudgetExceededError,
@@ -40,6 +48,31 @@ function makeSubmission(
     },
   };
 }
+
+/** 실행 계층 테스트용 문제 리터럴 — 분할 정책(compile의 시드 셔플)과 무관하게
+ *  피드백·가드·홀드아웃 구성을 직접 고정한다. 분할 자체는 compile describe가 검증한다. */
+function makeProblem(over: Partial<HandoverProblem> = {}): HandoverProblem {
+  const c = (i: number): CaseDef => ({
+    id: `case-${i}`,
+    question: `질문 ${i}: 항목${i}은 어떻게 처리하나요?`,
+    expectedAnswer: `정답 ${i}: 절차${i}을 따르면 됩니다.`,
+  });
+  return {
+    material: "사내 배포 파이프라인을 관리하는 업무입니다.",
+    visibleCases: [c(1), c(2), c(3), c(4)],
+    guardCases: [c(5), c(6)],
+    holdoutCases: [c(7), c(8)],
+    lengthCap: 2000,
+    useConciseness: true,
+    ...over,
+  };
+}
+
+const allCasesOf = (problem: HandoverProblem): CaseDef[] => [
+  ...problem.visibleCases,
+  ...problem.guardCases,
+  ...problem.holdoutCases,
+];
 
 /** 프롬프트 기록형 모의 LLM — prompts.ts의 고정 마커로 역할을 판별하는 문자열 규칙.
  *  responder 배치: 질문 목록의 케이스마다 문서에 정답이 있으면 그 정답, 없으면 "문서에 없음".
@@ -94,18 +127,50 @@ function createRecordingLlm(allCases: CaseDef[]): RecordingLlm {
 }
 
 describe("compile", () => {
-  it("케이스 6개는 가시 4 / 홀드아웃 2로 꼬리 분할되고 holdoutCaseIds가 일치한다", async () => {
+  it("케이스 6개는 시드 셔플로 피드백 3 / 가드 2 / 홀드아웃 1로 분할되고 팩과 일치한다", async () => {
     const { problem, pack } = await compile(makeSubmission(6), mockJudge);
 
-    expect(problem.visibleCases.map((c) => c.id)).toEqual([
-      "case-1", "case-2", "case-3", "case-4",
-    ]);
-    expect(problem.holdoutCases.map((c) => c.id)).toEqual(["case-5", "case-6"]);
+    expect(problem.visibleCases).toHaveLength(3);
+    expect(problem.guardCases).toHaveLength(2);
+    expect(problem.holdoutCases).toHaveLength(1);
+    // 세 집합은 전체 케이스의 겹침 없는 분할이다
+    const allIds = allCasesOf(problem).map((c) => c.id);
+    expect([...allIds].sort()).toEqual(
+      ["case-1", "case-2", "case-3", "case-4", "case-5", "case-6"].sort(),
+    );
+    expect(new Set(allIds).size).toBe(6);
 
     const hp = pack.holdoutPolicy;
-    expect(hp.mode).toBe("auto_tail");
-    if (hp.mode !== "auto_tail") throw new Error("unreachable");
+    expect(hp.mode).toBe("seeded_split");
+    if (hp.mode !== "seeded_split") throw new Error("unreachable");
+    expect(hp.guardCaseIds).toEqual(problem.guardCases.map((c) => c.id));
     expect(hp.holdoutCaseIds).toEqual(problem.holdoutCases.map((c) => c.id));
+    // 허용 오차 = 채점 반 단계: 100 / (2 × 가드 2개)
+    expect(hp.guardTolerance).toBe(25);
+  });
+
+  it("같은 시험지는 다시 컴파일해도 같은 분할·같은 다이제스트다 — 컴파일 순수성", async () => {
+    const a = await compile(makeSubmission(8), mockJudge);
+    const b = await compile(makeSubmission(8), mockJudge);
+    expect(b.pack.definitionDigest).toBe(a.pack.definitionDigest);
+    expect(b.problem.visibleCases.map((c) => c.id)).toEqual(
+      a.problem.visibleCases.map((c) => c.id),
+    );
+    expect(b.problem.guardCases.map((c) => c.id)).toEqual(a.problem.guardCases.map((c) => c.id));
+    expect(b.problem.holdoutCases.map((c) => c.id)).toEqual(
+      a.problem.holdoutCases.map((c) => c.id),
+    );
+  });
+
+  it("케이스 30개는 피드백 12 / 가드 12 / 홀드아웃 6으로 분할된다 (40/40/20)", async () => {
+    const { problem, pack } = await compile(makeSubmission(MAX_CASES), mockJudge);
+    expect(problem.visibleCases).toHaveLength(12);
+    expect(problem.guardCases).toHaveLength(12);
+    expect(problem.holdoutCases).toHaveLength(6);
+    const hp = pack.holdoutPolicy;
+    if (hp.mode !== "seeded_split") throw new Error("unreachable");
+    // 100 / (2 × 12) = 4.166… → 소수 첫째 자리 반올림
+    expect(hp.guardTolerance).toBe(4.2);
   });
 
   it("판정 절차 다이제스트가 계산되어 동결된다 (SHA-256 hex)", async () => {
@@ -152,14 +217,17 @@ describe("compile", () => {
   });
 
   it("기록 전체가 상한 안이면 베끼기 방어 정적 안내를 남기고, 상한을 넘으면 안내가 없다", async () => {
-    // 짧은 답 4개 + 넉넉한 상한 2,000자 — 통째 베끼기를 분량 게이트가 못 걸러내는 설정
+    // 짧은 답 + 넉넉한 상한 2,000자 — 통째 베끼기를 분량 게이트가 못 걸러내는 설정
     const roomy = await compile(makeSubmission(6, 2000), mockJudge);
     expect(roomy.notices.some((n) => n.includes("베끼기"))).toBe(true);
 
-    // 상한 500자 — 가시 기록 전체(4케이스 × 약 130자)가 상한을 넘어 게이트가 방어한다
+    // 상한 500자 — 피드백 기록 전체(3케이스 × 약 200자)가 상한을 넘어 게이트가 방어한다
     const padded = makeSubmission(6, 500);
     for (const c of padded.answers["cases"] as Array<Record<string, unknown>>) {
-      c.expectedAnswer = `${c.expectedAnswer} 상세 절차는 위키의 운영 문서에 정리되어 있고 담당자 승인 뒤 진행해야 하며 금요일 배포는 금지입니다. 예외는 보안 패치뿐이며 그때도 사후 보고가 필요합니다.`;
+      c.expectedAnswer =
+        `${c.expectedAnswer} 상세 절차는 위키의 운영 문서에 정리되어 있고 담당자 승인 뒤 진행해야 하며 금요일 배포는 금지입니다. ` +
+        `예외는 보안 패치뿐이며 그때도 사후 보고가 필요합니다. 장애가 발생하면 온콜 채널에 먼저 공유하고 롤백 여부를 ` +
+        `리드와 합의한 뒤 진행 기록을 운영 일지에 남겨야 합니다.`;
     }
     const tight = await compile(padded, mockJudge);
     expect(tight.notices).toEqual([]);
@@ -192,16 +260,17 @@ describe("compile", () => {
     expect(vertex.pack.definitionDigest).not.toBe(b.pack.definitionDigest);
   });
 
-  it("케이스 provenance는 컴파일을 통과해 가시·홀드아웃 케이스에 유지된다", async () => {
+  it("케이스 provenance는 컴파일과 시드 분할을 통과해 각 케이스에 유지된다", async () => {
     const submission = makeSubmission(6);
     const cases = submission.answers["cases"] as Array<Record<string, unknown>>;
     cases[0].provenance = "ai";
     cases[5].provenance = "ai_edited";
     const { problem } = await compile(submission, mockJudge);
 
-    expect(problem.visibleCases[0].provenance).toBe("ai");
-    expect(problem.visibleCases[1].provenance).toBeUndefined();
-    expect(problem.holdoutCases[1].provenance).toBe("ai_edited");
+    const byId = new Map(allCasesOf(problem).map((c) => [c.id, c]));
+    expect(byId.get("case-1")!.provenance).toBe("ai");
+    expect(byId.get("case-2")!.provenance).toBeUndefined();
+    expect(byId.get("case-6")!.provenance).toBe("ai_edited");
   });
 
   it("provenance만 달라도 다이제스트가 달라진다 — 케이스 출처는 판정 절차에 결속된다", async () => {
@@ -240,44 +309,64 @@ describe("compile", () => {
 
 describe("createScorer", () => {
   it("분량 초과는 게이트에서 실격되고 LLM은 한 번도 호출되지 않는다", async () => {
-    const { problem } = await compile(makeSubmission(6), mockJudge);
-    const llm = createRecordingLlm([...problem.visibleCases, ...problem.holdoutCases]);
+    const problem = makeProblem();
+    const llm = createRecordingLlm(allCasesOf(problem));
     const scorer = createScorer(problem, llm);
 
     const result = await scorer("가".repeat(problem.lengthCap + 1));
     expect(result.gateRejected).toBe(true);
     expect(result.total).toBe(0);
+    expect(result.guardScore).toBeNull();
     expect(result.violations[0]).toContain("분량 초과");
     expect(llm.prompts).toHaveLength(0);
   });
 
-  it("가시 케이스만 채점한다 — 홀드아웃 질문은 responder 프롬프트에 등장하지 않는다(불변식)", async () => {
+  it("피드백 케이스를 채점하고 가드는 별도 배치로 집계만 낸다 — 홀드아웃은 등장하지 않는다", async () => {
     // 간결성 끔 — 순수 커버리지 산술을 검증한다 (켠 경로는 아래 간결성 describe)
-    const { problem } = await compile(makeSubmission(6, 2000, false), mockJudge);
-    const llm = createRecordingLlm([...problem.visibleCases, ...problem.holdoutCases]);
+    const problem = makeProblem({ useConciseness: false });
+    const llm = createRecordingLlm(allCasesOf(problem));
     const scorer = createScorer(problem, llm);
 
-    // 가시 케이스 1·2의 정답만 담긴 문서 → 4개 중 2개 정답 = 50점
+    // 피드백 1·2와 가드 1(case-5)의 정답만 담긴 문서 → 커버리지 50, 가드 50
     const doc =
       "배포 파이프라인 안내. " +
       problem.visibleCases[0].expectedAnswer +
       " " +
-      problem.visibleCases[1].expectedAnswer;
+      problem.visibleCases[1].expectedAnswer +
+      " " +
+      problem.guardCases[0].expectedAnswer;
     const result = await scorer(doc);
 
     expect(result.gateRejected).toBe(false);
     expect(result.total).toBe(50);
     expect(result.parts).toEqual({ case_answerability: 50 });
+    expect(result.guardScore).toBe(50);
 
-    // violations 문자열에 실패한 케이스 id가 담긴다 (Generator 피드백의 재료)
+    // violations 문자열에는 실패한 피드백 케이스만 담긴다 — 가드 트레이스는
+    // Generator 피드백으로 새지 않는다(비퇴보 조건은 집계 점수만 쓴다)
     expect(result.violations).toHaveLength(2);
     expect(result.violations[0]).toContain("case-3");
     expect(result.violations[1]).toContain("case-4");
+    for (const v of result.violations) {
+      expect(v).not.toContain("case-5");
+      expect(v).not.toContain("case-6");
+    }
 
-    // 배치 채점: responder 1콜 + grader 1콜 — 케이스 수와 무관
+    // 배치 채점 4콜: 피드백 responder+grader, 가드 responder+grader — 케이스 수와 무관
     const responderPrompts = llm.prompts.filter((p) => p.includes("아래 문서만을 근거로"));
-    expect(responderPrompts).toHaveLength(1);
-    expect(llm.prompts).toHaveLength(2);
+    expect(responderPrompts).toHaveLength(2);
+    expect(llm.prompts).toHaveLength(4);
+
+    // 피드백과 가드는 같은 responder 프롬프트에 섞이지 않는다
+    const [first, second] = responderPrompts;
+    for (const v of problem.visibleCases) {
+      expect(first).toContain(v.question);
+      expect(second).not.toContain(v.question);
+    }
+    for (const g of problem.guardCases) {
+      expect(first).not.toContain(g.question);
+      expect(second).toContain(g.question);
+    }
 
     // 불변식: 홀드아웃 케이스의 질문·정답은 어떤 프롬프트에도 등장하지 않는다
     for (const h of problem.holdoutCases) {
@@ -286,10 +375,15 @@ describe("createScorer", () => {
         expect(p).not.toContain(h.expectedAnswer);
       }
     }
-    // 가시 케이스 질문은 각각 responder 프롬프트에 등장한다
-    for (const v of problem.visibleCases) {
-      expect(responderPrompts.some((p) => p.includes(v.question))).toBe(true);
-    }
+  });
+
+  it("가드 케이스가 없으면 guardScore는 null이고 추가 호출도 없다", async () => {
+    const problem = makeProblem({ guardCases: [], useConciseness: false });
+    const llm = createRecordingLlm(allCasesOf(problem));
+    const result = await createScorer(problem, llm)("문서. " + problem.visibleCases[0].expectedAnswer);
+
+    expect(result.guardScore).toBeNull();
+    expect(llm.prompts).toHaveLength(2);
   });
 });
 
@@ -297,8 +391,8 @@ describe("createScorer — 간결성 가점", () => {
   const round1 = (x: number): number => Math.round(x * 10) / 10;
 
   it("켜면 커버리지 0.8 + 상한 대비 여유 0.2로 합산하고, 같은 커버리지면 짧을수록 높다", async () => {
-    const { problem } = await compile(makeSubmission(6), mockJudge); // 기본 켬
-    const llm = createRecordingLlm([...problem.visibleCases, ...problem.holdoutCases]);
+    const problem = makeProblem({ guardCases: [] }); // 기본 켬
+    const llm = createRecordingLlm(allCasesOf(problem));
     const scorer = createScorer(problem, llm);
 
     // 가시 4케이스 중 2개 정답 = 커버리지 50
@@ -329,8 +423,8 @@ describe("createScorer — 간결성 가점", () => {
   });
 
   it("답변력이 0이면 간결성도 0 — 빈 문서가 간결성만으로 점수를 받지 못한다", async () => {
-    const { problem } = await compile(makeSubmission(6), mockJudge);
-    const llm = createRecordingLlm([...problem.visibleCases, ...problem.holdoutCases]);
+    const problem = makeProblem({ guardCases: [] });
+    const llm = createRecordingLlm(allCasesOf(problem));
     const result = await createScorer(problem, llm)("관련 없는 짧은 문서");
 
     expect(result.total).toBe(0);
@@ -353,7 +447,7 @@ describe("배치 채점 — 형식 오류", () => {
   };
 
   it("responder 배치가 요청 케이스를 모두 담지 않으면 형식 재시도 1회 후 성공한다", async () => {
-    const { problem } = await compile(makeSubmission(6, 2000, false), mockJudge);
+    const problem = makeProblem({ guardCases: [], useConciseness: false });
     const answers = problem.visibleCases.map((c) => ({ caseId: c.id, answer: c.expectedAnswer }));
     const grades = problem.visibleCases.map((c) => ({ caseId: c.id, score: 1, why: "정답" }));
     const llm = sequenceLlm([
@@ -369,7 +463,7 @@ describe("배치 채점 — 형식 오류", () => {
   });
 
   it("grader 배치가 재시도까지 실패하면 GradeFormatError를 던진다", async () => {
-    const { problem } = await compile(makeSubmission(6), mockJudge);
+    const problem = makeProblem({ guardCases: [], useConciseness: false });
     const answers = problem.visibleCases.map((c) => ({ caseId: c.id, answer: c.expectedAnswer }));
     const llm = sequenceLlm([
       JSON.stringify(answers),
@@ -437,23 +531,23 @@ describe("gradeResponse — 형식 오류", () => {
 });
 
 describe("scoreHoldout", () => {
-  it("홀드아웃 케이스만 채점한다 — 가시 질문은 responder 프롬프트에 등장하지 않는다", async () => {
-    const { problem } = await compile(makeSubmission(6), mockJudge);
-    const llm = createRecordingLlm([...problem.visibleCases, ...problem.holdoutCases]);
+  it("홀드아웃 케이스만 채점한다 — 피드백·가드 질문은 responder 프롬프트에 등장하지 않는다", async () => {
+    const problem = makeProblem();
+    const llm = createRecordingLlm(allCasesOf(problem));
 
-    // 홀드아웃 케이스 1(case-5)의 정답만 담긴 문서 → 2개 중 1개 정답 = 50점
+    // 홀드아웃 케이스 1(case-7)의 정답만 담긴 문서 → 2개 중 1개 정답 = 50점
     const doc = "요약 문서. " + problem.holdoutCases[0].expectedAnswer;
     const result = await scoreHoldout(problem, doc, llm);
 
     expect(result.gateRejected).toBe(false);
     expect(result.score).toBe(50);
-    expect(result.perCase.map((g) => g.caseId)).toEqual(["case-5", "case-6"]);
+    expect(result.perCase.map((g) => g.caseId)).toEqual(["case-7", "case-8"]);
     expect(result.perCase.map((g) => g.score)).toEqual([1, 0]);
 
     const responderPrompts = llm.prompts.filter((p) => p.includes("아래 문서만을 근거로"));
     expect(responderPrompts).toHaveLength(1);
-    // 가시 케이스의 질문은 어떤 responder 프롬프트에도 등장하지 않는다
-    for (const v of problem.visibleCases) {
+    // 피드백·가드 케이스의 질문은 어떤 responder 프롬프트에도 등장하지 않는다
+    for (const v of [...problem.visibleCases, ...problem.guardCases]) {
       for (const p of responderPrompts) expect(p).not.toContain(v.question);
     }
     // 홀드아웃 질문은 각각 등장한다
@@ -463,8 +557,8 @@ describe("scoreHoldout", () => {
   });
 
   it("분량 게이트 실격은 0점이 아니라 score null이며 모델을 호출하지 않는다", async () => {
-    const { problem } = await compile(makeSubmission(6), mockJudge);
-    const llm = createRecordingLlm([...problem.visibleCases, ...problem.holdoutCases]);
+    const problem = makeProblem();
+    const llm = createRecordingLlm(allCasesOf(problem));
     const result = await scoreHoldout(problem, "가".repeat(problem.lengthCap + 1), llm);
 
     expect(result).toEqual({
@@ -476,28 +570,27 @@ describe("scoreHoldout", () => {
     expect(llm.prompts).toHaveLength(0);
   });
 
-  it("홀드아웃 질문을 가시 질문과의 반복/신규로 구분하되 분할에서 제거하지 않는다", async () => {
-    const submission = makeSubmission(6);
-    const cases = submission.answers["cases"] as Array<{
-      question: string;
-      expectedAnswer: string;
-    }>;
-    cases[4].question = `  ${cases[0].question.toUpperCase()}  `;
-    const { problem } = await compile(submission, mockJudge);
-    const llm = createRecordingLlm([...problem.visibleCases, ...problem.holdoutCases]);
+  it("홀드아웃 질문을 피드백 질문과의 반복/신규로 구분하되 분할에서 제거하지 않는다", async () => {
+    const problem = makeProblem();
+    // 홀드아웃 1(case-7)의 질문을 피드백 1(case-1)과 사실상 같게 — 공백·대소문자만 다르게
+    problem.holdoutCases[0] = {
+      ...problem.holdoutCases[0],
+      question: `  ${problem.visibleCases[0].question.toUpperCase()}  `,
+    };
+    const llm = createRecordingLlm(allCasesOf(problem));
     const result = await scoreHoldout(problem, "요약 문서", llm);
 
     expect(result.gateRejected).toBe(false);
     expect(result.perCase).toHaveLength(2);
     expect(result.perCase.map((g) => g.caseType)).toEqual(["repeated", "new"]);
-    expect(problem.holdoutCases.map((c) => c.id)).toEqual(["case-5", "case-6"]);
+    expect(problem.holdoutCases.map((c) => c.id)).toEqual(["case-7", "case-8"]);
   });
 });
 
 describe("createGenerator", () => {
   it("mutatePrompt에 feedback의 championScore·championViolations·round가 실린다", async () => {
-    const { problem } = await compile(makeSubmission(6), mockJudge);
-    const llm = createRecordingLlm([...problem.visibleCases, ...problem.holdoutCases]);
+    const problem = makeProblem();
+    const llm = createRecordingLlm(allCasesOf(problem));
     const generate = createGenerator(problem, llm);
 
     const violation = "case-2 (질문 2: 항목2은 어떻게 처리…): 오답 — 핵심 절차 누락";
@@ -517,16 +610,29 @@ describe("createGenerator", () => {
     expect(prompt).toContain("라운드 3");
     // 간결성이 켜진 절차의 변이 프롬프트에는 가점 힌트가 실린다 (강제는 scorer, 프롬프트는 힌트)
     expect(prompt).toContain("간결성 가점");
-    // 변이 프롬프트도 가시 케이스만 본다 — 홀드아웃 유입 금지
-    for (const h of problem.holdoutCases) {
-      expect(prompt).not.toContain(h.question);
-      expect(prompt).not.toContain(h.expectedAnswer);
+    // 가드가 있는 절차에는 비공개 검증 안내가 실린다 — 질문·정답이 아니라 존재만
+    expect(prompt).toContain("공개되지 않는 검증 질문");
+    // 변이 프롬프트도 피드백 케이스만 본다 — 가드·홀드아웃 유입 금지
+    for (const hidden of [...problem.guardCases, ...problem.holdoutCases]) {
+      expect(prompt).not.toContain(hidden.question);
+      expect(prompt).not.toContain(hidden.expectedAnswer);
     }
   });
 
+  it("가드가 없는 절차의 변이 프롬프트에는 비공개 검증 안내가 없다", async () => {
+    const problem = makeProblem({ guardCases: [] });
+    const llm = createRecordingLlm(allCasesOf(problem));
+    await createGenerator(problem, llm)("챔피언 문서", () => 0, {
+      round: 1,
+      championScore: 0,
+      championViolations: [],
+    });
+    expect(llm.prompts[0]).not.toContain("공개되지 않는 검증 질문");
+  });
+
   it("간결성을 끈 절차의 변이 프롬프트에는 가점 힌트가 없다", async () => {
-    const { problem } = await compile(makeSubmission(6, 2000, false), mockJudge);
-    const llm = createRecordingLlm([...problem.visibleCases, ...problem.holdoutCases]);
+    const problem = makeProblem({ useConciseness: false });
+    const llm = createRecordingLlm(allCasesOf(problem));
     await createGenerator(problem, llm)("챔피언 문서", () => 0, {
       round: 1,
       championScore: 0,
@@ -537,6 +643,7 @@ describe("createGenerator", () => {
 });
 
 describe("생성 출력 토큰 예산", () => {
+
   it("원샷·변이 호출에 분량 상한 연동 maxOutputTokens가 실린다 — 기본 상한의 조용한 절단 방지", async () => {
     const { problem } = await compile(makeSubmission(6, 8000), mockJudge);
     const optsSeen: Array<number | undefined> = [];
@@ -559,7 +666,7 @@ describe("생성 출력 토큰 예산", () => {
   });
 
   it("배치 채점 호출에도 케이스 수 연동 maxOutputTokens가 실린다", async () => {
-    // 최대 구성: 30케이스 → 가시 20 — 기본 상한(8192)보다 큰 예산이 필요한 지점
+    // 최대 구성: 30케이스 → 피드백 12 · 가드 12 — 기본 상한(8192)보다 큰 예산이 필요한 지점
     const { problem } = await compile(makeSubmission(MAX_CASES), mockJudge);
     const seen: Array<number | undefined> = [];
     const llm: LlmClient = {
@@ -568,19 +675,19 @@ describe("생성 출력 토큰 예산", () => {
       async complete(prompt, opts) {
         seen.push(opts?.maxOutputTokens);
         if (prompt.includes("아래 문서만을 근거로")) {
-          return JSON.stringify(
-            problem.visibleCases.map((c) => ({ caseId: c.id, answer: c.expectedAnswer })),
-          );
+          const listBlock = prompt.split("## 질문 목록")[1] ?? "";
+          const ids = [...listBlock.matchAll(/### 질문 \(([^)]+)\)/g)].map((m) => m[1]);
+          return JSON.stringify(ids.map((id) => ({ caseId: id, answer: "정답" })));
         }
-        return JSON.stringify(
-          problem.visibleCases.map((c) => ({ caseId: c.id, score: 1, why: "정답" })),
-        );
+        const ids = [...prompt.matchAll(/### 케이스 \(([^)]+)\)/g)].map((m) => m[1]);
+        return JSON.stringify(ids.map((id) => ({ caseId: id, score: 1, why: "정답" })));
       },
     };
 
     await createScorer(problem, llm)("문서");
-    expect(problem.visibleCases).toHaveLength(20);
-    expect(seen).toEqual([20_480, 20_480]);
+    expect(problem.visibleCases).toHaveLength(12);
+    // 피드백 responder+grader, 가드 responder+grader — 각 12케이스 × 1024토큰
+    expect(seen).toEqual([12_288, 12_288, 12_288, 12_288]);
   });
 });
 
@@ -605,9 +712,10 @@ describe("withCallBudget", () => {
 
   it("선언된 실행 예산은 최대 구성의 이론적 최악 호출 수를 넘는 백스톱이다", async () => {
     const { loopSpec } = await compile(makeSubmission(MAX_CASES), mockJudge);
-    // 배치 채점 1회 최악 = responder + 형식 재시도 + grader + 형식 재시도 = 4콜
+    // 배치 채점 1회 최악 = responder + 형식 재시도 + grader + 형식 재시도 = 4콜.
+    // 라운드마다 피드백·가드 배치가 각각 1회씩이므로 채점 최악은 2배다.
     const perScoringWorst = 4;
-    const worst = (loopSpec.maxRounds + 1) * (1 + perScoringWorst) + 2 * perScoringWorst;
+    const worst = (loopSpec.maxRounds + 1) * (1 + 2 * perScoringWorst) + 2 * perScoringWorst;
     expect(MAX_CALLS_PER_RUN).toBeGreaterThan(worst);
   });
 });

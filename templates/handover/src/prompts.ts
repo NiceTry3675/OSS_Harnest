@@ -20,10 +20,11 @@ function casesBlock(cases: CaseDef[]): string {
     .join("\n\n");
 }
 
-/** 원샷 생성 — 원료는 소개 자료 + 가시 케이스의 Q&A 기록. 홀드아웃은 여기 없다. */
+/** 원샷 생성 — 원료는 소개 자료 + 피드백(가시) 케이스의 Q&A 기록. 가드·홀드아웃은 여기 없다. */
 export function oneshotPrompt(problem: HandoverProblem): string {
   return `당신은 인수인계·온보딩 문서를 작성합니다.
 목표: 후임자가 아래 기록의 저자에게 묻지 않고, 이 문서만 읽고도 실제로 들어오는 질문들에 답할 수 있게 하는 것.
+아래 기록은 실제 질문의 표본일 뿐입니다 — 기록에 없는 질문도 들어오므로, 참고 자료의 주제 전반을 고르게 다루세요.
 ${limitBlock(problem.lengthCap)}
 
 ## 업무 소개 · 참고 자료
@@ -46,7 +47,12 @@ export function mutatePrompt(
   return `아래는 인수인계 문서와, 동결된 평가 절차의 채점 결과입니다.
 평가 방식: 문서만 읽은 응답자가 실제 질문들에 답하고, 기록된 정답과 대조했습니다.
 실패 목록을 고치되 이미 맞는 내용을 깨지 마세요.
-내용을 추가해야 한다면 먼저 덜 중요한 내용을 비슷한 분량만큼 삭제하세요 — 분량 제한이 있습니다.
+내용을 추가해야 한다면 먼저 덜 중요한 내용을 비슷한 분량만큼 삭제하세요 — 분량 제한이 있습니다.${
+    problem.guardCases.length > 0
+      ? `\n채점에는 아래 기록 외에 공개되지 않는 검증 질문들도 쓰입니다 — 검증 점수가 나빠진 수정본은 채택되지 않습니다.
+실패 목록만 좁게 때우거나 기록의 문답을 그대로 옮겨 적지 말고, 참고 자료의 다른 주제 커버리지도 함께 유지하세요.`
+      : ""
+  }
 ${limitBlock(problem.lengthCap)}${
     problem.useConciseness
       ? `\n간결성 가점: 같은 커버리지면 짧은 문서가 더 높은 점수를 받습니다 (현재 ${championDoc.length.toLocaleString()}자).`

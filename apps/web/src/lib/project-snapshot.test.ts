@@ -28,7 +28,13 @@ const pack: EvaluationPack = {
     judge: { provider: "mock", model: "모의 모델" },
     pairwiseNotice: "미적용",
   },
-  holdoutPolicy: { mode: "auto_tail", note: "자동", holdoutCaseIds: ["case-5"] },
+  holdoutPolicy: {
+    mode: "seeded_split",
+    note: "시드 분할",
+    guardCaseIds: ["case-4"],
+    holdoutCaseIds: ["case-5"],
+    guardTolerance: 4.2,
+  },
   definitionDigest: "a".repeat(64),
 };
 
@@ -165,7 +171,9 @@ describe("IndexedDbProjectStore", () => {
         champion: "라운드 1",
         championScore: 1,
         championViolations: [],
+        championGuardScore: null,
         curve: [1],
+        guardCurve: [null],
         tree: [],
         provenance: [],
         rngState: 1,
@@ -190,7 +198,9 @@ describe("IndexedDbProjectStore", () => {
       champion: 10,
       championScore: 10,
       championViolations: [],
+      championGuardScore: null,
       curve: [5, 10],
+      guardCurve: [null, null],
       tree: [
         {
           round: 1,
@@ -199,6 +209,8 @@ describe("IndexedDbProjectStore", () => {
           adopted: true,
           gateRejected: false,
           violations: [],
+          candidateGuardScore: null,
+          guardSafe: true,
         },
       ],
       provenance: [],
@@ -237,7 +249,9 @@ describe("IndexedDbProjectStore", () => {
       champion: 1,
       championScore: 1,
       championViolations: [],
+      championGuardScore: null,
       curve: [1],
+      guardCurve: [null],
       tree: [],
       provenance: [],
       rngState: 1,

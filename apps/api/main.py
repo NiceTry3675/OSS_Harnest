@@ -58,7 +58,7 @@ app.add_middleware(
 
 DB_SCHEMA_VERSION = 1
 EXPORT_KIND = "harnest.project-export"
-EXPORT_ENVELOPE_VERSION = 2
+EXPORT_ENVELOPE_VERSION = 3
 INTERVIEW_SCHEMA_VERSION = "skeleton-1"
 PACK_VERSION = "skeleton-1"
 SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -230,6 +230,18 @@ def require_number(value: Any, path: str) -> int | float:
     return value
 
 
+def require_nullable_number(value: Any, path: str) -> int | float | None:
+    if value is None:
+        return None
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or (isinstance(value, float) and not math.isfinite(value))
+    ):
+        raise HTTPException(status_code=422, detail=f"{path}는 null이거나 숫자여야 합니다.")
+    return value
+
+
 def require_boolean(value: Any, path: str) -> bool:
     if not isinstance(value, bool):
         raise HTTPException(status_code=422, detail=f"{path}는 boolean이어야 합니다.")
@@ -357,7 +369,9 @@ def validate_checkpoint_shape(checkpoint: Dict[str, Any]) -> None:
             "champion",
             "championScore",
             "championViolations",
+            "championGuardScore",
             "curve",
+            "guardCurve",
             "tree",
             "provenance",
             "rngState",
@@ -367,16 +381,31 @@ def validate_checkpoint_shape(checkpoint: Dict[str, Any]) -> None:
     require_number(checkpoint.get("round"), f"{path}.round")
     require_number(checkpoint.get("championScore"), f"{path}.championScore")
     require_string_array(checkpoint.get("championViolations"), f"{path}.championViolations")
+    require_nullable_number(
+        checkpoint.get("championGuardScore"), f"{path}.championGuardScore"
+    )
     curve = require_array(checkpoint.get("curve"), f"{path}.curve")
     for index, score in enumerate(curve):
         require_number(score, f"{path}.curve[{index}]")
+    guard_curve = require_array(checkpoint.get("guardCurve"), f"{path}.guardCurve")
+    for index, score in enumerate(guard_curve):
+        require_nullable_number(score, f"{path}.guardCurve[{index}]")
     tree = require_array(checkpoint.get("tree"), f"{path}.tree")
     for index, item in enumerate(tree):
         item_path = f"{path}.tree[{index}]"
         record = require_object(item, item_path)
         require_exact_members(
             record,
-            {"round", "candidateScore", "championScore", "adopted", "gateRejected", "violations"},
+            {
+                "round",
+                "candidateScore",
+                "championScore",
+                "adopted",
+                "gateRejected",
+                "violations",
+                "candidateGuardScore",
+                "guardSafe",
+            },
             item_path,
         )
         require_number(record.get("round"), f"{item_path}.round")
@@ -385,6 +414,10 @@ def validate_checkpoint_shape(checkpoint: Dict[str, Any]) -> None:
         require_boolean(record.get("adopted"), f"{item_path}.adopted")
         require_boolean(record.get("gateRejected"), f"{item_path}.gateRejected")
         require_string_array(record.get("violations"), f"{item_path}.violations")
+        require_nullable_number(
+            record.get("candidateGuardScore"), f"{item_path}.candidateGuardScore"
+        )
+        require_boolean(record.get("guardSafe"), f"{item_path}.guardSafe")
     provenance = require_array(checkpoint.get("provenance"), f"{path}.provenance")
     for index, item in enumerate(provenance):
         item_path = f"{path}.provenance[{index}]"
@@ -586,18 +619,26 @@ def extract_export_metadata(
         pack.get("holdoutPolicy"), "project.evaluation.pack.holdoutPolicy"
     )
     holdout_policy_mode = holdout_policy.get("mode")
-    if holdout_policy_mode not in {"none", "auto_tail"}:
+    if holdout_policy_mode not in {"none", "seeded_split"}:
         raise HTTPException(status_code=422, detail="지원하지 않는 holdoutPolicy.mode입니다.")
     require_string(holdout_policy.get("note"), "project.evaluation.pack.holdoutPolicy.note")
-    if holdout_policy_mode == "auto_tail":
+    if holdout_policy_mode == "seeded_split":
         require_exact_members(
             holdout_policy,
-            {"mode", "note", "holdoutCaseIds"},
+            {"mode", "note", "guardCaseIds", "holdoutCaseIds", "guardTolerance"},
             "project.evaluation.pack.holdoutPolicy",
+        )
+        require_string_array(
+            holdout_policy.get("guardCaseIds"),
+            "project.evaluation.pack.holdoutPolicy.guardCaseIds",
         )
         require_string_array(
             holdout_policy.get("holdoutCaseIds"),
             "project.evaluation.pack.holdoutPolicy.holdoutCaseIds",
+        )
+        require_number(
+            holdout_policy.get("guardTolerance"),
+            "project.evaluation.pack.holdoutPolicy.guardTolerance",
         )
     else:
         require_exact_members(

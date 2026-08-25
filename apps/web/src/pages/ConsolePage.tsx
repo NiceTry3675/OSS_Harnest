@@ -427,6 +427,14 @@ export function ConsolePage() {
       />
 
       <div className="card">
+        {checkpoint !== null && (checkpoint.championGuardScore ?? null) !== null && (
+          <div>
+            <span className="badge">검증 가드: {fmt(checkpoint.championGuardScore!)}점</span>
+            <span className="hint" style={{ marginLeft: 4 }}>
+              비공개 검증 케이스 집계 — 이 점수가 퇴보하는 후보는 채택되지 않습니다
+            </span>
+          </div>
+        )}
         {holdout.baseline !== null && (
           <div style={{ marginTop: 10 }}>
             <span className={holdout.baseline.gateRejected ? "badge muted" : "badge"}>

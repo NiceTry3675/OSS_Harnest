@@ -8,8 +8,9 @@
  *  (분량 상한 대 기록 길이 — 베끼기 방어)은 compile이 정적 안내로 알린다(./index.ts).
  *
  *  불변식:
- *  - 배터리는 **가시 케이스만** 쓴다. 홀드아웃 채점은 라운드 0·종료 시뿐이라는
- *    구조 보장(SPEC §3 원칙 7)을 배터리에도 그대로 적용 — 이 파일 어디에도 holdoutCases 접근이 없다.
+ *  - 배터리는 **피드백(가시) 케이스만** 쓴다. 가드 트레이스 비공개·홀드아웃 채점 시점 제한이라는
+ *    구조 보장(SPEC §3 원칙 7, §5.1.1)을 배터리에도 그대로 적용 — 이 파일 어디에도
+ *    guardCases·holdoutCases 접근이 없다.
  *  - 채점은 동결 절차의 scorer 그대로(createScorer) — 리포트가 인증하는 대상이 바로 그 절차다.
  *  - 비용: 채점 케이스는 BATTERY_CASE_CAP까지 서브샘플 — 배터리는 개선 곡선이 아니라
  *    통과/주의/실패의 거친 판정이므로 허용한다(실행 비교 세트 고정은 SPEC §5.1.1). */
@@ -46,10 +47,12 @@ export async function runExaminerBattery(
   onCheck?: (check: ExaminerCheckResult) => void,
 ): Promise<ExaminerReport> {
   // 서브샘플 문제: 채점 메커니즘은 동결 절차 그대로, 케이스 수만 상한 적용.
-  // holdoutCases를 비워 이 파일의 어떤 경로도 홀드아웃을 만질 수 없게 한다(이중 방어).
+  // guardCases·holdoutCases를 비워 이 파일의 어떤 경로도 가드·홀드아웃을 만질 수 없게
+  // 한다(이중 방어) — 배터리는 저지의 안정성·꼼수 내성만 보므로 피드백 표본이면 충분하다.
   const batteryProblem: HandoverProblem = {
     ...problem,
     visibleCases: problem.visibleCases.slice(0, BATTERY_CASE_CAP),
+    guardCases: [],
     holdoutCases: [],
   };
   const scorer = createScorer(batteryProblem, llm);

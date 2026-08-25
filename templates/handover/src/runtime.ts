@@ -1,10 +1,11 @@
 /** 실행 계층 — 동결 평가자(case_answering)와 LLM Generator를 루프 엔진 슬롯에 맞춘다.
  *  불변식:
- *  - 루프용 scorer는 **가시 케이스만** 채점한다. 홀드아웃은 scoreHoldout으로만 —
- *    호출 시점은 라운드 0과 종료 시(SPEC §3 원칙 7). 이 파일의 어떤 경로도 홀드아웃을
- *    Generator 입력으로 흘리지 않는다.
+ *  - 루프용 scorer는 피드백(가시)·검증 가드 케이스만 채점한다. 가드는 집계 점수만
+ *    반환하고 개별 트레이스(violations)에는 싣지 않는다 — Generator로 새는 경로가
+ *    구조적으로 없다(SPEC §5.1.1). 홀드아웃은 scoreHoldout으로만 — 호출 시점은
+ *    라운드 0과 종료 시(SPEC §3 원칙 7).
  *  - responder는 문서+이번 채점 대상 질문 목록만 본다(prompts.respondersPrompt가 그 형태를
- *    강제). 가시 채점과 홀드아웃 채점은 별도 배치 호출이라 같은 프롬프트에 섞이지 않는다. */
+ *    강제). 피드백·가드·홀드아웃 채점은 각각 별도 배치 호출이라 같은 프롬프트에 섞이지 않는다. */
 
 import {
   CallBudgetExceededError,
@@ -285,7 +286,9 @@ export const CONCISENESS_WEIGHT = 0.2;
 
 const round1 = (x: number): number => Math.round(x * 10) / 10;
 
-/** 동결 평가자 — 게이트(분량) → 가시 케이스 실측 평균 ×100 (+ 선택적 간결성 가중) */
+/** 동결 평가자 — 게이트(분량) → 피드백 케이스 실측 평균 ×100 (+ 선택적 간결성 가중)
+ *  + 검증 가드 집계. 가드는 별도 배치로 채점하고 집계 점수만 반환한다 — 개별 트레이스는
+ *  violations에 싣지 않으므로 Generator 피드백으로 흘러갈 수 없다. */
 export function createScorer(problem: HandoverProblem, llm: LlmClient) {
   return async (doc: HandoverDoc): Promise<ScoreResult> => {
     const gateViolation = lengthGateViolation(problem, doc);
@@ -295,14 +298,31 @@ export function createScorer(problem: HandoverProblem, llm: LlmClient) {
         violations: [gateViolation],
         parts: {},
         gateRejected: true,
+        guardScore: null,
       };
     }
     const grades = await gradeCases(llm, doc, problem.visibleCases);
     const coverage = (grades.reduce((a, g) => a + g.score, 0) / grades.length) * 100;
     const violations = grades.filter((g) => g.score < 1).map(summarize);
+
+    // 검증 가드 — 피드백과 별도 배치 호출(혼합 금지 불변식), 집계 점수만 남긴다
+    let guardScore: number | null = null;
+    if (problem.guardCases.length > 0) {
+      const guardGrades = await gradeCases(llm, doc, problem.guardCases);
+      guardScore = round1(
+        (guardGrades.reduce((a, g) => a + g.score, 0) / guardGrades.length) * 100,
+      );
+    }
+
     if (!problem.useConciseness) {
       const total = round1(coverage);
-      return { total, violations, parts: { case_answerability: total }, gateRejected: false };
+      return {
+        total,
+        violations,
+        parts: { case_answerability: total },
+        gateRejected: false,
+        guardScore,
+      };
     }
     // 답변력이 0이면 간결성도 0 — 빈 문서가 간결성만으로 저커버리지 문서를 이기는 역전 방지
     const headroom =
@@ -312,6 +332,7 @@ export function createScorer(problem: HandoverProblem, llm: LlmClient) {
       violations,
       parts: { case_answerability: round1(coverage), conciseness: round1(headroom) },
       gateRejected: false,
+      guardScore,
     };
   };
 }
@@ -389,7 +410,7 @@ export function normalizeQuestion(question: string): string {
 }
 
 /** 라운드당 예상 LLM 콜 수 — 관제실 비용 안내용.
- *  배치 채점으로 케이스 수와 무관하다: 생성 1 + responder 배치 1 + grader 배치 1. */
-export function estimateCallsPerRound(_problem: HandoverProblem): number {
-  return 3;
+ *  배치 채점으로 케이스 수와 무관하다: 생성 1 + 피드백 배치 2 (+ 가드 배치 2). */
+export function estimateCallsPerRound(problem: HandoverProblem): number {
+  return problem.guardCases.length > 0 ? 5 : 3;
 }

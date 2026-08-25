@@ -78,11 +78,11 @@ export function WizardBlueprint({
               </div>
             </div>
           ))}
-          {hp && hp.mode === "auto_tail" ? (
+          {hp && hp.mode === "seeded_split" ? (
             <div className="bp-row is-seal">
               <span className="bp-ic">?</span>
               <div className="bp-body">
-                <b>숨김 검증</b>
+                <b>검증 가드 · 숨김 검증</b>
                 <p>{hp.note}</p>
               </div>
             </div>

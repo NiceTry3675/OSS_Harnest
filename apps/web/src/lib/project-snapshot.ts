@@ -98,15 +98,23 @@ export function restoreProjectSnapshot(
     return null;
   }
 
+  // seeded_split 도입 전(auto_tail) 팩은 현재 계약으로 렌더·실행할 수 없다 — 답변은 남기고
+  // 컴파일 산출물만 버려 재컴파일(=새 분할·새 다이제스트·재승인)을 유도한다.
+  const compiled =
+    snapshot.compiled !== null &&
+    (snapshot.compiled.pack.holdoutPolicy as { mode?: string }).mode === "auto_tail"
+      ? null
+      : snapshot.compiled;
+
   const approvalMatches =
     snapshot.approvedAt !== null &&
-    snapshot.compiled !== null &&
-    snapshot.approvedDigest === snapshot.compiled.pack.definitionDigest;
+    compiled !== null &&
+    snapshot.approvedDigest === compiled.pack.definitionDigest;
 
   return {
     templateId: snapshot.templateId,
     answers: snapshot.answers,
-    compiled: snapshot.compiled,
+    compiled,
     examinerReport:
       snapshot.schemaVersion === 1
         ? migrateV1Report(snapshot.examinerRun?.report ?? null)

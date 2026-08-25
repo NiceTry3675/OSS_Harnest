@@ -401,12 +401,13 @@ export function ApprovalPage() {
             </>
           )}
 
-          <h2>숨김 검증</h2>
-          {hp.mode === "auto_tail" ? (
+          <h2>케이스 분할</h2>
+          {hp.mode === "seeded_split" ? (
             <>
               <p style={{ fontSize: 14, margin: "0 0 4px" }}>
-                숨김 검증 케이스 {hp.holdoutCaseIds.length}개 — 실행 시작·종료 시에만 별도
-                채점되며 개선·채택 판단에는 사용되지 않습니다.
+                검증 가드 {hp.guardCaseIds.length}개(비퇴보 허용 오차 ±{hp.guardTolerance}점) ·
+                숨김 검증 {hp.holdoutCaseIds.length}개 — 가드는 집계 점수만 채택 판단에 쓰이고,
+                숨김 검증은 실행 시작·종료 시에만 별도 채점됩니다.
               </p>
               <p className="hint" style={{ margin: "0 0 12px" }}>{hp.note}</p>
             </>
@@ -504,13 +505,15 @@ export function ApprovalPage() {
           </>
         )}
 
-        {hp.mode === "auto_tail" ? (
+        {hp.mode === "seeded_split" ? (
           <>
-            <h2>숨김 검증</h2>
-            <p style={{ fontSize: 14, margin: 0 }}>
-              숨김 검증 케이스 {hp.holdoutCaseIds.length}개 — 실행 시작·종료 시에만 별도
-              채점되며 개선·채택 판단에는 사용되지 않습니다.
+            <h2>케이스 분할</h2>
+            <p style={{ fontSize: 14, margin: "0 0 4px" }}>
+              검증 가드 {hp.guardCaseIds.length}개(비퇴보 허용 오차 ±{hp.guardTolerance}점) ·
+              숨김 검증 {hp.holdoutCaseIds.length}개 — 가드는 집계 점수만 채택 판단에 쓰이고,
+              숨김 검증은 실행 시작·종료 시에만 별도 채점됩니다.
             </p>
+            <p className="hint" style={{ margin: 0 }}>{hp.note}</p>
           </>
         ) : null}
 

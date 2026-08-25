@@ -278,6 +278,22 @@ export function ResultsPage() {
         </div>
       </div>
 
+      {(checkpoint.championGuardScore ?? null) !== null && (
+        <div className="card">
+          <div style={{ fontSize: 16, fontWeight: 600 }}>
+            검증 가드 — 시작{" "}
+            {(checkpoint.guardCurve?.[0] ?? null) !== null
+              ? `${fmt(checkpoint.guardCurve[0]!)}점`
+              : "측정 불가(실격)"}{" "}
+            → 종료 {fmt(checkpoint.championGuardScore!)}점
+          </div>
+          <p className="hint" style={{ marginBottom: 0 }}>
+            매 라운드 집계 점수만 채택의 비퇴보 조건으로 쓴 비공개 검증 케이스입니다 — 개별
+            질문·실패 사유는 생성 모델에 전달되지 않았습니다.
+          </p>
+        </div>
+      )}
+
       {(holdout.baseline !== null ||
         holdout.final !== null ||
         baselineHoldoutError !== null ||
@@ -394,11 +410,11 @@ export function ResultsPage() {
           <>
             <span className="badge">케이스 실측 채점(저지: {jp.judge.model})</span>
             <span className="badge" title={jp.pairwiseNotice}>
-              채택: 스칼라 엄격 개선
+              채택: 스칼라 엄격 개선 + 가드 비퇴보
             </span>
-            {hp.mode === "auto_tail" && (
+            {hp.mode === "seeded_split" && (
               <span className="badge" title={hp.note}>
-                홀드아웃 {hp.holdoutCaseIds.length}케이스(자동 꼬리)
+                가드 {hp.guardCaseIds.length} · 홀드아웃 {hp.holdoutCaseIds.length}케이스(시드 분할)
               </span>
             )}
             {examinerReport !== null && examinerReport.forDigest === pack.definitionDigest ? (

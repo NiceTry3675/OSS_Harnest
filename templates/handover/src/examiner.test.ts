@@ -122,7 +122,7 @@ async function compileScenario() {
     judgeModel: "테스트-모의",
   });
   const { problem } = compiled;
-  // 검증용 문서 = 가시 1~3 정답 원문 — 배터리 4케이스 중 3개 커버(75점)
+  // 검증용 문서 = 피드백 케이스 정답 원문 일부 — 채점 가능한(0점 아님) 안정적 구성
   const oneshotDoc = problem.visibleCases
     .slice(0, 3)
     .map((c) => c.expectedAnswer)
@@ -260,8 +260,8 @@ describe("runExaminerBattery — 경계", () => {
 });
 
 describe("runExaminerBattery — 불변식·비용", () => {
-  it("홀드아웃 질문·정답은 배터리의 어떤 프롬프트에도 등장하지 않고, 채점은 케이스 상한까지만 쓴다", async () => {
-    // 9케이스 → 가시 6 / 홀드아웃 3, 배터리 채점은 가시 앞 4개만
+  it("가드·홀드아웃 질문·정답은 배터리의 어떤 프롬프트에도 등장하지 않고, 채점은 케이스 상한까지만 쓴다", async () => {
+    // 9케이스 → 피드백 5 / 가드 3 / 홀드아웃 1, 배터리 채점은 피드백 앞 4개만
     const compiled = await compile(makeSubmission(9, 500, LONG_PAD), {
       judgeProvider: "mock",
       judgeModel: "테스트-모의",
@@ -280,13 +280,13 @@ describe("runExaminerBattery — 불변식·비용", () => {
 
     await runExaminerBattery(problem, pack, llm);
 
-    for (const h of problem.holdoutCases) {
+    for (const hidden of [...problem.guardCases, ...problem.holdoutCases]) {
       for (const p of llm.prompts) {
-        expect(p).not.toContain(h.question);
-        expect(p).not.toContain(h.expectedAnswer);
+        expect(p).not.toContain(hidden.question);
+        expect(p).not.toContain(hidden.expectedAnswer);
       }
     }
-    // 채점(responder) 프롬프트에는 배터리 상한 밖 가시 케이스가 등장하지 않는다
+    // 채점(responder) 프롬프트에는 배터리 상한 밖 피드백 케이스가 등장하지 않는다
     const responderPrompts = llm.prompts.filter((p) => p.includes("아래 문서만을 근거로"));
     for (const v of problem.visibleCases.slice(BATTERY_CASE_CAP)) {
       for (const p of responderPrompts) expect(p).not.toContain(v.question);

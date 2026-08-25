@@ -22,6 +22,9 @@ export interface ScoreResult {
   violations: string[];
   parts: Record<string, number>;
   gateRejected: boolean;
+  /** 검증 가드 집계(0~100) — 채택의 비퇴보 조건에만 쓰이고 Generator에는 개별 트레이스가
+   *  노출되지 않는다(SPEC §5.1.1). 가드 미구성 템플릿·게이트 기각 시 null 또는 생략. */
+  guardScore?: number | null;
 }
 
 export interface RoundRecord {
@@ -31,6 +34,10 @@ export interface RoundRecord {
   adopted: boolean;
   gateRejected: boolean;
   violations: string[];
+  /** 후보의 검증 가드 집계 — 가드 미구성·게이트 기각이면 null */
+  candidateGuardScore: number | null;
+  /** 가드 비퇴보 조건 통과 여부 — 가드가 없으면 항상 true(공허 참) */
+  guardSafe: boolean;
 }
 
 export type ProvenanceType =
@@ -57,8 +64,12 @@ export interface LoopCheckpoint<A> {
   champion: A;
   championScore: number;
   championViolations: string[];
+  /** 챔피언의 검증 가드 집계 — 가드 미구성·게이트 기각 챔피언이면 null */
+  championGuardScore: number | null;
   /** 라운드별 채택 확정 후 챔피언 스칼라 — strict 채택에서는 내려가지 않는다 */
   curve: number[];
+  /** 라운드별 채택 확정 후 챔피언 가드 집계 — 허용 오차 안에서는 내려갈 수 있다 */
+  guardCurve: Array<number | null>;
   tree: RoundRecord[];
   provenance: ProvenanceEntry[];
   /** RNG 내부 상태 — 재개 시 이어서 같은 수열 */

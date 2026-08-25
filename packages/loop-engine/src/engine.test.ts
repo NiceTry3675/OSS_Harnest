@@ -107,6 +107,96 @@ describe("createLoopRun", () => {
     }
   });
 
+  it("검증 가드가 퇴보한 후보는 스칼라가 높아도 기각한다 (seeded_split)", async () => {
+    const guardedPack: EvaluationPack = {
+      ...pack,
+      holdoutPolicy: {
+        mode: "seeded_split",
+        note: "-",
+        guardCaseIds: ["g1"],
+        holdoutCaseIds: ["h1"],
+        guardTolerance: 5,
+      },
+    };
+    const events: LoopCheckpoint<number>[] = [];
+    const handle = createLoopRun<number>({
+      runId: "guard-drop",
+      pack: guardedPack,
+      spec: makeSpec({ maxRounds: 3 }),
+      // 챔피언(0): 10점/가드 60 — 후보: 99점/가드 40 → 허용 오차 5를 넘는 퇴보라 기각
+      scorer: (a) => (a === 0 ? { ...ok(10), guardScore: 60 } : { ...ok(99), guardScore: 40 }),
+      generate: (champion) => champion + 1,
+      initial: () => 0,
+      store: new MemoryCheckpointStore<number>(),
+      onEvent: (cp) => events.push(cp),
+    });
+    await handle.start();
+
+    const last = events[events.length - 1];
+    expect(last.champion).toBe(0);
+    expect(last.championScore).toBe(10);
+    expect(last.championGuardScore).toBe(60);
+    expect(last.guardCurve).toEqual([60, 60, 60, 60]);
+    for (const record of last.tree) {
+      expect(record.guardSafe).toBe(false);
+      expect(record.adopted).toBe(false);
+      expect(record.candidateGuardScore).toBe(40);
+    }
+  });
+
+  it("가드가 허용 오차 안에서 내려간 후보는 채택한다", async () => {
+    const guardedPack: EvaluationPack = {
+      ...pack,
+      holdoutPolicy: {
+        mode: "seeded_split",
+        note: "-",
+        guardCaseIds: ["g1"],
+        holdoutCaseIds: ["h1"],
+        guardTolerance: 5,
+      },
+    };
+    const events: LoopCheckpoint<number>[] = [];
+    const handle = createLoopRun<number>({
+      runId: "guard-tolerance",
+      pack: guardedPack,
+      spec: makeSpec({ maxRounds: 1 }),
+      scorer: (a) => (a === 0 ? { ...ok(10), guardScore: 60 } : { ...ok(50), guardScore: 56 }),
+      generate: (champion) => champion + 1,
+      initial: () => 0,
+      store: new MemoryCheckpointStore<number>(),
+      onEvent: (cp) => events.push(cp),
+    });
+    await handle.start();
+
+    const last = events[events.length - 1];
+    expect(last.champion).toBe(1);
+    expect(last.championScore).toBe(50);
+    expect(last.championGuardScore).toBe(56);
+    expect(last.guardCurve).toEqual([60, 56]);
+    expect(last.tree[0].guardSafe).toBe(true);
+    expect(last.tree[0].adopted).toBe(true);
+  });
+
+  it("가드 미구성(scorer가 guardScore를 주지 않음)이면 채택 판정이 기존과 같다", async () => {
+    const events: LoopCheckpoint<number>[] = [];
+    const handle = createLoopRun<number>({
+      runId: "guard-absent",
+      pack,
+      spec: makeSpec({ maxRounds: 1 }),
+      scorer: (a) => ok(a === 0 ? 10 : 50),
+      generate: (champion) => champion + 1,
+      initial: () => 0,
+      store: new MemoryCheckpointStore<number>(),
+      onEvent: (cp) => events.push(cp),
+    });
+    await handle.start();
+
+    const last = events[events.length - 1];
+    expect(last.tree[0].adopted).toBe(true);
+    expect(last.championGuardScore).toBeNull();
+    expect(last.guardCurve).toEqual([null, null]);
+  });
+
   it("연속 plateauRounds 미채택이면 조기 종료한다", async () => {
     const events: LoopCheckpoint<number>[] = [];
     const handle = createLoopRun<number>({
@@ -493,7 +583,9 @@ describe("IndexedDbCheckpointStore", () => {
       champion: 42,
       championScore: 88,
       championViolations: ["예시 위반"],
+      championGuardScore: null,
       curve: [80, 85, 88, 88],
+      guardCurve: [null, null, null, null],
       tree: [
         {
           round: 1,
@@ -502,6 +594,8 @@ describe("IndexedDbCheckpointStore", () => {
           adopted: true,
           gateRejected: false,
           violations: [],
+          candidateGuardScore: null,
+          guardSafe: true,
         },
       ],
       provenance: [{ at: "2026-01-01T00:00:00.000Z", type: "run_started", detail: "테스트" }],

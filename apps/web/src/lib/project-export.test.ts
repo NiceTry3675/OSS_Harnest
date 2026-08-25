@@ -48,7 +48,9 @@ async function fixture() {
     champion: "완료",
     championScore: 90,
     championViolations: [],
+    championGuardScore: null,
     curve: [80, 90],
+    guardCurve: [null, null],
     tree: [
       {
         round: 1,
@@ -57,6 +59,8 @@ async function fixture() {
         adopted: true,
         gateRejected: false,
         violations: [],
+        candidateGuardScore: null,
+        guardSafe: true,
       },
     ],
     provenance: [],
@@ -106,7 +110,13 @@ describe("결과 기록 내보내기", () => {
     const { compiled, checkpoint, pack } = await fixture();
     const withHoldoutBase: Omit<EvaluationPack, "definitionDigest"> = {
       ...pack,
-      holdoutPolicy: { mode: "auto_tail", note: "자동", holdoutCaseIds: ["case-1"] },
+      holdoutPolicy: {
+        mode: "seeded_split",
+        note: "시드 분할",
+        guardCaseIds: ["case-0"],
+        holdoutCaseIds: ["case-1"],
+        guardTolerance: 4.2,
+      },
     };
     const withHoldout: EvaluationPack = {
       ...withHoldoutBase,

@@ -46,6 +46,10 @@ export function createLoopRun<A>(opts: LoopRunOptions<A>): LoopHandle {
     onEvent(snapshot);
   };
 
+  // 가드 허용 오차는 팩의 분할 정책에 동결돼 있다 — 엔진은 값을 읽기만 한다
+  const guardTolerance =
+    pack.holdoutPolicy.mode === "seeded_split" ? pack.holdoutPolicy.guardTolerance : 0;
+
   async function start(): Promise<void> {
     if (active) return;
     active = true;
@@ -59,6 +63,18 @@ export function createLoopRun<A>(opts: LoopRunOptions<A>): LoopHandle {
           throw new Error(
             "체크포인트의 판정 절차가 현재 승인본과 다릅니다 — 이어받을 수 없습니다(재승인 필요).",
           );
+        }
+        // 가드 도입 전(같은 다이제스트의 결정적 팩) 체크포인트 정규화 — 필드 부재를 null로 승격
+        const stored = c as {
+          championGuardScore?: number | null;
+          guardCurve?: Array<number | null>;
+          tree: Array<{ candidateGuardScore?: number | null; guardSafe?: boolean }>;
+        };
+        stored.championGuardScore ??= null;
+        stored.guardCurve ??= Array<number | null>(c.curve.length).fill(null);
+        for (const record of stored.tree) {
+          record.candidateGuardScore ??= null;
+          record.guardSafe ??= true;
         }
         cp = c;
         if (c.status === "done") return;
@@ -77,7 +93,9 @@ export function createLoopRun<A>(opts: LoopRunOptions<A>): LoopHandle {
           champion,
           championScore: first.total,
           championViolations: first.violations,
+          championGuardScore: first.guardScore ?? null,
           curve: [first.total],
+          guardCurve: [first.guardScore ?? null],
           tree: [],
           provenance: [],
           rngState: rng.state,
@@ -118,16 +136,26 @@ export function createLoopRun<A>(opts: LoopRunOptions<A>): LoopHandle {
         });
         const result = await scorer(candidate);
         const prevScore = c.championScore;
-        // 게이트 기각 후보는 채택 판정에 진입하지 않는다; 동점은 챔피언 유지(scalar_strict)
-        const adopted = !result.gateRejected && result.total > prevScore;
+        const prevGuardScore = c.championGuardScore;
+        const candidateGuardScore = result.guardScore ?? null;
+        // 검증 가드 비퇴보 — 가드가 없거나 챔피언 가드가 없으면 공허 참(비교 대상 부재)
+        const guardSafe =
+          candidateGuardScore === null || prevGuardScore === null
+            ? true
+            : candidateGuardScore >= prevGuardScore - guardTolerance;
+        // 게이트 기각 후보는 채택 판정에 진입하지 않는다; 가드 퇴보 후보도 기각;
+        // 동점은 챔피언 유지(scalar_strict)
+        const adopted = !result.gateRejected && guardSafe && result.total > prevScore;
         if (adopted) {
           c.champion = candidate;
           c.championScore = result.total;
           c.championViolations = result.violations;
+          c.championGuardScore = candidateGuardScore;
         }
         c.round = round;
         // 곡선에는 후보 점수가 아니라 "채택 확정 후 챔피언" 점수를 기록한다 (§5.1.1)
         c.curve.push(c.championScore);
+        c.guardCurve.push(c.championGuardScore);
         c.tree.push({
           round,
           candidateScore: result.total,
@@ -135,13 +163,17 @@ export function createLoopRun<A>(opts: LoopRunOptions<A>): LoopHandle {
           adopted,
           gateRejected: result.gateRejected,
           violations: result.violations,
+          candidateGuardScore,
+          guardSafe,
         });
         note(
           c,
           "round",
           result.gateRejected
             ? `라운드 ${round}: 후보 게이트 기각 — 채택 판정 미진입`
-            : `라운드 ${round}: 후보 ${result.total}점 / 챔피언 ${prevScore}점 — ${adopted ? "채택" : "기각"}`,
+            : !guardSafe
+              ? `라운드 ${round}: 후보 ${result.total}점 — 검증 가드 퇴보(${prevGuardScore}점 → ${candidateGuardScore}점)로 기각`
+              : `라운드 ${round}: 후보 ${result.total}점 / 챔피언 ${prevScore}점 — ${adopted ? "채택" : "기각"}`,
         );
         if (adopted) note(c, "adopted", `챔피언 교체: ${prevScore}점 → ${result.total}점`);
 

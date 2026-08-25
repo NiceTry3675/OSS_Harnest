@@ -89,14 +89,16 @@ localStorage에만 저장됩니다(SPEC §3 원칙 1). `SHARED_OPENAI_API_KEY` /
 | POST | `/proxy/openai` | 본문을 그대로 OpenAI Responses API에 전달 (공유 키 미설정 시 404) |
 | POST | `/proxy/gemini/{model}` | 본문을 그대로 Gemini generateContent에 전달 (공유 키 미설정 시 404) |
 
-`POST /exports`는 `kind: "harnest.project-export"`, `envelopeVersion: 2`, `exportedAt`와
+`POST /exports`는 `kind: "harnest.project-export"`, `envelopeVersion: 3`, `exportedAt`와
 `project.interview`·`project.evaluation`·`project.loopSpec`, `result.checkpoint`·`result.holdout`의
-완전한 v2 봉투 골격을 요구합니다. 인터뷰·Pack은 `skeleton-1`이고 같은 비어 있지 않은
+완전한 v3 봉투 골격을 요구합니다. 인터뷰·Pack은 `skeleton-1`이고 같은 비어 있지 않은
 `templateId`를 가져야 하며, judge 절차에 맞는 null 또는 객체형 승인 증거를 요구합니다. Pack의
 `templateId`, `packVersion`, 소문자 SHA-256 `definitionDigest`를 색인하고, approval·examiner report·
 checkpoint의 귀속 식별자가 현재 Pack에 결속되는지 확인합니다. checkpoint는
-`status: "done"` 및 `doneReason`을 가져야 하며,
-`holdoutPolicy.mode`가 `none`이면 결과도 `none`, `auto_tail`이면 baseline/final의 scored 또는
+`status: "done"` 및 `doneReason`을 가져야 하고, 검증 가드 필드
+(`championGuardScore`·`guardCurve`, tree의 `candidateGuardScore`·`guardSafe`)를 null 허용
+숫자·불리언으로 요구합니다. `holdoutPolicy.mode`가 `none`이면 결과도 `none`,
+`seeded_split`(가드·홀드아웃 caseId와 `guardTolerance` 포함)이면 baseline/final의 scored 또는
 failed 기록을 가진 `measured`여야 합니다. 고정 계층의 알 수 없는 필드, 배열 안의 잘못된 원소 타입,
 중복 JSON 키와 잘못된 Unicode surrogate는 거부합니다.
 

@@ -16,8 +16,8 @@ import { SCORE_CEILING, type LoopCheckpoint, type LoopSpec } from "./loop";
 import { digestScope, JUDGE_PROVIDERS, type EvaluationPack } from "./pack";
 
 export const PROJECT_EXPORT_KIND = "harnest.project-export" as const;
-/** v2 (2026-08-25): 캘리브레이션 제거, 검증 배터리를 stability·hack_resistance 2종으로 축소 */
-export const PROJECT_EXPORT_VERSION = 2 as const;
+/** v3 (2026-08-25): 시드 셔플 분할(seeded_split)·검증 가드 도입 — 체크포인트에 가드 곡선 추가 */
+export const PROJECT_EXPORT_VERSION = 3 as const;
 
 export interface ApprovalBinding {
   /** 사용자가 승인한 Evaluation Pack의 definitionDigest */
@@ -282,6 +282,34 @@ function checkpointIssues(
     scoreIssue(record.championScore, `${checkpointPath}.tree[${index}].championScore`);
   });
 
+  // 검증 가드 — 곡선 길이·값 범위·게이트 기각과의 일관성
+  const guardScoreIssue = (value: number | null, path: string): void => {
+    if (value !== null && (!Number.isFinite(value) || value < 0 || value > SCORE_CEILING)) {
+      issues.push(issue(path, "가드 점수는 null이거나 0 이상 100 이하의 유한한 수여야 합니다."));
+    }
+  };
+  if (checkpoint.guardCurve.length !== checkpoint.curve.length) {
+    issues.push(issue(`${checkpointPath}.guardCurve`, "가드 곡선은 점수 곡선과 길이가 같아야 합니다."));
+  }
+  guardScoreIssue(checkpoint.championGuardScore, `${checkpointPath}.championGuardScore`);
+  checkpoint.guardCurve.forEach((value, index) => {
+    guardScoreIssue(value, `${checkpointPath}.guardCurve[${index}]`);
+  });
+  checkpoint.tree.forEach((record, index) => {
+    guardScoreIssue(
+      record.candidateGuardScore,
+      `${checkpointPath}.tree[${index}].candidateGuardScore`,
+    );
+    if (record.gateRejected && record.candidateGuardScore !== null) {
+      issues.push(
+        issue(
+          `${checkpointPath}.tree[${index}].candidateGuardScore`,
+          "게이트 기각 후보에는 가드 점수를 기록할 수 없습니다.",
+        ),
+      );
+    }
+  });
+
   for (let index = 1; index < checkpoint.curve.length; index += 1) {
     if (checkpoint.curve[index] < checkpoint.curve[index - 1]) {
       issues.push(issue(`${checkpointPath}.curve[${index}]`, "챔피언 점수는 내려갈 수 없습니다."));
@@ -297,7 +325,7 @@ function checkpointIssues(
     const recordPath = `${checkpointPath}.tree[${index}]`;
     const previousChampionScore = checkpoint.curve[index];
     const expectedAdopted =
-      !record.gateRejected && record.candidateScore > previousChampionScore;
+      !record.gateRejected && record.guardSafe && record.candidateScore > previousChampionScore;
     const expectedChampionScore = expectedAdopted
       ? record.candidateScore
       : previousChampionScore;
@@ -311,7 +339,9 @@ function checkpointIssues(
           `${recordPath}.adopted`,
           record.gateRejected
             ? "게이트 기각 후보는 채택할 수 없습니다."
-            : "후보 점수가 직전 챔피언보다 엄격히 높을 때만 채택해야 합니다.",
+            : !record.guardSafe
+              ? "검증 가드가 퇴보한 후보는 채택할 수 없습니다."
+              : "후보 점수가 직전 챔피언보다 엄격히 높을 때만 채택해야 합니다.",
         ),
       );
     }
@@ -321,6 +351,16 @@ function checkpointIssues(
     if (checkpoint.curve[index + 1] !== record.championScore) {
       issues.push(issue(`${checkpointPath}.curve[${index + 1}]`, "해당 라운드 챔피언 점수와 다릅니다."));
     }
+    if (checkpoint.guardCurve.length === checkpoint.curve.length) {
+      const expectedGuard = expectedAdopted
+        ? record.candidateGuardScore
+        : checkpoint.guardCurve[index];
+      if (checkpoint.guardCurve[index + 1] !== expectedGuard) {
+        issues.push(
+          issue(`${checkpointPath}.guardCurve[${index + 1}]`, "채택 판정 후 챔피언 가드 점수와 다릅니다."),
+        );
+      }
+    }
   }
 
   if (
@@ -328,6 +368,14 @@ function checkpointIssues(
     checkpoint.championScore !== checkpoint.curve[checkpoint.curve.length - 1]
   ) {
     issues.push(issue(`${checkpointPath}.championScore`, "최종 곡선의 챔피언 점수와 다릅니다."));
+  }
+  if (
+    checkpoint.guardCurve.length > 0 &&
+    checkpoint.championGuardScore !== checkpoint.guardCurve[checkpoint.guardCurve.length - 1]
+  ) {
+    issues.push(
+      issue(`${checkpointPath}.championGuardScore`, "최종 가드 곡선의 챔피언 가드 점수와 다릅니다."),
+    );
   }
 
   let trailingRejections = 0;
@@ -417,7 +465,7 @@ function holdoutIssues(
     issues.push(
       issue(
         "project.evaluation.pack.holdoutPolicy.holdoutCaseIds",
-        "auto_tail 홀드아웃에는 한 개 이상의 caseId가 필요합니다.",
+        "seeded_split 홀드아웃에는 한 개 이상의 caseId가 필요합니다.",
       ),
     );
   }
@@ -426,6 +474,43 @@ function holdoutIssues(
       issue(
         "project.evaluation.pack.holdoutPolicy.holdoutCaseIds",
         "동결된 홀드아웃 caseId에 중복이 없어야 합니다.",
+      ),
+    );
+  }
+  const guardIds = new Set(policy.guardCaseIds);
+  if (guardIds.size === 0) {
+    issues.push(
+      issue(
+        "project.evaluation.pack.holdoutPolicy.guardCaseIds",
+        "seeded_split 검증 가드에는 한 개 이상의 caseId가 필요합니다.",
+      ),
+    );
+  }
+  if (guardIds.size !== policy.guardCaseIds.length) {
+    issues.push(
+      issue(
+        "project.evaluation.pack.holdoutPolicy.guardCaseIds",
+        "동결된 가드 caseId에 중복이 없어야 합니다.",
+      ),
+    );
+  }
+  if (policy.holdoutCaseIds.some((caseId) => guardIds.has(caseId))) {
+    issues.push(
+      issue(
+        "project.evaluation.pack.holdoutPolicy",
+        "가드와 홀드아웃 케이스는 겹칠 수 없습니다.",
+      ),
+    );
+  }
+  if (
+    !Number.isFinite(policy.guardTolerance) ||
+    policy.guardTolerance <= 0 ||
+    policy.guardTolerance > 50
+  ) {
+    issues.push(
+      issue(
+        "project.evaluation.pack.holdoutPolicy.guardTolerance",
+        "가드 허용 오차는 0 초과 50 이하의 유한한 수여야 합니다.",
       ),
     );
   }
@@ -556,9 +641,11 @@ function copyPack(pack: EvaluationPack): EvaluationPack {
     pack.holdoutPolicy.mode === "none"
       ? { mode: "none", note: pack.holdoutPolicy.note }
       : {
-          mode: "auto_tail",
+          mode: "seeded_split",
           note: pack.holdoutPolicy.note,
+          guardCaseIds: [...pack.holdoutPolicy.guardCaseIds],
           holdoutCaseIds: [...pack.holdoutPolicy.holdoutCaseIds],
+          guardTolerance: pack.holdoutPolicy.guardTolerance,
         };
   return {
     packVersion: pack.packVersion,
@@ -637,6 +724,12 @@ function copyHoldoutRecord(record: HoldoutRecord): HoldoutRecord {
 }
 
 function copyCheckpoint<A>(checkpoint: LoopCheckpoint<A>): LoopCheckpoint<A> {
+  // 가드 도입 전에 저장된 체크포인트(다이제스트가 안 바뀐 결정적 팩)도 정식 기록으로
+  // 내보낼 수 있어야 한다 — 필드 부재는 "가드 미구성"(null·공허 참)으로 정규화한다.
+  const stored = checkpoint as LoopCheckpoint<A> & {
+    championGuardScore?: number | null;
+    guardCurve?: Array<number | null>;
+  };
   return {
     runId: checkpoint.runId,
     packDigest: checkpoint.packDigest,
@@ -646,15 +739,27 @@ function copyCheckpoint<A>(checkpoint: LoopCheckpoint<A>): LoopCheckpoint<A> {
     champion: checkpoint.champion,
     championScore: checkpoint.championScore,
     championViolations: [...checkpoint.championViolations],
+    championGuardScore: stored.championGuardScore ?? null,
     curve: [...checkpoint.curve],
-    tree: checkpoint.tree.map((record) => ({
-      round: record.round,
-      candidateScore: record.candidateScore,
-      championScore: record.championScore,
-      adopted: record.adopted,
-      gateRejected: record.gateRejected,
-      violations: [...record.violations],
-    })),
+    guardCurve: [
+      ...(stored.guardCurve ?? Array<number | null>(checkpoint.curve.length).fill(null)),
+    ],
+    tree: checkpoint.tree.map((record) => {
+      const storedRecord = record as typeof record & {
+        candidateGuardScore?: number | null;
+        guardSafe?: boolean;
+      };
+      return {
+        round: record.round,
+        candidateScore: record.candidateScore,
+        championScore: record.championScore,
+        adopted: record.adopted,
+        gateRejected: record.gateRejected,
+        violations: [...record.violations],
+        candidateGuardScore: storedRecord.candidateGuardScore ?? null,
+        guardSafe: storedRecord.guardSafe ?? true,
+      };
+    }),
     provenance: checkpoint.provenance.map((entry) => ({
       at: entry.at,
       type: entry.type,

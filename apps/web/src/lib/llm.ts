@@ -1472,7 +1472,11 @@ export async function testSharedConnection(
  *  problem을 알지만 responder 경로는 "문서에 포함됐는가"만 본다 — 문서 밖 지식으로
  *  답하지 않게 해 case_answering 불변식을 시뮬레이션한다. 명시적으로 "모의"로 표기할 것. */
 export function createMockClient(problem: HandoverProblem): LlmClient {
-  const allCases: CaseDef[] = [...problem.visibleCases, ...problem.holdoutCases];
+  const allCases: CaseDef[] = [
+    ...problem.visibleCases,
+    ...problem.guardCases,
+    ...problem.holdoutCases,
+  ];
   // 문자·숫자로만 된 단어 중 최장을 고른다 — 구두점 섞인 단어("deploy.sh를")를 정제해
   // 고르면 원문과 불일치해 항상 "문서에 없음"이 되는 버그가 있었다
   const keyToken = (text: string): string => {

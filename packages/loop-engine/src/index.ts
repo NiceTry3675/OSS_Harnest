@@ -3,6 +3,9 @@
  *  - 첫 커밋부터 체크포인트·재개 가능한 상태 머신: 매 라운드 종료 시 store.save가 계약이다.
  *  - 채택: adoptionRule "scalar_strict" — 후보 스칼라 > 챔피언 스칼라일 때만 교체(동점 유지).
  *  - 게이트 reject 후보는 채택 판정에 진입하지 않는다(기각으로 기록).
+ *  - 검증 가드(팩 holdoutPolicy.mode "seeded_split"): 후보 가드 집계가
+ *    챔피언 가드 − guardTolerance 미만이면 스칼라가 높아도 기각 — 가시 시험지 전용
+ *    과적합 문서가 챔피언이 되는 경로를 막는다. 가드 개별 트레이스는 Generator에 가지 않는다.
  *  - 정체: 연속 plateauRounds 미채택 시 doneReason "plateau"로 종료.
  *  - 상한: 챔피언 스칼라가 척도 상한(100)에 도달하면 doneReason "ceiling"으로 즉시 종료 —
  *    엄격 개선 규칙상 이후 채택이 불가능해 남은 라운드는 결과에 영향을 줄 수 없다.

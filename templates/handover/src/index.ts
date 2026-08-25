@@ -29,14 +29,18 @@ export const LENGTH_CAP_MAX = 20_000;
 export const LENGTH_CAP_DEFAULT = 8_000;
 
 /** 실행 1회(라운드 0 + 루프 + 홀드아웃 2회 채점)의 모델 호출 예산 (SPEC §5.2).
- *  배치 채점 1회는 최악 4콜(responder+grader+형식 재시도 각 1회)이다. 라운드 0+8라운드에서
- *  전부 발생해도 (8+1)×(1+4) + 2×4 = 53회다. 80은 정상 실행에서 절대 걸리지 않는 백스톱이다. */
-export const MAX_CALLS_PER_RUN = 80;
+ *  배치 채점 1회는 최악 4콜(responder+grader+형식 재시도 각 1회)이다. 피드백·가드가 별도
+ *  배치이므로 라운드 0+8라운드에서 전부 발생해도 (8+1)×(1+4+4) + 2×4 = 89회다.
+ *  120은 정상 실행에서 절대 걸리지 않는 백스톱이다. */
+export const MAX_CALLS_PER_RUN = 120;
 
 export interface HandoverProblem {
   material: string;
-  /** 루프(Generator·scorer)가 보는 케이스 — 원료이자 가시 시험지 */
+  /** 피드백 케이스 — Generator·scorer가 보는 가시 시험지(질문·실패 사유 공개) */
   visibleCases: CaseDef[];
+  /** 검증 가드 — 매 라운드 채점하되 집계 점수만 채택의 비퇴보 조건에 쓴다.
+   *  개별 질문·트레이스는 Generator에 절대 노출되지 않는다(SPEC §5.1.1). */
+  guardCases: CaseDef[];
   /** 루프에 절대 노출되지 않는다 — 라운드 0과 종료 시에만 채점(SPEC §3 원칙 7) */
   holdoutCases: CaseDef[];
   /** 사용자가 정한 절대 분량 상한(자) — hard gate */
@@ -68,7 +72,7 @@ export const questions: Question[] = [
     type: "caseList",
     label: "실제로 받았던 질문과, 그때 당신이 한 답을 알려주세요.",
     shortLabel: "질문과 답",
-    help: `한 줄씩 넣으면 됩니다. ${MIN_CASES}~${MAX_CASES}개를 넣을 수 있고, 뒤쪽 몇 개는 개선·채택에는 쓰지 않고 실행 시작·종료에만 별도 채점합니다.`,
+    help: `한 줄씩 넣으면 됩니다. ${MIN_CASES}~${MAX_CASES}개를 넣을 수 있고, 케이스는 시드로 섞어 피드백(개선 재료) · 검증 가드(과적합 방지) · 홀드아웃(시작·종료 별도 채점)으로 자동 분할됩니다.`,
     nextLabel: "채점 모델 고르기",
     // 케이스 수 상한의 정본은 이 선언 — 위저드는 min/max를 읽어 렌더하고 compile이 재검증한다
     min: MIN_CASES,
@@ -116,6 +120,25 @@ export interface CompileOptions {
   judgeModel: string;
 }
 
+/** mulberry32 기반 결정적 Fisher–Yates 셔플 — 케이스 분할 전용.
+ *  엔진 RNG와 상태를 공유하지 않으며, 같은 (items, seed)에는 항상 같은 순열을 준다. */
+function seededShuffle<T>(items: readonly T[], seed: number): T[] {
+  let s = seed >>> 0;
+  const next = (): number => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(next() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
 export async function compile(
   submission: InterviewSubmission,
   opts: CompileOptions,
@@ -155,22 +178,32 @@ export async function compile(
     );
   }
 
-  // 자동 꼬리 분할: 입력 순서의 마지막 1/3(최소 1개)이 홀드아웃 — 실측 02 반복성 보존 설계의 축소판
-  const holdoutCount = Math.max(1, Math.floor(cases.length / 3));
-  const visibleCases = cases.slice(0, cases.length - holdoutCount);
-  const holdoutCases = cases.slice(cases.length - holdoutCount);
+  // 케이스 본문·자료의 지문을 판정 절차에 결속 — 내용이 다른 시험지는 다른 다이제스트를
+  // 갖는다(같은 개수·같은 상한이어도). 체크포인트 귀속·시드가 실제 시험지 내용에 잠긴다.
+  const casesDigest = (await sha256Canonical({ material, cases })).slice(0, 16);
+
+  // 시드 셔플 분할(피드백 40% · 검증 가드 40% · 홀드아웃 20%, 각 최소 1) — 케이스 초안이
+  // 자료 순서를 따르더라도 세 집합이 특정 주제군(예: 자료 후반부)에 몰리지 않게 한다.
+  // 시드를 내용 지문에서 유도하므로 같은 시험지는 언제 컴파일해도 같은 분할이다
+  // (컴파일 순수성 = 다이제스트 안정성).
+  const shuffled = seededShuffle(cases, parseInt(casesDigest.slice(0, 8), 16));
+  const holdoutCount = Math.max(1, Math.floor(cases.length * 0.2));
+  const guardCount = Math.max(1, Math.floor(cases.length * 0.4));
+  const holdoutCases = shuffled.slice(0, holdoutCount);
+  const guardCases = shuffled.slice(holdoutCount, holdoutCount + guardCount);
+  const visibleCases = shuffled.slice(holdoutCount + guardCount);
+  // 비퇴보 허용 오차 = 채점 반 단계(0.5점짜리 뒤집힘 하나) — 저지 노이즈로 좋은 후보가
+  // 기각되지 않게 하되, 실제 퇴보는 걸러낸다. 사용자 노브가 아니라 개수에서 유도되는 산식.
+  const guardTolerance = Math.round((100 / (2 * guardCases.length)) * 10) / 10;
 
   const problem: HandoverProblem = {
     material,
     visibleCases,
+    guardCases,
     holdoutCases,
     lengthCap,
     useConciseness,
   };
-
-  // 케이스 본문·자료의 지문을 판정 절차에 결속 — 내용이 다른 시험지는 다른 다이제스트를
-  // 갖는다(같은 개수·같은 상한이어도). 체크포인트 귀속·시드가 실제 시험지 내용에 잠긴다.
-  const casesDigest = (await sha256Canonical({ material, cases })).slice(0, 16);
 
   const base: Omit<EvaluationPack, "definitionDigest"> = {
     packVersion: "skeleton-1",
@@ -182,7 +215,7 @@ export async function compile(
         scorer: "handover_case_answering",
         params: { visibleCases: visibleCases.length, scale: "0/0.5/1", casesDigest },
         weight: useConciseness ? COVERAGE_WEIGHT : 1.0,
-        label: `문서만 보고 실제 질문에 답할 수 있는가 (가시 케이스 ${visibleCases.length}개 실측)`,
+        label: `문서만 보고 실제 질문에 답할 수 있는가 (피드백 케이스 ${visibleCases.length}개 실측)`,
       },
       // 간결성(선택) — 상한 대비 여유의 결정적 산술. 커버리지와 정면으로 충돌하는 축이라
       // "전부 담으면 만점" 포화를 없앤다. 답변력 0이면 0점(빈 문서 역전 방지, runtime.ts).
@@ -214,12 +247,17 @@ export async function compile(
       judge: { provider: opts.judgeProvider, model: opts.judgeModel },
       // 검증 리포트는 승인 전 요건으로 구현됨(./examiner.ts) — forDigest 결속이라 팩 필드가 아니다
       pairwiseNotice:
-        "미적용 — 케이스 집계 스칼라가 엄격히 개선될 때만 채택합니다(SPEC §5.1.1)",
+        "미적용 — 검증 가드가 퇴보하지 않고 케이스 집계 스칼라가 엄격히 개선될 때만 채택합니다(SPEC §5.1.1)",
     },
     holdoutPolicy: {
-      mode: "auto_tail",
-      note: `입력의 마지막 ${holdoutCount}개 케이스는 루프에 숨겨지며 시작·종료 시에만 채점됩니다`,
+      mode: "seeded_split",
+      note:
+        `케이스 ${cases.length}개를 시드로 섞어 피드백 ${visibleCases.length} · 검증 가드 ${guardCases.length} · ` +
+        `홀드아웃 ${holdoutCount}개로 나눕니다. 가드는 집계 점수만 채택의 비퇴보 조건에 쓰이고, ` +
+        `홀드아웃은 실행 시작·종료 시에만 채점됩니다`,
+      guardCaseIds: guardCases.map((c) => c.id),
       holdoutCaseIds: holdoutCases.map((c) => c.id),
+      guardTolerance,
     },
   };
 
@@ -227,7 +265,7 @@ export async function compile(
   const pack: EvaluationPack = { ...base, definitionDigest };
 
   const loopSpec: LoopSpec = {
-    // LLM 비용: 라운드당 (1 생성 + 배치 채점 2)콜 — 짧게 돌리고 정체로 끊는다
+    // LLM 비용: 라운드당 (1 생성 + 피드백 배치 2 + 가드 배치 2)콜 — 짧게 돌리고 정체로 끊는다
     maxRounds: 8,
     plateauRounds: 4,
     adoptionRule: "scalar_strict",

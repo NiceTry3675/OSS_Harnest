@@ -64,10 +64,18 @@ export interface EvaluationPack {
   holdoutPolicy:
     | { mode: "none"; note: string }
     | {
-        /** 자동 꼬리 분할 — 마지막 1/3이 홀드아웃. 루프(Generator)에는 절대 노출되지 않는다 */
-        mode: "auto_tail";
+        /** 시드 셔플 분할 — 케이스를 내용 지문에서 유도한 시드로 섞어
+         *  피드백(트레이스 공개) / 검증 가드 / 홀드아웃으로 나눈다. 입력 순서가 자료 순서를
+         *  따르더라도 세 집합이 특정 주제군에 몰리지 않게 하는 장치다.
+         *  가드는 매 라운드 집계 점수만 채택의 비퇴보 조건에 쓰이고 개별 트레이스는
+         *  Generator에 노출되지 않는다. 홀드아웃은 루프에 절대 노출되지 않는다(SPEC §3 원칙 7). */
+        mode: "seeded_split";
         note: string;
+        guardCaseIds: string[];
         holdoutCaseIds: string[];
+        /** 가드 비퇴보 허용 오차 — 채점 반 단계(100 / (2 × 가드 케이스 수)) 산식으로 고정.
+         *  판정 절차의 일부이므로 digestScope 안에 있다(변경 = 재승인). */
+        guardTolerance: number;
       };
   /** 판정 절차 전체(packVersion+templateId+criteria+gates+judgeProcedure+holdoutPolicy)의 SHA-256.
    *  승인 시 계산·동결 — 이후 어떤 필드가 바뀌어도 다이제스트가 어긋난다. */

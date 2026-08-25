@@ -157,7 +157,7 @@ def run() -> None:
     definition_digest = hashlib.sha256(canonical_scope).hexdigest()
     export_envelope = {
         "kind": "harnest.project-export",
-        "envelopeVersion": 2,
+        "envelopeVersion": 3,
         "exportedAt": "2026-08-24T00:02:00.000Z",
         "project": {
             "interview": {
@@ -193,7 +193,9 @@ def run() -> None:
                 "champion": "완료 산출물",
                 "championScore": 90.0,
                 "championViolations": [],
+                "championGuardScore": None,
                 "curve": [50.0, 90.0],
+                "guardCurve": [None, None],
                 "tree": [
                     {
                         "round": 1,
@@ -202,6 +204,8 @@ def run() -> None:
                         "adopted": True,
                         "gateRejected": False,
                         "violations": [],
+                        "candidateGuardScore": None,
+                        "guardSafe": True,
                     }
                 ],
                 "provenance": [],
@@ -244,7 +248,7 @@ def run() -> None:
             (export_id,),
         ).fetchone()
         assert row == (
-            2,
+            3,
             "handover",
             "skeleton-1",
             definition_digest,
@@ -294,9 +298,11 @@ def run() -> None:
             "pairwiseNotice": "미적용",
         },
         "holdoutPolicy": {
-            "mode": "auto_tail",
-            "note": "자동 꼬리",
+            "mode": "seeded_split",
+            "note": "시드 분할",
+            "guardCaseIds": ["case-3"],
             "holdoutCaseIds": ["case-4"],
+            "guardTolerance": 4.2,
         },
     }
     llm_digest = hashlib.sha256(
@@ -310,7 +316,7 @@ def run() -> None:
     report_at = "2026-08-24T00:03:00.000Z"
     llm_export = {
         "kind": "harnest.project-export",
-        "envelopeVersion": 2,
+        "envelopeVersion": 3,
         "exportedAt": "2026-08-24T00:05:00.000Z",
         "project": {
             "interview": {
@@ -413,7 +419,6 @@ def run() -> None:
             "provider": provider,
             "model": model,
         }
-        evaluation["calibration"]["forDigest"] = provider_digest
         evaluation["approval"]["forDigest"] = provider_digest
         provider_export["result"]["checkpoint"]["packDigest"] = provider_digest
         provider_export["result"]["checkpoint"]["runId"] = f"run-{provider}"
@@ -480,16 +485,18 @@ def run() -> None:
     ] = [None]
     unknown_root_field = json.loads(raw_export)
     unknown_root_field["unexpected"] = True
-    auto_tail_without_measurement = json.loads(raw_export)
-    auto_tail_without_measurement["project"]["evaluation"]["pack"]["holdoutPolicy"] = {
-        "mode": "auto_tail",
-        "note": "자동 꼬리",
+    split_without_measurement = json.loads(raw_export)
+    split_without_measurement["project"]["evaluation"]["pack"]["holdoutPolicy"] = {
+        "mode": "seeded_split",
+        "note": "시드 분할",
+        "guardCaseIds": ["case-0"],
         "holdoutCaseIds": ["case-1"],
+        "guardTolerance": 4.2,
     }
 
     invalid_exports = [
-        b'{"kind":"harnest.project-export","kind":"harnest.project-export","envelopeVersion":2}',
-        raw_export.replace(b'"envelopeVersion": 2', b'"envelopeVersion": 1', 1),
+        b'{"kind":"harnest.project-export","kind":"harnest.project-export","envelopeVersion":3}',
+        raw_export.replace(b'"envelopeVersion": 3', b'"envelopeVersion": 1', 1),
         export_bytes(missing_exported_at),
         export_bytes(wrong_digest_shape),
         export_bytes(wrong_interview_schema),
@@ -525,7 +532,7 @@ def run() -> None:
             b'"artifact": "\\udc00"',
             1,
         ),
-        export_bytes(auto_tail_without_measurement),
+        export_bytes(split_without_measurement),
     ]
     for invalid_export in invalid_exports:
         r = client.post(

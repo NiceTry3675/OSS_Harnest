@@ -37,7 +37,13 @@ async function makePack(kind: "deterministic" | "llm"): Promise<EvaluationPack> 
           },
     holdoutPolicy:
       kind === "llm"
-        ? { mode: "auto_tail", note: "자동", holdoutCaseIds: ["case-4"] }
+        ? {
+            mode: "seeded_split",
+            note: "시드 분할",
+            guardCaseIds: ["case-3"],
+            holdoutCaseIds: ["case-4"],
+            guardTolerance: 4.2,
+          }
         : { mode: "none", note: "없음" },
   };
   return { ...base, definitionDigest: await sha256Canonical(digestScope(base)) };
@@ -53,7 +59,9 @@ function checkpoint(pack: EvaluationPack): LoopCheckpoint<string> {
     champion: "완료 문서",
     championScore: 80,
     championViolations: [],
+    championGuardScore: null,
     curve: [50, 80],
+    guardCurve: [null, null],
     tree: [
       {
         round: 1,
@@ -62,6 +70,8 @@ function checkpoint(pack: EvaluationPack): LoopCheckpoint<string> {
         adopted: true,
         gateRejected: false,
         violations: [],
+        candidateGuardScore: null,
+        guardSafe: true,
       },
     ],
     provenance: [],
@@ -290,10 +300,44 @@ describe("ProjectExportEnvelope", () => {
       adopted: false,
       gateRejected: true,
       violations: ["게이트 위반"],
+      candidateGuardScore: null,
+      guardSafe: true,
     };
     input.result.checkpoint.doneReason = "plateau";
 
     await expect(createProjectExportEnvelope(input)).resolves.toBeDefined();
+  });
+
+  it("검증 가드가 퇴보한 후보는 높은 점수여도 채택으로 기록할 수 없다", async () => {
+    const pack = await makePack("llm");
+    const input = exportInput(pack, scoredHoldout);
+    input.result.checkpoint.championScore = 50;
+    input.result.checkpoint.championGuardScore = 60;
+    input.result.checkpoint.curve[1] = 50;
+    input.result.checkpoint.guardCurve = [60, 60];
+    input.result.checkpoint.tree[0] = {
+      round: 1,
+      candidateScore: 99,
+      championScore: 50,
+      adopted: false,
+      gateRejected: false,
+      violations: [],
+      candidateGuardScore: 10,
+      guardSafe: false,
+    };
+    input.result.checkpoint.doneReason = "plateau";
+    const valid = await createProjectExportEnvelope(input);
+    expect(await projectExportIssues(valid)).toEqual([]);
+
+    const tampered = structuredClone(valid);
+    tampered.result.checkpoint.tree[0].adopted = true;
+    tampered.result.checkpoint.tree[0].championScore = 99;
+    tampered.result.checkpoint.championScore = 99;
+    tampered.result.checkpoint.curve[1] = 99;
+    tampered.result.checkpoint.guardCurve[1] = 10;
+    tampered.result.checkpoint.championGuardScore = 10;
+    const paths = (await projectExportIssues(tampered)).map((entry) => entry.path);
+    expect(paths).toContain("result.checkpoint.tree[0].adopted");
   });
 
   it("종료 사유는 plateau 우선순위와 정확한 꼬리 미채택 횟수를 따르고 seed는 정수다", async () => {
@@ -308,6 +352,8 @@ describe("ProjectExportEnvelope", () => {
       adopted: false,
       gateRejected: false,
       violations: [],
+      candidateGuardScore: null,
+      guardSafe: true,
     };
     input.result.checkpoint.doneReason = "plateau";
     const plateau = await createProjectExportEnvelope(input);
@@ -343,6 +389,8 @@ describe("ProjectExportEnvelope", () => {
       adopted: true,
       gateRejected: false,
       violations: [],
+      candidateGuardScore: null,
+      guardSafe: true,
     };
     input.result.checkpoint.doneReason = "ceiling";
     const ceiling = await createProjectExportEnvelope(input);
@@ -364,7 +412,7 @@ describe("ProjectExportEnvelope", () => {
     );
   });
 
-  it("auto_tail 채점은 동결 caseId 집합과 정확히 같고 중복이 없어야 한다", async () => {
+  it("홀드아웃 채점은 동결 caseId 집합과 정확히 같고 중복이 없어야 한다", async () => {
     const pack = await makePack("llm");
     const valid = await createProjectExportEnvelope(exportInput(pack, scoredHoldout));
 
@@ -392,7 +440,7 @@ describe("ProjectExportEnvelope", () => {
     ).toBeGreaterThanOrEqual(1);
   });
 
-  it("auto_tail 케이스 점수·집계와 baseline/final 케이스 설명이 서로 일치해야 한다", async () => {
+  it("홀드아웃 케이스 점수·집계와 baseline/final 케이스 설명이 서로 일치해야 한다", async () => {
     const pack = await makePack("llm");
     const valid = await createProjectExportEnvelope(exportInput(pack, scoredHoldout));
     if (valid.result.holdout.mode !== "measured") throw new Error("fixture 오류");
@@ -411,7 +459,7 @@ describe("ProjectExportEnvelope", () => {
     expect(paths).toContain("result.holdout");
   });
 
-  it("auto_tail 실패와 게이트 기각은 caseId 채점 없이도 명시적으로 기록한다", async () => {
+  it("홀드아웃 실패와 게이트 기각은 caseId 채점 없이도 명시적으로 기록한다", async () => {
     const pack = await makePack("llm");
     const input = exportInput(pack, scoredHoldout);
     if (input.result.holdout.mode !== "measured") throw new Error("fixture 오류");
