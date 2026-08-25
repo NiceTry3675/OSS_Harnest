@@ -8,35 +8,47 @@ import { ResultsPage } from "./pages/ResultsPage";
 import { StepBar } from "./components/StepBar";
 import { useProject } from "./state";
 import {
-  applyTheme, nextTheme, readTheme, saveTheme, THEME_ICON, THEME_LABEL,
-  type ThemeChoice,
+  applyTheme, oppositeTheme, readTheme, resolvedTheme, saveTheme,
+  THEME_ICON, THEME_LABEL, type Rendered,
 } from "./lib/theme";
 
 /** 밝은 화면 ↔ 어두운 화면 ↔ 시스템 설정을 순환한다 */
 function ThemeToggle() {
-  const [choice, setChoice] = useState<ThemeChoice>("system");
+  // 지금 화면에 적용된 테마를 들고 있다가, 누르면 곧바로 반대로 넘긴다
+  const [shown, setShown] = useState<Rendered>("light");
 
   useEffect(() => {
     const saved = readTheme();
-    setChoice(saved);
     applyTheme(saved);
+    setShown(resolvedTheme(saved));
+
+    // 시스템 설정을 따르는 동안에는 OS가 바뀌면 같이 바뀐다
+    if (typeof matchMedia !== "function") return;
+    const mq = matchMedia("(prefers-color-scheme: dark)");
+    const sync = () => {
+      if (readTheme() === "system") setShown(resolvedTheme("system"));
+    };
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
   }, []);
 
-  const cycle = () => {
-    const next = nextTheme(choice);
-    setChoice(next);
+  const flip = () => {
+    const next = oppositeTheme();
     saveTheme(next);
+    setShown(next);
   };
+
+  const other: Rendered = shown === "dark" ? "light" : "dark";
 
   return (
     <button
       type="button"
       className="theme-toggle"
-      onClick={cycle}
-      title={THEME_LABEL[choice]}
-      aria-label={`화면 밝기 — 현재 ${THEME_LABEL[choice]}`}
+      onClick={flip}
+      title={`${THEME_LABEL[other]}으로 바꾸기`}
+      aria-label={`${THEME_LABEL[other]}으로 바꾸기 — 지금은 ${THEME_LABEL[shown]}`}
     >
-      {THEME_ICON[choice]}
+      {THEME_ICON[shown]}
     </button>
   );
 }

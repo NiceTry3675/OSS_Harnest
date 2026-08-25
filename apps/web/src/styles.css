@@ -28,8 +28,8 @@
   --dur-slow: 520ms;
   --dur-stage: 720ms;
 
-  --font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+  --font: "Pretendard Variable", Pretendard, -apple-system, system-ui,
+    "Malgun Gothic", sans-serif;
   --mono-font: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
@@ -137,7 +137,18 @@ body {
   font-size: var(--t-body);
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+
+  /* 한국어는 기본값이 글자 단위 줄바꿈이라 "그때 당 / 신이"처럼 낱말이 쪼개진다.
+     keep-all로 어절을 지키고, 끊을 데가 없는 긴 토큰(주소·지문)만 예외로 쪼갠다. */
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
+
+/* 문단은 마지막 줄에 한 낱말만 남지 않게 한다 */
+p, .sub, .hint, .q-help, .hero-lead { text-wrap: pretty; }
+
+/* 지문·주소처럼 어절이 없는 값은 어디서든 끊는다 */
+.mono, .digest, .seal-fp code { word-break: break-all; }
 
 /* 랩01의 판면 구조를 그대로 쓴다.
    상단바는 화면 전체 폭(좌우 30px), 본문은 좌우 6vw 여백 + 안쪽 1180px. */
@@ -216,11 +227,31 @@ body {
 }
 
 /* ═══ 화면 전환 ═══ */
-.route-swap { animation: route-in var(--dur-stage) var(--ease) both; }
-@keyframes route-in {
-  from { opacity: 0; transform: translate3d(24px, 0, 0); }
+/* 화면이 통째로 옆으로 미끄러지면 딱딱하다. 바탕은 짧게 페이드하고,
+   안쪽 덩어리들이 시차를 두고 아래에서 떠오르게 한다 — 랩의 움직임이 이 구조다. */
+.route-swap { animation: route-fade var(--dur-slow) var(--ease) both; }
+@keyframes route-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* 화면 안 최상위 덩어리들이 차례로 떠오른다 */
+/* backwards = 지연 동안만 시작 상태를 잡고, 끝나면 원래 스타일로 돌아간다.
+   both와 달리 애니메이션이 중간에 취소돼도 내용이 사라지지 않는다. */
+.route-swap > * > * { animation: rise-in 620ms var(--ease) backwards; }
+.route-swap > * > *:nth-child(1) { animation-delay: 40ms; }
+.route-swap > * > *:nth-child(2) { animation-delay: 110ms; }
+.route-swap > * > *:nth-child(3) { animation-delay: 180ms; }
+.route-swap > * > *:nth-child(4) { animation-delay: 250ms; }
+.route-swap > * > *:nth-child(5) { animation-delay: 320ms; }
+.route-swap > * > *:nth-child(n + 6) { animation-delay: 380ms; }
+@keyframes rise-in {
+  from { opacity: 0; transform: translate3d(0, 18px, 0); }
   to { opacity: 1; transform: none; }
 }
+/* 자기 연출을 가진 것들은 건드리지 않는다 */
+.route-swap > * > .seal,
+.route-swap > * > .tour-veil { animation: none; }
 
 /* ═══ 활자 ═══ */
 h1 { font-size: var(--t-h1); line-height: 1.24; letter-spacing: -0.035em; font-weight: 800; margin: 0 0 var(--s-2); text-wrap: balance; }
