@@ -14,15 +14,24 @@ import {
 import type { HandoverProblem } from "@harnest/template-handover";
 import {
   createAssistMockClient,
+  createAnthropicClient,
+  createDetectedByoClient,
   createGeminiClient,
   createMockClient,
+  createOllamaClient,
   createOpenAIClient,
+  createOpenRouterClient,
   createVertexClient,
+  detectAndListModels,
+  detectByoCredential,
   getByoCredential,
+  listAvailableModels,
   normalizeVertexServiceAccount,
+  normalizeOllamaBaseUrl,
   parseVertexServiceAccount,
   setByoCredential,
   testByoConnection,
+  testDetectedByoConnection,
 } from "./llm";
 
 const c = (id: string, q: string, a: string): CaseDef => ({ id, question: q, expectedAnswer: a });
@@ -46,7 +55,7 @@ const problem: HandoverProblem = {
 describe("BYO 키 저장", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("Gemini·Vertex·OpenAI 자격 증명을 서로 다른 localStorage 슬롯에 보관한다", () => {
+  it("각 공급자 자격 증명을 서로 다른 localStorage 슬롯에 보관한다", () => {
     const values = new Map<string, string>();
     vi.stubGlobal("localStorage", {
       getItem: (key: string) => values.get(key) ?? null,
@@ -57,9 +66,15 @@ describe("BYO 키 저장", () => {
     setByoCredential("gemini", "gemini-key");
     setByoCredential("vertex", "vertex-credential");
     setByoCredential("openai", "openai-key");
+    setByoCredential("anthropic", "anthropic-key");
+    setByoCredential("openrouter", "openrouter-key");
+    setByoCredential("ollama", "http://localhost:11434");
     expect(getByoCredential("gemini")).toBe("gemini-key");
     expect(getByoCredential("vertex")).toBe("vertex-credential");
     expect(getByoCredential("openai")).toBe("openai-key");
+    expect(getByoCredential("anthropic")).toBe("anthropic-key");
+    expect(getByoCredential("openrouter")).toBe("openrouter-key");
+    expect(getByoCredential("ollama")).toBe("http://localhost:11434");
 
     setByoCredential("openai", null);
     expect(getByoCredential("openai")).toBeNull();
@@ -183,6 +198,184 @@ const openAISuccessResponse = (...texts: string[]): Response =>
     }),
   }) as Response;
 
+const jsonResponse = (body: unknown): Response =>
+  ({ ok: true, status: 200, json: async () => body }) as Response;
+
+describe("자격 증명 공급자 자동 판별", () => {
+  it.each([
+    [`sk-proj-${"a".repeat(24)}`, "openai"],
+    [`sk-ant-api03-${"b".repeat(24)}`, "anthropic"],
+    [`sk-or-v1-${"c".repeat(24)}`, "openrouter"],
+    [`AIza${"d".repeat(32)}`, "gemini"],
+    ["ollama://localhost:11434", "ollama"],
+    ["http://127.0.0.1:11434/api", "ollama"],
+  ])("%s 형식을 %s로 판별한다", (credential, provider) => {
+    const result = detectByoCredential(credential);
+    expect(result.status).toBe("detected");
+    if (result.status === "detected") expect(result.value.provider).toBe(provider);
+  });
+
+  it("알 수 없는 키는 여러 공급자에 전송하지 않고 판별 불가로 남긴다", () => {
+    const result = detectByoCredential("vendor-neutral-secret");
+    expect(result.status).toBe("unknown");
+    if (result.status === "unknown") expect(result.reason).toContain("판별할 수 없습니다");
+  });
+
+  it("Ollama endpoint를 base URL로 정규화하고 위험한 URL 구성요소를 거부한다", () => {
+    expect(normalizeOllamaBaseUrl("localhost:11434/api/")).toBe("http://localhost:11434");
+    expect(() => normalizeOllamaBaseUrl("ftp://localhost:11434")).toThrow("HTTP 또는 HTTPS");
+    expect(() => normalizeOllamaBaseUrl("http://user:pass@localhost:11434")).toThrow(
+      "사용자 정보",
+    );
+  });
+});
+
+describe("공급자별 모델 버전 목록", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("자동 판별한 Claude 키로 접근 가능한 모델과 메타데이터를 조회한다", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      jsonResponse({
+        data: [
+          {
+            id: "claude-sonnet-test",
+            display_name: "Claude Sonnet Test",
+            created_at: "2026-01-01T00:00:00Z",
+            max_input_tokens: 200_000,
+            max_tokens: 64_000,
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await detectAndListModels(`sk-ant-api03-${"x".repeat(24)}`);
+    expect(result.provider).toBe("anthropic");
+    expect(result.models).toEqual([
+      expect.objectContaining({
+        id: "claude-sonnet-test",
+        label: "Claude Sonnet Test",
+        contextWindow: 200_000,
+        maxOutputTokens: 64_000,
+      }),
+    ]);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://api.anthropic.com/v1/models?limit=1000");
+    expect(fetchMock.mock.calls[0][1]?.headers).toMatchObject({
+      "x-api-key": `sk-ant-api03-${"x".repeat(24)}`,
+      "anthropic-version": "2023-06-01",
+    });
+  });
+
+  it("Gemini 목록에서 generateContent 지원 모델만 반환하고 resource prefix를 제거한다", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          models: [
+            {
+              name: "models/gemini-text-test",
+              displayName: "Gemini Text Test",
+              supportedGenerationMethods: ["generateContent"],
+              inputTokenLimit: 1000,
+            },
+            {
+              name: "models/embedding-test",
+              displayName: "Embedding",
+              supportedGenerationMethods: ["embedContent"],
+            },
+          ],
+        }),
+      ),
+    );
+    await expect(listAvailableModels("gemini", `AIza${"g".repeat(32)}`)).resolves.toEqual([
+      expect.objectContaining({ id: "gemini-text-test", contextWindow: 1000 }),
+    ]);
+  });
+
+  it("OpenAI·OpenRouter·Ollama 응답을 공통 모델 항목으로 변환한다", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ data: [{ id: "gpt-test", owned_by: "openai" }] }))
+      .mockResolvedValueOnce(
+        jsonResponse({ data: [{ id: "anthropic/claude-test", name: "Claude Test", context_length: 99 }] }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          models: [
+            {
+              model: "qwen:test",
+              modified_at: "2026-01-01T00:00:00Z",
+              details: { parameter_size: "7B", quantization_level: "Q4" },
+            },
+          ],
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(listAvailableModels("openai", `sk-${"o".repeat(24)}`)).resolves.toEqual([
+      expect.objectContaining({ id: "gpt-test", ownedBy: "openai" }),
+    ]);
+    await expect(
+      listAvailableModels("openrouter", `sk-or-v1-${"r".repeat(24)}`),
+    ).resolves.toEqual([
+      expect.objectContaining({ id: "anthropic/claude-test", contextWindow: 99 }),
+    ]);
+    await expect(listAvailableModels("ollama", "http://localhost:11434")).resolves.toEqual([
+      expect.objectContaining({ id: "qwen:test", label: "qwen:test (7B · Q4)" }),
+    ]);
+    expect(fetchMock.mock.calls[2][0]).toBe("http://localhost:11434/api/tags");
+  });
+});
+
+describe("Claude·OpenRouter·Ollama 호출 어댑터", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("각 공급자 요청 형식과 텍스트 응답을 처리한다", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ content: [{ type: "text", text: "Claude 응답" }] }))
+      .mockResolvedValueOnce(jsonResponse({ choices: [{ message: { content: "Router 응답" } }] }))
+      .mockResolvedValueOnce(jsonResponse({ message: { role: "assistant", content: "Ollama 응답" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createAnthropicClient("ant-key", "claude-test").complete("요청")).resolves.toBe(
+      "Claude 응답",
+    );
+    await expect(createOpenRouterClient("or-key", "vendor/model").complete("요청")).resolves.toBe(
+      "Router 응답",
+    );
+    await expect(createOllamaClient("ollama://localhost:11434", "qwen:test").complete("요청"))
+      .resolves.toBe("Ollama 응답");
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "https://api.anthropic.com/v1/messages",
+      "https://openrouter.ai/api/v1/chat/completions",
+      "http://localhost:11434/api/chat",
+    ]);
+    expect(fetchMock.mock.calls[0][1]?.headers).toMatchObject({
+      "x-api-key": "ant-key",
+      "anthropic-dangerous-direct-browser-access": "true",
+    });
+    expect(fetchMock.mock.calls[1][1]?.headers).toMatchObject({ Authorization: "Bearer or-key" });
+    expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toMatchObject({
+      model: "qwen:test",
+      stream: false,
+      options: { num_predict: 8192 },
+    });
+  });
+
+  it("자동 판별 클라이언트와 연결 테스트가 판별된 provider를 보존한다", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ choices: [{ message: { content: "OK" } }] })),
+    );
+    const key = `sk-or-v1-${"z".repeat(24)}`;
+    const client = createDetectedByoClient(key, "openai/test");
+    expect(client.providerId).toBe("openrouter");
+    await expect(testDetectedByoConnection(key, "openai/test")).resolves.toBe("openrouter");
+  });
+});
+
 async function vertexCredential(): Promise<string> {
   const pair = await crypto.subtle.generateKey(
     {
@@ -235,6 +428,12 @@ describe("Vertex 서비스 계정 어댑터", () => {
     expect(parsed.project_id).toBe("vertex-project");
     expect(parsed.client_email).toBe("harnest@vertex-project.iam.gserviceaccount.com");
     expect(normalizeVertexServiceAccount(raw)).not.toContain("client_x509_cert_url");
+    const detection = detectByoCredential(raw);
+    expect(detection.status).toBe("detected");
+    if (detection.status === "detected") expect(detection.value.provider).toBe("vertex");
+    await expect(listAvailableModels("vertex", raw)).resolves.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "gemini-3.7-flash", source: "catalog" })]),
+    );
 
     expect(() => parseVertexServiceAccount("not-json")).toThrow("해석할 수 없습니다");
     expect(() => parseVertexServiceAccount(JSON.stringify({ type: "authorized_user" }))).toThrow(

@@ -22,7 +22,17 @@ export interface GateDef {
 }
 
 /** 판정 절차에 동결할 수 있는 저지 프로바이더 — 모델 ID와 함께 다이제스트에 결속된다. */
-export type JudgeProvider = "gemini" | "vertex" | "openai" | "mock";
+export const JUDGE_PROVIDERS = [
+  "gemini",
+  "vertex",
+  "openai",
+  "anthropic",
+  "openrouter",
+  "ollama",
+  "mock",
+] as const;
+
+export type JudgeProvider = (typeof JUDGE_PROVIDERS)[number];
 
 /** 결정적 전용 — 면제 사유를 화면에 정직하게 표시한다(SPEC §10). */
 export interface JudgeDeterministicOnly {

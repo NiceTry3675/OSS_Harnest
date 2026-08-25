@@ -62,6 +62,15 @@ EXPORT_ENVELOPE_VERSION = 2
 INTERVIEW_SCHEMA_VERSION = "skeleton-1"
 PACK_VERSION = "skeleton-1"
 SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
+JUDGE_PROVIDERS = {
+    "gemini",
+    "vertex",
+    "openai",
+    "anthropic",
+    "openrouter",
+    "ollama",
+    "mock",
+}
 rate_limiter = build_rate_limiter()
 
 # 관리자가 설정하지 않으면 빈 문자열이고, /proxy/* 해당 벤더는 404로 막는다.
@@ -329,7 +338,7 @@ def validate_examiner_report(value: Dict[str, Any], path: str) -> None:
     require_string(value.get("forDigest"), f"{path}.forDigest")
     judge = require_object(value.get("judge"), f"{path}.judge")
     require_exact_members(judge, {"provider", "model"}, f"{path}.judge")
-    if judge.get("provider") not in {"gemini", "openai", "mock"}:
+    if judge.get("provider") not in JUDGE_PROVIDERS:
         raise HTTPException(status_code=422, detail=f"{path}.judge.provider가 올바르지 않습니다.")
     require_string(judge.get("model"), f"{path}.judge.model")
     require_string(value.get("ranAt"), f"{path}.ranAt")
@@ -562,7 +571,7 @@ def extract_export_metadata(
             {"provider", "model"},
             "project.evaluation.pack.judgeProcedure.judge",
         )
-        if judge.get("provider") not in {"gemini", "openai", "mock"}:
+        if judge.get("provider") not in JUDGE_PROVIDERS:
             raise HTTPException(status_code=422, detail="지원하지 않는 저지 provider입니다.")
         require_nonempty_string(
             judge.get("model"), "project.evaluation.pack.judgeProcedure.judge.model"

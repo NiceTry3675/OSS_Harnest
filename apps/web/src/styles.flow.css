@@ -382,3 +382,67 @@ label.dropzone input[type="file"] { display: none; }
 .test { display: flex; flex-direction: column; min-height: 128px; }
 .test p { flex: 1; }
 .test-state { margin-top: auto; }
+
+/* ── 모델 고르기 ── */
+.model-pick {
+  display: flex; align-items: center; gap: var(--s-3);
+  margin-top: var(--s-4); flex-wrap: wrap;
+}
+.model-pick label { font-size: var(--t-sm); font-weight: 700; color: var(--ink-2); flex: none; }
+.model-pick select,
+.model-pick input { flex: 1; min-width: 260px; }
+.model-pick button { height: 44px; padding: 0 18px; font-size: var(--t-sm); flex: none; }
+
+/* 모의 모델은 고르는 것이 아니라 빠져나가는 것 — 카드보다 작게 둔다 */
+.judge-escape {
+  display: flex; align-items: center; gap: var(--s-3);
+  margin-top: var(--s-5); padding-top: var(--s-4);
+  border-top: 1px solid var(--border); flex-wrap: wrap;
+}
+.judge-escape button { height: 42px; padding: 0 18px; font-size: var(--t-sm); }
+
+/* ── 공급자 카드: 6개를 3×2로, 한 화면에 담기게 ── */
+.wizard-grid.is-wide .models,
+.models { grid-template-columns: repeat(3, 1fr); gap: 12px; }
+@media (max-width: 900px) { .models, .wizard-grid.is-wide .models { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .models, .wizard-grid.is-wide .models { grid-template-columns: 1fr; } }
+
+.wizard-main form .model,
+.model { padding: 14px 16px; min-height: 0; }
+.model b { font-size: 15.5px; }
+.model .model-id { font-size: 12px; margin-top: 2px; }
+.model.is-on::after { top: 12px; right: 14px; }
+
+/* ── 모델 고르기 ── */
+.picker { position: relative; flex: 1; min-width: 280px; }
+.picker-input { width: 100%; }
+.picker-spin {
+  position: absolute; right: 14px; top: 50%; margin-top: -7px;
+  width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid var(--accent); border-top-color: transparent;
+  animation: spin 0.7s linear infinite;
+}
+.picker-list {
+  position: absolute; z-index: 40; left: 0; right: 0; top: calc(100% + 6px);
+  max-height: 320px; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow-3); padding: 6px;
+}
+.picker-row {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  width: 100%; height: auto; padding: 9px 11px; border: none; background: transparent;
+  border-radius: 10px; text-align: left; font-weight: 500;
+}
+.picker-row:hover:not(:disabled) { background: var(--surface-2); transform: none; }
+.picker-row.is-on { background: var(--accent-soft); }
+.picker-name { font-size: var(--t-sm); font-weight: 700; color: var(--ink); }
+.picker-id { font-family: var(--mono-font); font-size: 11.5px; color: var(--ink-3); }
+.picker-empty { padding: 12px; font-size: var(--t-xs); color: var(--ink-3); }
+
+.picker-more {
+  width: 100%; height: auto; padding: 10px; margin-top: 4px;
+  border: none; border-top: 1px solid var(--border); border-radius: 0;
+  background: transparent; color: var(--ink-3);
+  font-size: var(--t-xs); font-weight: 600;
+}
+.picker-more:hover:not(:disabled) { color: var(--accent); background: transparent; transform: none; }

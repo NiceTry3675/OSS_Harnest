@@ -13,7 +13,7 @@ import {
 } from "./examiner";
 import type { InterviewSubmission } from "./interview";
 import { SCORE_CEILING, type LoopCheckpoint, type LoopSpec } from "./loop";
-import { digestScope, type EvaluationPack } from "./pack";
+import { digestScope, JUDGE_PROVIDERS, type EvaluationPack } from "./pack";
 
 export const PROJECT_EXPORT_KIND = "harnest.project-export" as const;
 /** v2 (2026-08-25): 캘리브레이션 제거, 검증 배터리를 stability·hack_resistance 2종으로 축소 */
@@ -730,7 +730,7 @@ export async function projectExportIssues(
       issues.push(issue("project.evaluation.examinerReport", "결정적 전용 Pack에는 리포트를 붙이지 않습니다."));
     }
   } else {
-    if (!(["gemini", "vertex", "openai", "mock"] as const).includes(pack.judgeProcedure.judge.provider)) {
+    if (!JUDGE_PROVIDERS.includes(pack.judgeProcedure.judge.provider)) {
       issues.push(
         issue(
           "project.evaluation.pack.judgeProcedure.judge.provider",
