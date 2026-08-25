@@ -123,6 +123,20 @@ describe("compile", () => {
     await expect(compile(makeSubmission(6, 20_001), mockJudge)).rejects.toThrow("500~20,000");
   });
 
+  it("기록 전체가 상한 안이면 베끼기 방어 정적 안내를 남기고, 상한을 넘으면 안내가 없다", async () => {
+    // 짧은 답 4개 + 넉넉한 상한 2,000자 — 통째 베끼기를 분량 게이트가 못 걸러내는 설정
+    const roomy = await compile(makeSubmission(6, 2000), mockJudge);
+    expect(roomy.notices.some((n) => n.includes("베끼기"))).toBe(true);
+
+    // 상한 500자 — 가시 기록 전체(4케이스 × 약 130자)가 상한을 넘어 게이트가 방어한다
+    const padded = makeSubmission(6, 500);
+    for (const c of padded.answers["cases"] as Array<Record<string, unknown>>) {
+      c.expectedAnswer = `${c.expectedAnswer} 상세 절차는 위키의 운영 문서에 정리되어 있고 담당자 승인 뒤 진행해야 하며 금요일 배포는 금지입니다. 예외는 보안 패치뿐이며 그때도 사후 보고가 필요합니다.`;
+    }
+    const tight = await compile(padded, mockJudge);
+    expect(tight.notices).toEqual([]);
+  });
+
   it("judge 옵션은 pack에 동결되며 다이제스트에 결속된다", async () => {
     const a = await compile(makeSubmission(6), { judgeProvider: "mock", judgeModel: "모의-감정관" });
     const jp = a.pack.judgeProcedure;

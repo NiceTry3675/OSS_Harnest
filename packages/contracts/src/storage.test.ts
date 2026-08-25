@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import { sha256Canonical } from "./digest";
-import type { CalibrationResult, ExaminerReport } from "./examiner";
+import type { ExaminerReport } from "./examiner";
 import type { LoopCheckpoint } from "./loop";
 import { digestScope, type EvaluationPack } from "./pack";
 import {
@@ -33,7 +33,7 @@ async function makePack(kind: "deterministic" | "llm"): Promise<EvaluationPack> 
           }
         : {
             kind: "deterministic_only",
-            exemptions: { examinerReport: "면제", calibration: "면제", pairwise: "면제" },
+            exemptions: { examinerReport: "면제", pairwise: "면제" },
           },
     holdoutPolicy:
       kind === "llm"
@@ -72,8 +72,6 @@ function checkpoint(pack: EvaluationPack): LoopCheckpoint<string> {
 function report(pack: EvaluationPack): ExaminerReport {
   return {
     checks: [
-      { id: "ordering", verdict: "pass", note: "순서 통과" },
-      { id: "discrimination", verdict: "pass", note: "변별 통과" },
       { id: "stability", verdict: "pass", note: "안정성 통과" },
       { id: "hack_resistance", verdict: "pass", note: "꼼수 내성 통과" },
     ],
@@ -81,24 +79,6 @@ function report(pack: EvaluationPack): ExaminerReport {
     forDigest: pack.definitionDigest,
     judge: { provider: "mock", model: "모의 모델" },
     ranAt: "2026-08-24T11:00:00.000Z",
-  };
-}
-
-function calibration(pack: EvaluationPack, forReportAt: string): CalibrationResult {
-  return {
-    pairs: [
-      {
-        id: "hack-1",
-        kind: "hack_probe",
-        userChoice: "A",
-        examinerChoice: "A",
-        agreed: true,
-      },
-    ],
-    verdict: "pass",
-    forDigest: pack.definitionDigest,
-    forReportAt,
-    ranAt: "2026-08-24T11:05:00.000Z",
   };
 }
 
@@ -147,8 +127,6 @@ function exportInput(
       evaluation: {
         pack,
         examinerReport,
-        calibration:
-          examinerReport === null ? null : calibration(pack, examinerReport.ranAt),
         approval: { forDigest: pack.definitionDigest, approvedAt: now },
       },
       loopSpec: { ...defaultLoopSpec },
@@ -167,7 +145,6 @@ describe("ProjectExportEnvelope", () => {
         evaluation: {
           pack,
           examinerReport: null,
-          calibration: null,
           approval: { forDigest: pack.definitionDigest, approvedAt: now },
         },
         loopSpec: { maxRounds: 1, plateauRounds: 1, adoptionRule: "scalar_strict", seed: 1 },
@@ -193,7 +170,6 @@ describe("ProjectExportEnvelope", () => {
           evaluation: {
             pack,
             examinerReport: null,
-            calibration: null,
             approval: { forDigest: pack.definitionDigest, approvedAt: now },
           },
           loopSpec: { maxRounds: 1, plateauRounds: 1, adoptionRule: "scalar_strict", seed: 1 },
@@ -229,7 +205,7 @@ describe("ProjectExportEnvelope", () => {
     expect(getterReads).toBe(0);
   });
 
-  it("LLM 승인본은 report·calibration·approval·checkpoint를 같은 Pack에 결속한다", async () => {
+  it("LLM 승인본은 report·approval·checkpoint를 같은 Pack에 결속한다", async () => {
     const pack = await makePack("llm");
     const examinerReport = report(pack);
     const envelope = await createProjectExportEnvelope({
@@ -239,7 +215,6 @@ describe("ProjectExportEnvelope", () => {
         evaluation: {
           pack,
           examinerReport,
-          calibration: calibration(pack, examinerReport.ranAt),
           approval: { forDigest: pack.definitionDigest, approvedAt: now },
         },
         loopSpec: { maxRounds: 1, plateauRounds: 1, adoptionRule: "scalar_strict", seed: 1 },
@@ -250,7 +225,7 @@ describe("ProjectExportEnvelope", () => {
     expect(await projectExportIssues(envelope)).toEqual([]);
   });
 
-  it("시험관 리포트는 네 필수 검사를 각각 정확히 한 번 포함해야 한다", async () => {
+  it("시험관 리포트는 두 필수 검사(안정성·꼼수 내성)를 각각 정확히 한 번 포함해야 한다", async () => {
     const pack = await makePack("llm");
     const valid = await createProjectExportEnvelope(exportInput(pack, scoredHoldout));
 
@@ -261,7 +236,7 @@ describe("ProjectExportEnvelope", () => {
     );
 
     const duplicated = structuredClone(valid);
-    duplicated.project.evaluation.examinerReport!.checks[3] = {
+    duplicated.project.evaluation.examinerReport!.checks[1] = {
       ...duplicated.project.evaluation.examinerReport!.checks[0],
     };
     expect((await projectExportIssues(duplicated)).map((entry) => entry.path)).toContain(
@@ -485,8 +460,6 @@ describe("ProjectExportEnvelope", () => {
     Object.assign(input.project.evaluation.pack.holdoutPolicy, { internal: sentinel });
     Object.assign(input.project.evaluation.examinerReport!, { artifacts: sentinel });
     Object.assign(input.project.evaluation.examinerReport!.checks[0], { raw: sentinel });
-    Object.assign(input.project.evaluation.calibration!, { choices: sentinel });
-    Object.assign(input.project.evaluation.calibration!.pairs[0], { basis: sentinel });
     Object.assign(input.project.evaluation.approval, { actor: sentinel });
     Object.assign(input.project.loopSpec, { debug: sentinel });
     Object.assign(input.result, { transient: sentinel });
@@ -512,7 +485,7 @@ describe("ProjectExportEnvelope", () => {
     expect(envelope.project.interview.answers).toEqual({ custom: { nested: "보존" } });
   });
 
-  it("Pack 본문 변조와 report·calibration·checkpoint 결속 불일치를 모두 거부한다", async () => {
+  it("Pack 본문 변조와 report·checkpoint 결속 불일치를 모두 거부한다", async () => {
     const pack = await makePack("llm");
     const examinerReport = report(pack);
     const valid = await createProjectExportEnvelope({
@@ -522,7 +495,6 @@ describe("ProjectExportEnvelope", () => {
         evaluation: {
           pack,
           examinerReport,
-          calibration: calibration(pack, examinerReport.ranAt),
           approval: { forDigest: pack.definitionDigest, approvedAt: now },
         },
         loopSpec: { maxRounds: 1, plateauRounds: 1, adoptionRule: "scalar_strict", seed: 1 },
@@ -539,13 +511,11 @@ describe("ProjectExportEnvelope", () => {
       label: "변조",
     });
     broken.project.evaluation.examinerReport!.forDigest = "b".repeat(64);
-    broken.project.evaluation.calibration!.forReportAt = "2026-08-24T00:00:00.000Z";
     broken.result.checkpoint.packDigest = "c".repeat(64);
 
     const paths = (await projectExportIssues(broken)).map((entry) => entry.path);
     expect(paths).toContain("project.evaluation.pack.definitionDigest");
     expect(paths).toContain("project.evaluation.examinerReport.forDigest");
-    expect(paths).toContain("project.evaluation.calibration.forReportAt");
     expect(paths).toContain("result.checkpoint.packDigest");
   });
 
@@ -608,7 +578,6 @@ describe("ProjectExportEnvelope", () => {
           evaluation: {
             pack,
             examinerReport,
-            calibration: calibration(pack, examinerReport.ranAt),
             approval: { forDigest: pack.definitionDigest, approvedAt: now },
           },
           loopSpec: { maxRounds: 1, plateauRounds: 1, adoptionRule: "scalar_strict", seed: 1 },

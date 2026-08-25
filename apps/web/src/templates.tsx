@@ -4,9 +4,8 @@
 
 import type { ComponentType } from "react";
 import type {
-  CalibrationPairSpec,
-  EvaluationPack,
   ExaminerCheckResult,
+  ExaminerReport,
   InterviewSubmission,
   JudgeProvider,
   Question,
@@ -15,7 +14,7 @@ import type {
 import type { GeneratorFeedback } from "@harnest/loop-engine";
 import * as timetable from "@harnest/template-timetable";
 import * as handover from "@harnest/template-handover";
-import type { CompiledGeneric, ExaminerRunGeneric, HoldoutEvaluation } from "./state";
+import type { CompiledGeneric, HoldoutEvaluation } from "./state";
 import type { LlmClient } from "@harnest/template-handover";
 import { DEV_SAMPLES } from "./lib/devSamples";
 import type { TemplateFlow } from "./lib/flowStep";
@@ -66,7 +65,7 @@ export interface TemplateEntry {
   /** 승인·동결된 팩의 저지 선언에 맞는 클라이언트 구성 — 불일치면 throw(재승인 원칙) */
   createLlm(compiled: CompiledGeneric): LlmClient | null;
   createRuntime(compiled: CompiledGeneric, llm: LlmClient | null): TemplateRuntime;
-  /** llm_judge 포함 템플릿의 승인 전 요건 — 검증 배터리와 캘리브레이션 쌍(SPEC §3 원칙 2).
+  /** llm_judge 포함 템플릿의 승인 전 요건 — 검증 배터리(SPEC §3 원칙 2).
    *  결정적 전용 템플릿은 undefined(SPEC §10 면제). */
   examiner?: {
     runBattery(
@@ -75,8 +74,7 @@ export interface TemplateEntry {
       onProgress?: (message: string) => void,
       /** 검사 하나가 끝날 때마다 — 화면이 결과를 기다리지 않고 바로 표시한다 */
       onCheck?: (check: ExaminerCheckResult) => void,
-    ): Promise<ExaminerRunGeneric>;
-    buildPairs(run: ExaminerRunGeneric, pack: EvaluationPack): CalibrationPairSpec[];
+    ): Promise<ExaminerReport>;
   };
   /** 인터뷰 단계 케이스 초안 보조(선택) — caseList 질문에서만 노출된다.
    *  클릭당 본 호출 1회 + 형식 재시도 1회로 템플릿 상수가 상한하며 실행 예산 밖이다(SPEC §5.2).
@@ -211,8 +209,6 @@ const handoverEntry: TemplateEntry = {
         onProgress,
         onCheck,
       ),
-    buildPairs: (run, pack) =>
-      handover.buildCalibrationPairs(run as handover.ExaminerRun, pack),
   },
   createRuntime(compiled, llm) {
     if (!llm) throw new Error("채점 모델이 준비되지 않았습니다 — 키를 입력하거나 모의 모델을 선택하세요.");

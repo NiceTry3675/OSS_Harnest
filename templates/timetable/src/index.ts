@@ -130,7 +130,6 @@ export async function compile(submission: InterviewSubmission): Promise<Compiled
       kind: "deterministic_only",
       exemptions: {
         examinerReport: "해당 없음 — 결정적 채점 전용 (SPEC §10)",
-        calibration: "해당 없음 — 결정적 채점 전용 (SPEC §10)",
         pairwise: "미적용 — 채택은 스칼라 엄격 개선 (SPEC §10)",
       },
     },

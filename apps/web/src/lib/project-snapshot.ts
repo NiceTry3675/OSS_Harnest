@@ -1,27 +1,20 @@
-/** 브라우저 프로젝트 스냅샷 — 새로고침이 승인·캘리브레이션 불변식을 우회하지 못하게 한다.
+/** 브라우저 프로젝트 스냅샷 — 새로고침이 승인 불변식을 우회하지 못하게 한다.
  *  Evaluation Pack 정식 저장 계약이 아니라 단일 브라우저의 임시 영속화 계층이며,
  *  벤더 자격 증명과 access token은 이 타입과 저장 경로에 존재하지 않는다(SPEC §3 원칙 1, §7). */
 
-import type { CalibrationResult, LoopCheckpoint } from "@harnest/contracts";
-import type {
-  CompiledGeneric,
-  ExaminerAttempts,
-  ExaminerRunGeneric,
-  HoldoutScores,
-} from "../state";
+import type { ExaminerReport, LoopCheckpoint } from "@harnest/contracts";
+import { worstVerdict } from "@harnest/contracts";
+import type { CompiledGeneric, HoldoutScores } from "../state";
 
-export const PROJECT_SNAPSHOT_VERSION = 1 as const;
+/** v2 (2026-08-25): 캘리브레이션·재검증 계수·배터리 산출물 제거 — 리포트만 남는다 */
+export const PROJECT_SNAPSHOT_VERSION = 2 as const;
 
 export interface ProjectSnapshot {
   schemaVersion: typeof PROJECT_SNAPSHOT_VERSION;
   templateId: string | null;
   answers: Record<string, unknown>;
   compiled: CompiledGeneric | null;
-  examinerRun: ExaminerRunGeneric | null;
-  /** 검증 배터리 실행 계수 — 새로고침이 재검증 쿼터(SPEC §5.2)를 초기화하지 못하게 한다.
-   *  이 필드가 없는 구버전 스냅샷은 계수 0으로 읽는다. */
-  examinerAttempts?: ExaminerAttempts | null;
-  calibration: CalibrationResult | null;
+  examinerReport: ExaminerReport | null;
   /** 승인 순간의 다이제스트 — 승인 전 상태에는 null */
   approvedDigest: string | null;
   approvedAt: string | null;
@@ -29,13 +22,27 @@ export interface ProjectSnapshot {
   holdout: HoldoutScores;
 }
 
+/** v1 스냅샷 — 캘리브레이션·재검증 계수·배터리 산출물이 있던 시절의 형태(마이그레이션 전용).
+ *  검사 4종(순서·변별력 포함) 리포트를 담고 있을 수 있다. */
+interface ProjectSnapshotV1 {
+  schemaVersion: 1;
+  templateId: string | null;
+  answers: Record<string, unknown>;
+  compiled: CompiledGeneric | null;
+  examinerRun: { report: ExaminerReport } | null;
+  approvedDigest: string | null;
+  approvedAt: string | null;
+  runId: string | null;
+  holdout: HoldoutScores;
+}
+
+export type StoredProjectSnapshot = ProjectSnapshot | ProjectSnapshotV1;
+
 export interface RestoredProjectSnapshot {
   templateId: string | null;
   answers: Record<string, unknown>;
   compiled: CompiledGeneric | null;
-  examinerRun: ExaminerRunGeneric | null;
-  examinerAttempts: ExaminerAttempts | null;
-  calibration: CalibrationResult | null;
+  examinerReport: ExaminerReport | null;
   /** 승인 순간 캡처된 다이제스트 — 현재 팩과 일치할 때만 approvedAt과 함께 복원된다 */
   approvedDigest: string | null;
   approvedAt: string | null;
@@ -73,12 +80,23 @@ export function markUnavailableRestoredHoldout(
   return { ...normalized, errors };
 }
 
-/** 리포트·캘리브레이션은 불일치 상태도 복원해 수정→재검증 안내와 실패 고착을 보존한다.
+/** v1 리포트는 검사 4종을 담고 있다 — 현재 배터리 2종(안정성·꼼수 내성)만 남기고
+ *  overall을 다시 계산한다. 남긴 검사도 같은 저지로 실제 실행된 결과라 의미가 보존된다. */
+function migrateV1Report(report: ExaminerReport | null): ExaminerReport | null {
+  if (report === null) return null;
+  const checks = report.checks.filter((c) => c.id === "stability" || c.id === "hack_resistance");
+  if (checks.length !== 2) return null;
+  return { ...report, checks, overall: worstVerdict(checks.map((c) => c.verdict)) };
+}
+
+/** 리포트는 불일치 상태도 복원해 재검증 자동 실행의 신호로 쓴다.
  *  승인 이후 상태만 approvedDigest 일치로 복원한다. 불일치면 승인·실행 흔적을 폐기한다. */
 export function restoreProjectSnapshot(
-  snapshot: ProjectSnapshot,
+  snapshot: StoredProjectSnapshot,
 ): RestoredProjectSnapshot | null {
-  if (snapshot.schemaVersion !== PROJECT_SNAPSHOT_VERSION) return null;
+  if (snapshot.schemaVersion !== PROJECT_SNAPSHOT_VERSION && snapshot.schemaVersion !== 1) {
+    return null;
+  }
 
   const approvalMatches =
     snapshot.approvedAt !== null &&
@@ -89,9 +107,10 @@ export function restoreProjectSnapshot(
     templateId: snapshot.templateId,
     answers: snapshot.answers,
     compiled: snapshot.compiled,
-    examinerRun: snapshot.examinerRun,
-    examinerAttempts: snapshot.examinerAttempts ?? null,
-    calibration: snapshot.calibration,
+    examinerReport:
+      snapshot.schemaVersion === 1
+        ? migrateV1Report(snapshot.examinerRun?.report ?? null)
+        : snapshot.examinerReport,
     approvedDigest: approvalMatches ? snapshot.approvedDigest : null,
     approvedAt: approvalMatches ? snapshot.approvedAt : null,
     runId: approvalMatches ? snapshot.runId : null,
@@ -145,12 +164,12 @@ export class IndexedDbProjectStore {
     return this.writeChain;
   }
 
-  async load(): Promise<ProjectSnapshot | null> {
+  async load(): Promise<StoredProjectSnapshot | null> {
     const db = await this.open();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, "readonly");
       const req = tx.objectStore(STORE_NAME).get(CURRENT_KEY);
-      req.onsuccess = () => resolve((req.result as ProjectSnapshot | undefined) ?? null);
+      req.onsuccess = () => resolve((req.result as StoredProjectSnapshot | undefined) ?? null);
       req.onerror = () => reject(req.error ?? new Error("프로젝트 스냅샷 읽기 실패"));
     });
   }

@@ -1,14 +1,13 @@
 /** 프로젝트 상태 — 페이지 간 공유되는 단일 컨텍스트 (템플릿 무관).
- *  흐름: 템플릿 선택 → 인터뷰(answers) → 컴파일(compiled) → 검증·캘리브레이션 → 승인(approvedAt)
+ *  흐름: 템플릿 선택 → 인터뷰(answers) → 컴파일(compiled) → 검증(자동) → 승인(approvedAt)
  *  → 실행(checkpoint) → 결과. 재컴파일 = 판정 절차 변경 → 승인·실행 상태를 반드시 무효화한다.
- *  검증 리포트·캘리브레이션은 재컴파일 시 지우지 않는다 — forDigest 불일치가 "기준이 수정되어
- *  무효화됨"을 화면에 알리는 재료다(수정→재검증 왕복, SPEC §4.1). 승인 가능 여부는
- *  approvalBlockers가 판단하며, approve()는 차단 사유가 있으면 무시된다(UI 밖 이중 방어). */
+ *  검증 리포트는 재컴파일 시 지우지 않는다 — forDigest 불일치가 재검증 자동 실행의 신호다
+ *  (수정→재검증 왕복, SPEC §4.1). 승인 가능 여부는 approvalBlockers가 판단하며,
+ *  approve()는 차단 사유가 있으면 무시된다(UI 밖 이중 방어). */
 
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   approvalBlockers,
-  type CalibrationResult,
   type EvaluationPack,
   type ExaminerReport,
   type HoldoutScores,
@@ -29,19 +28,8 @@ export interface CompiledGeneric {
   problem: unknown;
   pack: EvaluationPack;
   loopSpec: LoopSpec;
-}
-
-/** 배터리 실행 결과 — report는 계약 타입, artifacts는 템플릿 소유(캘리브레이션 쌍 재료) */
-export interface ExaminerRunGeneric {
-  report: ExaminerReport;
-  artifacts: unknown;
-}
-
-/** 검증 배터리 실행 횟수 — 다이제스트에 결속된 비용 쿼터 재료(SPEC §5.2).
- *  전송 실패도 호출을 소모하므로 완료가 아니라 시작 시점에 계수한다. */
-export interface ExaminerAttempts {
-  forDigest: string;
-  count: number;
+  /** 템플릿이 컴파일 시점에 계산한 설정 안내(선택) — 승인 화면이 그대로 표시한다 */
+  notices?: string[];
 }
 
 export interface ProjectState {
@@ -53,13 +41,8 @@ export interface ProjectState {
   setAnswers: (a: Record<string, unknown>) => void;
   compiled: CompiledGeneric | null;
   setCompiled: (c: CompiledGeneric | null) => void;
-  examinerRun: ExaminerRunGeneric | null;
-  setExaminerRun: (r: ExaminerRunGeneric | null) => void;
-  examinerAttempts: ExaminerAttempts | null;
-  /** 배터리 시작 1회 = 1 계수. 다른 다이제스트의 첫 시도는 계수를 새로 시작한다 */
-  noteExaminerAttempt: (digest: string) => void;
-  calibration: CalibrationResult | null;
-  setCalibration: (c: CalibrationResult | null) => void;
+  examinerReport: ExaminerReport | null;
+  setExaminerReport: (r: ExaminerReport | null) => void;
   /** 현재 팩 기준 승인 차단 사유 — 비어 있어야 approve()가 동작한다 */
   blockers: string[];
   /** 승인 순간 캡처된 다이제스트 — 정식 기록도 이 값을 사용하며 현재 Pack에서 재파생하지 않는다. */
@@ -89,9 +72,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [templateId, setTemplateId] = useState<string | null>(null);
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
   const [compiled, setCompiled] = useState<CompiledGeneric | null>(null);
-  const [examinerRun, setExaminerRun] = useState<ExaminerRunGeneric | null>(null);
-  const [examinerAttempts, setExaminerAttempts] = useState<ExaminerAttempts | null>(null);
-  const [calibration, setCalibration] = useState<CalibrationResult | null>(null);
+  const [examinerReport, setExaminerReport] = useState<ExaminerReport | null>(null);
   const [approvedAt, setApprovedAt] = useState<string | null>(null);
   // 승인 순간 캡처된 다이제스트 — 저장 시점에 현재 팩에서 파생하면 재결속 위험이 생긴다
   const [approvedDigest, setApprovedDigest] = useState<string | null>(null);
@@ -130,9 +111,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         setTemplateId(restored.templateId);
         setAnswers(restored.answers);
         setCompiled(restored.compiled);
-        setExaminerRun(restored.examinerRun);
-        setExaminerAttempts(restored.examinerAttempts);
-        setCalibration(restored.calibration);
+        setExaminerReport(restored.examinerReport);
         setApprovedAt(restored.approvedAt);
         setApprovedDigest(restored.approvedDigest);
         setRunId(restored.runId);
@@ -163,9 +142,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       templateId,
       answers,
       compiled,
-      examinerRun,
-      examinerAttempts,
-      calibration,
+      examinerReport,
       approvedDigest,
       approvedAt,
       runId,
@@ -174,14 +151,11 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     void snapshotStore.save(snapshot).catch((error: unknown) => {
       console.warn("프로젝트 스냅샷을 저장하지 못했습니다.", error);
     });
-  }, [hydrated, templateId, answers, compiled, examinerRun, examinerAttempts, calibration, approvedDigest, approvedAt, runId, holdout]);
+  }, [hydrated, templateId, answers, compiled, examinerReport, approvedDigest, approvedAt, runId, holdout]);
 
   const blockers = useMemo(
-    () =>
-      compiled
-        ? approvalBlockers(compiled.pack, examinerRun?.report ?? null, calibration)
-        : [],
-    [compiled, examinerRun, calibration],
+    () => (compiled ? approvalBlockers(compiled.pack, examinerReport) : []),
+    [compiled, examinerReport],
   );
 
   const value = useMemo<ProjectState>(
@@ -201,19 +175,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         setCheckpoint(null);
         setHoldout(emptyHoldout());
       },
-      examinerRun,
-      setExaminerRun,
-      examinerAttempts,
-      // 같은 다이제스트로 되돌아온 재컴파일에도 계수가 유지되도록 다이제스트 결속으로만 관리한다
-      noteExaminerAttempt: (digest: string) => {
-        setExaminerAttempts((prev) =>
-          prev !== null && prev.forDigest === digest
-            ? { forDigest: digest, count: prev.count + 1 }
-            : { forDigest: digest, count: 1 },
-        );
-      },
-      calibration,
-      setCalibration,
+      examinerReport,
+      setExaminerReport,
       blockers,
       approvedDigest,
       approvedAt,
@@ -234,9 +197,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         setTemplateId(null);
         setAnswers({});
         setCompiled(null);
-        setExaminerRun(null);
-        setExaminerAttempts(null);
-        setCalibration(null);
+        setExaminerReport(null);
         setApprovedAt(null);
         setApprovedDigest(null);
         setRunId(null);
@@ -244,7 +205,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         setHoldout(emptyHoldout());
       },
     }),
-    [hydrated, templateId, answers, compiled, examinerRun, examinerAttempts, calibration, blockers, approvedDigest, approvedAt, runId, checkpoint, holdout],
+    [hydrated, templateId, answers, compiled, examinerReport, blockers, approvedDigest, approvedAt, runId, checkpoint, holdout],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

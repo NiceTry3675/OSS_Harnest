@@ -133,7 +133,7 @@ def run() -> None:
     assert r.status_code == 200, r.text
     assert r.json() == {"ok": True}
 
-    # 버전형 봉투는 완전한 v1 골격을 가지며, 원문 UTF-8 바이트를 그대로 저장하고 돌려준다.
+    # 버전형 봉투는 완전한 v2 골격을 가지며, 원문 UTF-8 바이트를 그대로 저장하고 돌려준다.
     pack_scope = {
         "packVersion": "skeleton-1",
         "templateId": "handover",
@@ -143,7 +143,6 @@ def run() -> None:
             "kind": "deterministic_only",
             "exemptions": {
                 "examinerReport": "결정적 채점",
-                "calibration": "결정적 채점",
                 "pairwise": "결정적 채점",
             },
         },
@@ -158,7 +157,7 @@ def run() -> None:
     definition_digest = hashlib.sha256(canonical_scope).hexdigest()
     export_envelope = {
         "kind": "harnest.project-export",
-        "envelopeVersion": 1,
+        "envelopeVersion": 2,
         "exportedAt": "2026-08-24T00:02:00.000Z",
         "project": {
             "interview": {
@@ -172,7 +171,6 @@ def run() -> None:
                     "definitionDigest": definition_digest,
                 },
                 "examinerReport": None,
-                "calibration": None,
                 "approval": {
                     "forDigest": definition_digest,
                     "approvedAt": "2026-08-24T00:01:00.000Z",
@@ -246,7 +244,7 @@ def run() -> None:
             (export_id,),
         ).fetchone()
         assert row == (
-            1,
+            2,
             "handover",
             "skeleton-1",
             definition_digest,
@@ -312,7 +310,7 @@ def run() -> None:
     report_at = "2026-08-24T00:03:00.000Z"
     llm_export = {
         "kind": "harnest.project-export",
-        "envelopeVersion": 1,
+        "envelopeVersion": 2,
         "exportedAt": "2026-08-24T00:05:00.000Z",
         "project": {
             "interview": {
@@ -325,32 +323,12 @@ def run() -> None:
                 "examinerReport": {
                     "checks": [
                         {"id": check_id, "verdict": "pass", "note": "통과"}
-                        for check_id in (
-                            "ordering",
-                            "discrimination",
-                            "stability",
-                            "hack_resistance",
-                        )
+                        for check_id in ("stability", "hack_resistance")
                     ],
                     "overall": "pass",
                     "forDigest": llm_digest,
                     "judge": {"provider": "mock", "model": "모의 모델"},
                     "ranAt": report_at,
-                },
-                "calibration": {
-                    "pairs": [
-                        {
-                            "id": "hack-1",
-                            "kind": "hack_probe",
-                            "userChoice": "A",
-                            "examinerChoice": "A",
-                            "agreed": True,
-                        }
-                    ],
-                    "verdict": "pass",
-                    "forDigest": llm_digest,
-                    "forReportAt": report_at,
-                    "ranAt": "2026-08-24T00:04:00.000Z",
                 },
                 "approval": {
                     "forDigest": llm_digest,
@@ -452,8 +430,6 @@ def run() -> None:
     null_provenance_item["result"]["checkpoint"]["provenance"] = [None]
     malformed_report = json.loads(raw_llm_export)
     malformed_report["project"]["evaluation"]["examinerReport"] = {}
-    malformed_calibration = json.loads(raw_llm_export)
-    malformed_calibration["project"]["evaluation"]["calibration"] = {}
     missing_holdout_score = json.loads(raw_llm_export)
     missing_holdout_score["result"]["holdout"]["baseline"]["evaluation"].pop("score")
     null_holdout_case = json.loads(raw_llm_export)
@@ -472,8 +448,8 @@ def run() -> None:
     }
 
     invalid_exports = [
-        b'{"kind":"harnest.project-export","kind":"harnest.project-export","envelopeVersion":1}',
-        raw_export.replace(b'"envelopeVersion": 1', b'"envelopeVersion": 2', 1),
+        b'{"kind":"harnest.project-export","kind":"harnest.project-export","envelopeVersion":2}',
+        raw_export.replace(b'"envelopeVersion": 2', b'"envelopeVersion": 1', 1),
         export_bytes(missing_exported_at),
         export_bytes(wrong_digest_shape),
         export_bytes(wrong_interview_schema),
@@ -495,7 +471,6 @@ def run() -> None:
         export_bytes(null_tree_item),
         export_bytes(null_provenance_item),
         export_bytes(malformed_report),
-        export_bytes(malformed_calibration),
         export_bytes(missing_holdout_score),
         export_bytes(null_holdout_case),
         export_bytes(malformed_holdout_ids),

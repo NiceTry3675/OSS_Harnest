@@ -1,15 +1,13 @@
 /** 완료된 승인·실행을 휴대하거나 서버에 기록할 때 쓰는 정식 JSON 계약.
  *
  * 로컬 자동 복원용 ProjectSnapshot과 다르다. 이 봉투는 현재 승인본과 완료 결과만 담고,
- * 편집 중 상태·시험관 산출물·재검증 계수·API 키는 의도적으로 포함하지 않는다.
+ * 편집 중 상태·API 키는 의도적으로 포함하지 않는다.
  * 승인 증거는 definitionDigest를 참조하므로 digestScope 밖에서 forDigest로 결속한다. */
 
 import { sha256Canonical } from "./digest";
 import {
   approvalBlockers,
-  calibrationVerdict,
   worstVerdict,
-  type CalibrationResult,
   type ExaminerCheckId,
   type ExaminerReport,
 } from "./examiner";
@@ -18,7 +16,8 @@ import { SCORE_CEILING, type LoopCheckpoint, type LoopSpec } from "./loop";
 import { digestScope, type EvaluationPack } from "./pack";
 
 export const PROJECT_EXPORT_KIND = "harnest.project-export" as const;
-export const PROJECT_EXPORT_VERSION = 1 as const;
+/** v2 (2026-08-25): 캘리브레이션 제거, 검증 배터리를 stability·hack_resistance 2종으로 축소 */
+export const PROJECT_EXPORT_VERSION = 2 as const;
 
 export interface ApprovalBinding {
   /** 사용자가 승인한 Evaluation Pack의 definitionDigest */
@@ -31,8 +30,6 @@ export interface ApprovedEvaluationRecord {
   pack: EvaluationPack;
   /** 결정적 전용 템플릿에서는 null */
   examinerReport: ExaminerReport | null;
-  /** 결정적 전용 템플릿에서는 null */
-  calibration: CalibrationResult | null;
   approval: ApprovalBinding;
 }
 
@@ -90,8 +87,8 @@ export interface RunResultRecord<A = unknown> {
 /**
  * 완료 결과의 감사·보관용 단일 JSON 봉투.
  *
- * `problem`은 인터뷰 답변에서 파생되고, 시험관 artifacts는 승인 후 판정 근거가 아니므로 중복
- * 저장하지 않는다. 진행 중 프로젝트의 이식·재개 형식도 아니다.
+ * `problem`은 인터뷰 답변에서 파생되므로 중복 저장하지 않는다.
+ * 진행 중 프로젝트의 이식·재개 형식도 아니다.
  */
 export interface ProjectExportEnvelope<A = unknown> {
   kind: typeof PROJECT_EXPORT_KIND;
@@ -218,8 +215,6 @@ function jsonRepresentationIssues(
 }
 
 const REQUIRED_EXAMINER_CHECK_IDS = [
-  "ordering",
-  "discrimination",
   "stability",
   "hack_resistance",
 ] as const satisfies readonly ExaminerCheckId[];
@@ -235,7 +230,7 @@ function examinerCheckIssues(report: ExaminerReport): ContractIssue[] {
     : [
         issue(
           "project.evaluation.examinerReport.checks",
-          "ordering·discrimination·stability·hack_resistance 검사가 각각 정확히 한 번 필요합니다.",
+          "stability·hack_resistance 검사가 각각 정확히 한 번 필요합니다.",
         ),
       ];
 }
@@ -546,7 +541,6 @@ function copyPack(pack: EvaluationPack): EvaluationPack {
           kind: "deterministic_only",
           exemptions: {
             examinerReport: pack.judgeProcedure.exemptions.examinerReport,
-            calibration: pack.judgeProcedure.exemptions.calibration,
             pairwise: pack.judgeProcedure.exemptions.pairwise,
           },
         }
@@ -603,23 +597,6 @@ function copyExaminerReport(report: ExaminerReport | null): ExaminerReport | nul
     forDigest: report.forDigest,
     judge: { provider: report.judge.provider, model: report.judge.model },
     ranAt: report.ranAt,
-  };
-}
-
-function copyCalibration(calibration: CalibrationResult | null): CalibrationResult | null {
-  if (calibration === null) return null;
-  return {
-    pairs: calibration.pairs.map((pair) => ({
-      id: pair.id,
-      kind: pair.kind,
-      userChoice: pair.userChoice,
-      examinerChoice: pair.examinerChoice,
-      agreed: pair.agreed,
-    })),
-    verdict: calibration.verdict,
-    forDigest: calibration.forDigest,
-    forReportAt: calibration.forReportAt,
-    ranAt: calibration.ranAt,
   };
 }
 
@@ -710,7 +687,7 @@ export async function projectExportIssues(
 ): Promise<ContractIssue[]> {
   const issues: ContractIssue[] = [];
   const { interview, evaluation } = envelope.project;
-  const { pack, examinerReport, calibration, approval } = evaluation;
+  const { pack, examinerReport, approval } = evaluation;
 
   if (envelope.kind !== PROJECT_EXPORT_KIND) {
     issues.push(issue("kind", `지원하지 않는 형식입니다: ${String(envelope.kind)}`));
@@ -752,9 +729,6 @@ export async function projectExportIssues(
     if (examinerReport !== null) {
       issues.push(issue("project.evaluation.examinerReport", "결정적 전용 Pack에는 리포트를 붙이지 않습니다."));
     }
-    if (calibration !== null) {
-      issues.push(issue("project.evaluation.calibration", "결정적 전용 Pack에는 캘리브레이션을 붙이지 않습니다."));
-    }
   } else {
     if (!(["gemini", "vertex", "openai", "mock"] as const).includes(pack.judgeProcedure.judge.provider)) {
       issues.push(
@@ -772,7 +746,7 @@ export async function projectExportIssues(
         ),
       );
     }
-    for (const blocker of approvalBlockers(pack, examinerReport, calibration)) {
+    for (const blocker of approvalBlockers(pack, examinerReport)) {
       issues.push(issue("project.evaluation", blocker));
     }
   }
@@ -787,30 +761,6 @@ export async function projectExportIssues(
     }
     if (Number.isNaN(Date.parse(examinerReport.ranAt))) {
       issues.push(issue("project.evaluation.examinerReport.ranAt", "유효한 ISO 시각이어야 합니다."));
-    }
-  }
-
-  if (calibration !== null) {
-    if (calibration.forDigest !== pack.definitionDigest) {
-      issues.push(issue("project.evaluation.calibration.forDigest", "현재 Pack과 결속되지 않았습니다."));
-    }
-    if (examinerReport === null) {
-      issues.push(issue("project.evaluation.calibration.forReportAt", "결속할 검증 리포트가 없습니다."));
-    } else if (calibration.forReportAt !== examinerReport.ranAt) {
-      issues.push(issue("project.evaluation.calibration.forReportAt", "현재 검증 리포트 인스턴스와 다릅니다."));
-    }
-    if (
-      calibration.pairs.some(
-        (pair) => pair.agreed !== (pair.userChoice === pair.examinerChoice),
-      )
-    ) {
-      issues.push(issue("project.evaluation.calibration.pairs", "선택과 agreed 값이 서로 모순됩니다."));
-    }
-    if (calibration.verdict !== calibrationVerdict(calibration.pairs)) {
-      issues.push(issue("project.evaluation.calibration.verdict", "쌍 판정에서 계산한 verdict와 다릅니다."));
-    }
-    if (Number.isNaN(Date.parse(calibration.ranAt))) {
-      issues.push(issue("project.evaluation.calibration.ranAt", "유효한 ISO 시각이어야 합니다."));
     }
   }
 
@@ -848,7 +798,6 @@ export async function createProjectExportEnvelope<A>(
       evaluation: {
         pack: copyPack(input.project.evaluation.pack),
         examinerReport: copyExaminerReport(input.project.evaluation.examinerReport),
-        calibration: copyCalibration(input.project.evaluation.calibration),
         approval: {
           forDigest: input.project.evaluation.approval.forDigest,
           approvedAt: input.project.evaluation.approval.approvedAt,

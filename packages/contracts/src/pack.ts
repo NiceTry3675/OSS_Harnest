@@ -1,5 +1,5 @@
 /** Evaluation Pack — 승인 순간 동결되는 판정 절차 전체 (SPEC §3 원칙 4).
- *  결정적 전용 절차는 examinerReport·캘리브레이션에서 면제된다(SPEC §10). */
+ *  결정적 전용 절차는 examinerReport에서 면제된다(SPEC §10). */
 
 export interface CriterionDef {
   id: string;
@@ -27,12 +27,12 @@ export type JudgeProvider = "gemini" | "vertex" | "openai" | "mock";
 /** 결정적 전용 — 면제 사유를 화면에 정직하게 표시한다(SPEC §10). */
 export interface JudgeDeterministicOnly {
   kind: "deterministic_only";
-  exemptions: { examinerReport: string; calibration: string; pairwise: string };
+  exemptions: { examinerReport: string; pairwise: string };
 }
 
 /** 케이스 실측 채점 — responder는 산출물+케이스 질문만 본다(불변식).
  *  채택은 케이스 집계 스칼라 엄격 개선(SPEC §5.1.1).
- *  검증 리포트·캘리브레이션은 이 절차의 승인 전 요건이며 forDigest로 결속된다(./examiner.ts).
+ *  검증 리포트는 이 절차의 승인 전 요건이며 forDigest로 결속된다(./examiner.ts).
  *  리포트가 다이제스트를 참조하므로 digestScope에는 들어갈 수 없고, 현재는 팩 밖 별도 상태다. */
 export interface JudgeCaseAnswering {
   kind: "case_answering";

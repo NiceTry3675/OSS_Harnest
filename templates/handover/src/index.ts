@@ -88,6 +88,9 @@ export interface CompiledHandover {
   problem: HandoverProblem;
   pack: EvaluationPack;
   loopSpec: LoopSpec;
+  /** 설정의 산술적 성질에 대한 정적 안내 — 승인 화면이 그대로 표시한다.
+   *  (예: 기록 전체가 분량 상한 안 = 베끼기 방어(분량 게이트) 약화, 실측 교훈 ①) */
+  notices: string[];
 }
 
 export interface CompileOptions {
@@ -170,7 +173,7 @@ export async function compile(
     judgeProcedure: {
       kind: "case_answering",
       judge: { provider: opts.judgeProvider, model: opts.judgeModel },
-      // 검증 리포트·캘리브레이션은 승인 전 요건으로 구현됨(./examiner.ts) — forDigest 결속이라 팩 필드가 아니다
+      // 검증 리포트는 승인 전 요건으로 구현됨(./examiner.ts) — forDigest 결속이라 팩 필드가 아니다
       pairwiseNotice:
         "미적용 — 케이스 집계 스칼라가 엄격히 개선될 때만 채택합니다(SPEC §5.1.1)",
     },
@@ -192,7 +195,22 @@ export async function compile(
     seed: parseInt(definitionDigest.slice(0, 8), 16),
   };
 
-  return { problem, pack, loopSpec };
+  // 베끼기 방어 안내 — 가시 기록 전체가 상한 안에 들어가면 정답을 통째로 옮겨 적는 문서를
+  // 분량 게이트가 걸러내지 못한다(게이트 밴드 교훈 ①). LLM 호출 없는 두 숫자의 산술이므로
+  // 배터리 판정이 아니라 컴파일 시 정적 안내로 알린다.
+  const verbatimLength = visibleCases
+    .map((c) => `질문: ${c.question}\n답: ${c.expectedAnswer}`)
+    .join("\n\n").length;
+  const notices: string[] = [];
+  if (verbatimLength <= lengthCap) {
+    notices.push(
+      `기록 전체(약 ${verbatimLength.toLocaleString()}자)가 분량 상한 ${lengthCap.toLocaleString()}자 안에 들어갑니다 — ` +
+        "정답을 통째로 옮겨 적는 문서를 분량 게이트가 걸러내지 못하는 설정입니다. " +
+        "상한을 낮추면 베끼기 방어가 살아나며, 결과에서는 숨김 케이스 점수를 함께 확인하세요.",
+    );
+  }
+
+  return { problem, pack, loopSpec, notices };
 }
 
 export * from "./assist";
