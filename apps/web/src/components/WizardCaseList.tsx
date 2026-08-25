@@ -131,7 +131,7 @@ export function WizardCaseList({
       <p className="hint" style={{ marginTop: 8 }}>
         {minPairs}~{maxPairs}개.{" "}
         {settled
-          ? `지금은 뒤에서 ${hidden}개가 개선 과정에 숨겨지고 시작·종료 시에만 별도 채점됩니다.`
+          ? `지금은 뒤에서 ${hidden}개를 숨겨 두고, 시작할 때와 끝날 때만 따로 채점합니다.`
           : `${minPairs}개를 채우면 뒤쪽 몇 개가 숨겨질지 정해집니다.`}{" "}
         Shift+Enter로 줄바꿈.
       </p>
@@ -143,7 +143,7 @@ export function WizardCaseList({
             <div key={i}>
               {settled && i === hideFrom ? (
                 <div className="hide-mark">
-                  여기부터는 개선 과정에 숨기고 시작·종료 시에만 별도 채점합니다
+                  여기부터는 고치는 동안 숨겨 두고, 시작할 때와 끝날 때만 따로 채점합니다
                 </div>
               ) : null}
 

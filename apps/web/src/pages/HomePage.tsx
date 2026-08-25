@@ -11,7 +11,7 @@ function TrustOrb() {
     <div className="orb" aria-hidden="true">
       <div className="orb-inner">
         <div className="orb-score orb-state">기준 잠금</div>
-        <div className="orb-cap">같은 절차로 비교하고 숨김 검증</div>
+        <div className="orb-cap">같은 기준으로 비교하고, 숨긴 질문으로 확인</div>
         <div className="orb-track"><i /></div>
       </div>
     </div>

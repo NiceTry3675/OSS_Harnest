@@ -52,7 +52,7 @@ export function WizardBlueprint({
       {state.kind !== "ok" ? (
         <div>
           <p className="sub" style={{ marginBottom: 6 }}>
-            답변을 채우면 채점 기준과 필수 관문이 여기에 나타납니다.
+            답을 채우면 평가 기준과 반드시 지켜야 할 조건이 여기에 나타납니다.
           </p>
           {state.kind === "fail" && state.reason ? (
             <div className="hint">{state.reason}</div>
@@ -82,7 +82,7 @@ export function WizardBlueprint({
             <div className="bp-row is-seal">
               <span className="bp-ic">?</span>
               <div className="bp-body">
-                <b>검증 가드 · 숨김 검증</b>
+                <b>중간 점검 질문 · 숨긴 질문</b>
                 <p>{hp.note}</p>
               </div>
             </div>

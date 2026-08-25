@@ -50,14 +50,14 @@ export function SealPanel({ digest, children }: { digest: string; children: Reac
         </svg>
       </div>
 
-      <h2 className="seal-title">승인됨 · 동결</h2>
+      <h2 className="seal-title">승인 완료 · 잠김</h2>
       <p className="seal-sub">
-        동결된 기준은 여기서 수정할 수 없습니다. 바꾸려면 처음부터 새 기준을 만들어 다시
+        잠긴 기준은 여기서 고칠 수 없습니다. 바꾸려면 처음부터 새 기준을 만들어 다시
         승인해야 합니다.
       </p>
 
       <div className="seal-fp">
-        <span className="hint">동결 다이제스트</span>
+        <span className="hint">기준 지문</span>
         <code className="mono">{shown}<span className="seal-rest">{rest}</span></code>
       </div>
 
