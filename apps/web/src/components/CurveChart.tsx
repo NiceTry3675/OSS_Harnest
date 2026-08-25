@@ -11,6 +11,8 @@ interface CurveChartProps {
   adopted?: ReadonlySet<number>;
   /** x축 상한 고정(라이브 뷰의 축 안정용). 생략 시 데이터에 맞춤 */
   xMax?: number;
+  /** 실행 중이면 현재 지점을 강조한다 */
+  live?: boolean;
 }
 
 const H = 220;
@@ -19,13 +21,13 @@ const PAD_R = 14;
 const PAD_T = 14;
 const PAD_B = 26;
 const GRID_VALUES = [25, 50, 75, 100];
-const TITLE = "개선 곡선 — 라운드별 챔피언 점수";
+const TITLE = "점수 변화";
 
 function fmt(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(1);
 }
 
-export function CurveChart({ curve, adopted, xMax }: CurveChartProps) {
+export function CurveChart({ curve, adopted, xMax, live }: CurveChartProps) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(640);
   const [hover, setHover] = useState<number | null>(null);
@@ -45,7 +47,7 @@ export function CurveChart({ curve, adopted, xMax }: CurveChartProps) {
     <h2 style={{ margin: "0 0 10px", fontSize: 14, color: "var(--ink-2)" }}>{TITLE}</h2>
   );
 
-  if (curve.length <= 1) {
+  if (curve.length === 0) {
     return (
       <div ref={wrapRef}>
         {title}
@@ -59,7 +61,7 @@ export function CurveChart({ curve, adopted, xMax }: CurveChartProps) {
             fontSize: 13,
           }}
         >
-          실행하면 곡선이 그려집니다
+          실행을 시작하면 점수가 여기에 그려집니다
         </div>
       </div>
     );
@@ -73,6 +75,11 @@ export function CurveChart({ curve, adopted, xMax }: CurveChartProps) {
   const y = (score: number) => PAD_T + (1 - score / 100) * plotH;
 
   const points = curve.map((v, i) => `${x(i)},${y(v)}`).join(" ");
+  // 시작 점수와 현재 점수 사이를 칠해, 얼마나 올라왔는지가 면적으로 보이게 한다
+  const baseline = curve[0];
+  const current = curve[lastRound];
+  const gained = current > baseline;
+  const areaPoints = `${points} ${x(lastRound)},${y(baseline)} ${x(0)},${y(baseline)}`;
   const tickStep = Math.max(1, Math.ceil(domainMax / 6));
   const ticks: number[] = [];
   for (let t = 0; t <= domainMax; t += tickStep) ticks.push(t);
@@ -153,17 +160,51 @@ export function CurveChart({ curve, adopted, xMax }: CurveChartProps) {
             strokeDasharray="3 3"
           />
         )}
+        {gained && (
+          <polygon points={areaPoints} fill="var(--chart-line)" fillOpacity={0.1} />
+        )}
+        <line
+          x1={PAD_L}
+          x2={PAD_L + plotW}
+          y1={y(baseline)}
+          y2={y(baseline)}
+          stroke="var(--ink-3)"
+          strokeWidth={1}
+          strokeDasharray="4 4"
+        />
+        <text
+          x={PAD_L + 4}
+          y={y(baseline) - 6}
+          fontSize={11}
+          fill="var(--ink-3)"
+        >
+          시작 {fmt(baseline)}점
+        </text>
         <polyline
           points={points}
           fill="none"
           stroke="var(--chart-line)"
           strokeWidth={2}
+          strokeLinejoin="round"
+          strokeLinecap="round"
         />
         {curve.map((v, i) =>
-          adopted?.has(i) ? (
+          adopted?.has(i) && i !== lastRound ? (
             <circle key={i} cx={x(i)} cy={y(v)} r={4} fill="var(--chart-line)" />
           ) : null,
         )}
+        {/* 현재 지점 — 실행 중에는 맥박이 함께 퍼진다 */}
+        {live && (
+          <circle className="curve-now-halo" cx={x(lastRound)} cy={y(current)} r={5} fill="var(--chart-line)" />
+        )}
+        <circle
+          cx={x(lastRound)}
+          cy={y(current)}
+          r={5}
+          fill="var(--chart-line)"
+          stroke="var(--surface)"
+          strokeWidth={2}
+        />
       </svg>
       {hover !== null && hoverScore !== null && hoverScore !== undefined && (
         <div
@@ -182,7 +223,7 @@ export function CurveChart({ curve, adopted, xMax }: CurveChartProps) {
           }}
         >
           <span style={{ color: "var(--ink-2)" }}>
-            {hover === 0 ? "기준선(라운드 0)" : `라운드 ${hover}`}
+            {hover === 0 ? "시작" : `${hover}회차`}
           </span>{" "}
           · {fmt(hoverScore)}점
           {hover !== 0 && (

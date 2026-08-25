@@ -59,6 +59,8 @@ export async function runExaminerBattery(
   pack: EvaluationPack,
   llm: LlmClient,
   onProgress?: (message: string) => void,
+  /** 검사 하나가 끝날 때마다 호출된다 — 화면이 결과를 기다리지 않고 바로 보여줄 수 있다 */
+  onCheck?: (check: ExaminerCheckResult) => void,
 ): Promise<ExaminerRun> {
   // 서브샘플 문제: 채점 메커니즘은 동결 절차 그대로, 케이스 수만 상한 적용.
   // holdoutCases를 비워 이 파일의 어떤 경로도 홀드아웃을 만질 수 없게 한다(이중 방어).
@@ -87,9 +89,6 @@ export async function runExaminerBattery(
   const good = await scorer(goodDoc);
   const degraded = await scorer(degradedDoc);
   const empty = await scorer(emptyDoc);
-  onProgress?.("같은 문서를 다시 채점해 안정성을 확인하는 중…");
-  const goodRepeat = await scorer(goodDoc);
-
   // ① 순서 — 좋은 문서 > 훼손본 > 빈 문서
   const g = good.total;
   const d = degraded.total;
@@ -110,7 +109,12 @@ export async function runExaminerBattery(
         ? check("discrimination", "warn", "좋은 문서와 빈 문서의 간격이 좁습니다 — 케이스 기록을 더 채우면 나아집니다.")
         : check("discrimination", "fail", "좋은 문서와 빈 문서를 거의 구별하지 못합니다.");
 
+  onCheck?.(ordering);
+  onCheck?.(discrimination);
+
   // ③ 안정성 — 같은 문서 재채점의 흔들림
+  onProgress?.("같은 문서를 다시 채점해 안정성을 확인하는 중…");
+  const goodRepeat = await scorer(goodDoc);
   const drift = Math.abs(g - goodRepeat.total);
   const stability =
     drift <= 5
@@ -118,6 +122,8 @@ export async function runExaminerBattery(
       : drift <= 15
         ? check("stability", "warn", "재채점에서 점수가 다소 흔들립니다 — 판정을 참고 지표로 함께 보세요.")
         : check("stability", "fail", "재채점마다 점수가 크게 흔들립니다 — 이 저지 모델은 신뢰하기 어렵습니다.");
+
+  onCheck?.(stability);
 
   // ④ 꼼수 내성 — 큐레이션 프로브 4종 (장황함·통째 베끼기·날조·아첨)
   onProgress?.("알려진 꼼수 4종으로 기준을 찔러보는 중…");
@@ -191,6 +197,8 @@ export async function runExaminerBattery(
       ? "알려진 꼼수 4종(장황함·통째 베끼기·날조·아첨)이 모두 방어되었습니다."
       : probeNotes.join(" · ") + ".",
   );
+
+  onCheck?.(hackResistance);
 
   const checks = [ordering, discrimination, stability, hackResistance];
   const report: ExaminerReport = {

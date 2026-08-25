@@ -29,6 +29,8 @@ import {
 } from "../lib/llm";
 import { markUnavailableRestoredHoldout } from "../lib/project-snapshot";
 import { isHoldoutPhasePending, isHoldoutSettled } from "../lib/project-export";
+import { setFlowStep } from "../lib/flowStep";
+import { ScoreHero } from "../components/ScoreHero";
 import { CurveChart } from "../components/CurveChart";
 import { ExperimentTree } from "../components/ExperimentTree";
 import { ProviderCredentialInput } from "../components/ProviderCredentialInput";
@@ -60,16 +62,11 @@ function holdoutLabel(result: HoldoutEvaluation, phase: string): string {
     : `숨김 케이스(${phase}): ${fmt(result.score)}점`;
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="grow">
-      <div style={{ fontSize: 12, color: "var(--ink-3)" }}>{label}</div>
-      <div style={{ fontSize: 18, fontWeight: 600 }}>{value}</div>
-    </div>
-  );
-}
-
 export function ConsolePage() {
+  useEffect(() => {
+    setFlowStep({ kind: "run" });
+  }, []);
+
   const {
     templateId,
     compiled,
@@ -420,24 +417,16 @@ export function ConsolePage() {
         </div>
       )}
 
+      <ScoreHero
+        score={checkpoint ? checkpoint.championScore : null}
+        baseline={checkpoint && checkpoint.curve.length > 0 ? checkpoint.curve[0] : null}
+        round={checkpoint?.round ?? 0}
+        maxRounds={compiled.loopSpec.maxRounds}
+        statusLabel={STATUS_LABEL[status] ?? status}
+        running={status === "running"}
+      />
+
       <div className="card">
-        <div className="row">
-          <Stat
-            label="라운드"
-            value={`${checkpoint?.round ?? 0} / ${compiled.loopSpec.maxRounds}`}
-          />
-          <Stat label="상태" value={STATUS_LABEL[status] ?? status} />
-          <Stat
-            label="현재 챔피언 점수"
-            value={checkpoint ? `${fmt(checkpoint.championScore)}점` : "—"}
-          />
-          <Stat
-            label="기준선(라운드 0) 점수"
-            value={
-              checkpoint && checkpoint.curve.length > 0 ? `${fmt(checkpoint.curve[0])}점` : "—"
-            }
-          />
-        </div>
         {holdout.baseline !== null && (
           <div style={{ marginTop: 10 }}>
             <span className={holdout.baseline.gateRejected ? "badge muted" : "badge"}>
@@ -466,7 +455,7 @@ export function ConsolePage() {
             {maxCallsPerRun > 0 ? ` · 실행 1회 호출 예산 ${maxCallsPerRun}회` : ""}
           </p>
         )}
-        <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+        <div className="run-controls">
           <button
             className="primary"
             onClick={start}
@@ -501,13 +490,21 @@ export function ConsolePage() {
         </div>
       )}
 
-      <div className="card">
-        <CurveChart curve={checkpoint?.curve ?? []} adopted={adopted} xMax={compiled.loopSpec.maxRounds} />
-      </div>
-
-      <div className="card">
-        <h2 style={{ margin: "0 0 10px", fontSize: 14, color: "var(--ink-2)" }}>실험 기록</h2>
-        <ExperimentTree tree={checkpoint?.tree ?? []} />
+      {/* 점수·곡선은 왼쪽, 회차 기록은 오른쪽 — 한 화면에서 같이 읽힌다 */}
+      <div className="deck">
+        <div className="deck-main">
+          <CurveChart
+            curve={checkpoint?.curve ?? []}
+            adopted={adopted}
+            // 실행 중에만 축을 최대 회차로 고정한다 — 끝난 뒤에는 빈 오른쪽을 남기지 않는다
+            xMax={status === "running" ? compiled.loopSpec.maxRounds : undefined}
+            live={status === "running"}
+          />
+        </div>
+        <div className="deck-side">
+          <h2 className="deck-h">시도한 기록</h2>
+          <ExperimentTree tree={checkpoint?.tree ?? []} />
+        </div>
       </div>
     </div>
   );

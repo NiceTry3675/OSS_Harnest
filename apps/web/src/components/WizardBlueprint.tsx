@@ -46,8 +46,9 @@ export function WizardBlueprint({
   const hp = state.kind === "ok" ? state.pack.holdoutPolicy : null;
 
   return (
-    <div className="card" style={{ width: 380, flexShrink: 0 }}>
-      <h2 style={{ marginTop: 0 }}>채점 기준 미리보기</h2>
+    <div className="card blueprint">
+      <h2 style={{ marginTop: 0, marginBottom: 2 }}>이렇게 채점됩니다</h2>
+      <p className="hint" style={{ marginTop: 0, marginBottom: 4 }}>입력할수록 채워집니다</p>
       {state.kind !== "ok" ? (
         <div>
           <p className="sub" style={{ marginBottom: 6 }}>
@@ -59,41 +60,45 @@ export function WizardBlueprint({
         </div>
       ) : (
         <div>
-          <table className="grid">
-            <thead>
-              <tr>
-                <th style={{ textAlign: "left" }}>기준</th>
-                <th>가중치</th>
-              </tr>
-            </thead>
-            <tbody>
-              {state.pack.criteria.map((c) => (
-                <tr key={c.id}>
-                  <td style={{ textAlign: "left" }}>{c.label}</td>
-                  <td>{Math.round(c.weight * 100)}%</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <h2 style={{ fontSize: 14, margin: "14px 0 6px" }}>필수 관문</h2>
-          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
-            {state.pack.gates.map((g) => (
-              <li key={g.id}>
-                {g.label} <span className="badge muted">미충족 시 탈락</span>
-              </li>
-            ))}
-          </ul>
-          {jp && jp.kind === "case_answering" ? (
-            <div style={{ marginTop: 12, fontSize: 13 }}>
-              <strong>채점 모델</strong> — {PROVIDER_LABEL[jp.judge.provider]} · {jp.judge.model}
+          {state.pack.criteria.map((c, n) => (
+            <div key={c.id} className="bp-row">
+              <span className="bp-ic">{n + 1}</span>
+              <div className="bp-body">
+                <b>{c.label}</b>
+                <p>가중치 {Math.round(c.weight * 100)}%</p>
+              </div>
+            </div>
+          ))}
+          {state.pack.gates.map((g) => (
+            <div key={g.id} className="bp-row is-gate">
+              <span className="bp-ic">!</span>
+              <div className="bp-body">
+                <b>{g.label}</b>
+                <p>미충족 시 탈락</p>
+              </div>
+            </div>
+          ))}
+          {hp && hp.mode === "auto_tail" ? (
+            <div className="bp-row is-seal">
+              <span className="bp-ic">?</span>
+              <div className="bp-body">
+                <b>숨김 검증</b>
+                <p>{hp.note}</p>
+              </div>
             </div>
           ) : null}
-          {hp && hp.mode === "auto_tail" ? (
-            <div className="hint" style={{ marginTop: 8 }}>{hp.note}</div>
+          {jp && jp.kind === "case_answering" ? (
+            <div className="bp-row">
+              <span className="bp-ic">＊</span>
+              <div className="bp-body">
+                <b>채점 모델</b>
+                <p>
+                  {PROVIDER_LABEL[jp.judge.provider]} · {jp.judge.model}
+                </p>
+              </div>
+            </div>
           ) : null}
-          <p className="hint" style={{ marginTop: 12 }}>
-            이 기준은 다음 단계에서 당신이 직접 승인합니다.
-          </p>
+          <p className="hint">이 기준은 다음 단계에서 당신이 직접 승인합니다.</p>
         </div>
       )}
     </div>
