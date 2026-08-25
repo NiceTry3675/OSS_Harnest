@@ -188,7 +188,8 @@ export function WizardPage() {
   const [submitting, setSubmitting] = useState(false);
   // 기본값을 공급자로 둔다 — 키 칸이 처음부터 보여야 한다는 요청
   const [judgeChoice, setJudgeChoice] = useState<JudgeChoice>("openai");
-  const [assistChoice, setAssistChoice] = useState<JudgeChoice>("mock");
+  // 초안은 실제 모델로 뽑아야 쓸 만하다 — 모의 모델은 화면 확인용이라 기본값에서 뺀다
+  const [assistChoice, setAssistChoice] = useState<JudgeChoice>("gemini");
   const [assistBusy, setAssistBusy] = useState(false);
   // 클릭 1회에 요청할 초안 개수 — 남은 슬롯까지 자유롭게 고른다(호출은 개수와 무관하게 클릭당 1회)
   const [assistCount, setAssistCount] = useState(3);
@@ -549,11 +550,14 @@ export function WizardPage() {
                 title="개발 서버에서만 보입니다"
                 onClick={() => {
                   setError(null);
-                  setDraft((d) => ({ ...d, ...(entry.devSample as Record<string, DraftValue>) }));
-                  setStep(questions.length - 1);
+                  // 지금 단계의 답만 채운다 — 어떻게 채워지는지 보고 직접 넘길 수 있어야 한다
+                  const sample = entry.devSample as Record<string, DraftValue>;
+                  if (!(q.id in sample)) return;
+                  setDraft((d) => ({ ...d, [q.id]: sample[q.id] }));
                 }}
+                disabled={!(q.id in (entry.devSample as Record<string, DraftValue>))}
               >
-                예시 채우기
+                이 단계 예시 채우기
               </button>
             ) : null}
           </div>

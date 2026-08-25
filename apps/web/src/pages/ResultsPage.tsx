@@ -178,6 +178,20 @@ export function ResultsPage() {
   const baselineHoldoutError = holdout.errors?.baseline ?? null;
   const finalHoldoutError = holdout.errors?.final ?? null;
   const ArtifactView = entry.ArtifactView;
+
+  /** 산출물을 사람이 여는 파일로 내려받는다 — 기록 전체를 담는 JSON 내보내기와 다르다 */
+  const downloadArtifact = () => {
+    if (!entry.exportArtifact) return;
+    const file = entry.exportArtifact(compiled.problem, checkpoint.champion);
+    const url = URL.createObjectURL(new Blob([file.text], { type: file.mime }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = file.filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
   const holdoutDelta =
     holdout.baseline !== null &&
     !holdout.baseline.gateRejected &&
@@ -370,7 +384,14 @@ export function ResultsPage() {
         </div>
       )}
 
-      <h2>산출물</h2>
+      <div className="artifact-head">
+        <h2>산출물</h2>
+        {entry.exportArtifact ? (
+          <button className="primary" onClick={downloadArtifact}>
+            문서 내려받기
+          </button>
+        ) : null}
+      </div>
       <div className="card">
         <ArtifactView problem={compiled.problem} artifact={checkpoint.champion} />
       </div>

@@ -446,3 +446,12 @@ label.dropzone input[type="file"] { display: none; }
   font-size: var(--t-xs); font-weight: 600;
 }
 .picker-more:hover:not(:disabled) { color: var(--accent); background: transparent; transform: none; }
+
+/* 산출물 머리 — 제목 옆에 내려받기 */
+.artifact-head {
+  display: flex; align-items: center; gap: var(--s-4);
+  margin: var(--s-6) 0 var(--s-3); flex-wrap: wrap;
+}
+.artifact-head h2 { margin: 0; }
+.artifact-head button { margin-left: auto; height: 46px; padding: 0 22px; font-size: var(--t-sm); }
+
