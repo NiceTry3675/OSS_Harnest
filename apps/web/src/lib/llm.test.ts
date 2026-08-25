@@ -296,6 +296,57 @@ describe("Vertex 서비스 계정 어댑터", () => {
     });
   });
 
+  it("여러 텍스트 part를 합치고 공개된 thinking part는 답변에서 제외한다", async () => {
+    const raw = await vertexCredential();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(tokenResponse())
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  { text: "내부 생각", thought: true },
+                  { thoughtSignature: "서명만 있는 part" },
+                  { text: "최종" },
+                  { text: " 응답" },
+                ],
+              },
+              finishReason: "STOP",
+            },
+          ],
+        }),
+      } as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createVertexClient(raw, "gemini-3.7-flash", { retryBaseMs: 0 });
+    await expect(client.complete("요청")).resolves.toBe("최종 응답");
+  });
+
+  it("thinking이 출력 한도를 소진하면 Vertex 종료 사유를 보존한다", async () => {
+    const raw = await vertexCredential();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(tokenResponse())
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [{ content: { parts: [] }, finishReason: "MAX_TOKENS" }],
+          usageMetadata: { thoughtsTokenCount: 16 },
+        }),
+      } as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createVertexClient(raw, "gemini-3.7-flash", { retryBaseMs: 0 });
+    await expect(client.complete("요청")).rejects.toThrow(
+      "출력 토큰 한도에 도달해 텍스트를 만들지 못했습니다 (thinking 16 tokens)",
+    );
+  });
+
   it("만료 60초 전에는 access token을 갱신한다", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-25T00:00:00Z"));
@@ -532,6 +583,28 @@ describe("승인 전 BYO 1콜 연결 테스트", () => {
       model: "gpt-test",
       temperature: 0,
       max_output_tokens: 16,
+    });
+  });
+
+  it("Gemini 3.7 Vertex 연결 테스트는 low thinking과 충분한 출력 한도를 쓴다", async () => {
+    const raw = await vertexCredential();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(tokenResponse())
+      .mockResolvedValueOnce(successResponse("OK"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      testByoConnection("vertex", raw, "gemini-3.7-flash"),
+    ).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [, vertexInit] = fetchMock.mock.calls[1];
+    expect(JSON.parse(String(vertexInit?.body))).toMatchObject({
+      generationConfig: {
+        temperature: 1,
+        maxOutputTokens: 1024,
+        thinkingConfig: { thinkingLevel: "LOW" },
+      },
     });
   });
 

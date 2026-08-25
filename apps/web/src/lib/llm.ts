@@ -32,6 +32,8 @@ export interface LlmRequestOptions {
   requestTimeoutMs?: number;
   maxAttempts?: number;
   retryBaseMs?: number;
+  /** Gemini 3 연결 확인처럼 추론량을 제한해야 하는 호출에서만 지정한다. */
+  thinkingLevel?: "LOW" | "MEDIUM" | "HIGH";
 }
 
 export type GeminiClientOptions = LlmRequestOptions;
@@ -118,6 +120,58 @@ function wait(ms: number): Promise<void> {
   return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
 }
 
+type GeminiResponse = {
+  candidates?: Array<{
+    content?: { parts?: Array<{ text?: unknown; thought?: unknown }> };
+    finishReason?: unknown;
+  }>;
+  promptFeedback?: { blockReason?: unknown };
+  usageMetadata?: { thoughtsTokenCount?: unknown };
+};
+
+/** 텍스트 part가 여러 개인 응답을 합치고, 정상 HTTP 응답 안의 중단 사유를 보존한다. */
+function geminiOutputText(data: GeminiResponse, label: string): string {
+  const candidate = data.candidates?.[0];
+  const text = (candidate?.content?.parts ?? [])
+    .filter((part) => part.thought !== true && typeof part.text === "string")
+    .map((part) => part.text as string)
+    .join("");
+  if (text.length > 0) return text;
+
+  const finishReason =
+    typeof candidate?.finishReason === "string" ? candidate.finishReason : null;
+  const thoughtsTokenCount =
+    typeof data.usageMetadata?.thoughtsTokenCount === "number"
+      ? data.usageMetadata.thoughtsTokenCount
+      : null;
+  if (finishReason === "MAX_TOKENS") {
+    throw new Error(
+      `${label} 응답이 출력 토큰 한도에 도달해 텍스트를 만들지 못했습니다` +
+        `${thoughtsTokenCount === null ? "" : ` (thinking ${thoughtsTokenCount} tokens)`}`,
+    );
+  }
+  if (finishReason !== null) {
+    throw new Error(`${label} 응답이 텍스트 없이 중단되었습니다 (${finishReason})`);
+  }
+  const blockReason = data.promptFeedback?.blockReason;
+  if (typeof blockReason === "string") {
+    throw new Error(`${label} 프롬프트가 차단되었습니다 (${blockReason})`);
+  }
+  throw new Error(`${label} 응답에 텍스트 없음`);
+}
+
+function geminiGenerationConfig(
+  temperature: number,
+  maxOutputTokens: number,
+  thinkingLevel?: LlmRequestOptions["thinkingLevel"],
+): Record<string, unknown> {
+  return {
+    temperature,
+    maxOutputTokens,
+    ...(thinkingLevel ? { thinkingConfig: { thinkingLevel } } : {}),
+  };
+}
+
 export function createGeminiClient(
   apiKey: string,
   model = "gemini-3.7-flash",
@@ -133,10 +187,11 @@ export function createGeminiClient(
     async complete(prompt, opts) {
       const body = JSON.stringify({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: opts?.temperature ?? 0.7,
-          maxOutputTokens: opts?.maxOutputTokens ?? 8192,
-        },
+        generationConfig: geminiGenerationConfig(
+          opts?.temperature ?? 0.7,
+          opts?.maxOutputTokens ?? 8192,
+          options.thinkingLevel,
+        ),
       });
       let lastError: Error = new Error("LLM 호출 실패");
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -173,11 +228,9 @@ export function createGeminiClient(
           continue;
         }
 
-        let data: {
-          candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-        };
+        let data: GeminiResponse;
         try {
-          data = (await res.json()) as typeof data;
+          data = (await res.json()) as GeminiResponse;
         } catch {
           clearTimeout(timeout);
           if (controller.signal.aborted) {
@@ -189,9 +242,7 @@ export function createGeminiClient(
           throw new Error("Gemini 응답 JSON을 해석할 수 없습니다.");
         }
         clearTimeout(timeout);
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (typeof text !== "string") throw new Error("Gemini 응답에 텍스트 없음");
-        return text;
+        return geminiOutputText(data, "Gemini");
       }
       throw lastError;
     },
@@ -320,10 +371,11 @@ export function createVertexClient(
     async complete(prompt, opts) {
       const body = JSON.stringify({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: opts?.temperature ?? 0.7,
-          maxOutputTokens: opts?.maxOutputTokens ?? 8192,
-        },
+        generationConfig: geminiGenerationConfig(
+          opts?.temperature ?? 0.7,
+          opts?.maxOutputTokens ?? 8192,
+          options.thinkingLevel,
+        ),
       });
       const project = encodeURIComponent(credential.project_id);
       const modelId = encodeURIComponent(model);
@@ -372,11 +424,9 @@ export function createVertexClient(
           continue;
         }
 
-        let data: {
-          candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-        };
+        let data: GeminiResponse;
         try {
-          data = (await res.json()) as typeof data;
+          data = (await res.json()) as GeminiResponse;
         } catch {
           clearTimeout(timeout);
           if (controller.signal.aborted) {
@@ -388,9 +438,7 @@ export function createVertexClient(
           throw new Error("Vertex AI 응답 JSON을 해석할 수 없습니다.");
         }
         clearTimeout(timeout);
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (typeof text !== "string") throw new Error("Vertex AI 응답에 텍스트 없음");
-        return text;
+        return geminiOutputText(data, "Vertex AI");
       }
       throw lastError;
     },
@@ -656,10 +704,11 @@ export function createSharedGeminiClient(
     async complete(prompt, opts) {
       const body = JSON.stringify({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: opts?.temperature ?? 0.7,
-          maxOutputTokens: opts?.maxOutputTokens ?? 8192,
-        },
+        generationConfig: geminiGenerationConfig(
+          opts?.temperature ?? 0.7,
+          opts?.maxOutputTokens ?? 8192,
+          options.thinkingLevel,
+        ),
       });
       let lastError: Error = new Error("LLM 호출 실패");
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -695,11 +744,9 @@ export function createSharedGeminiClient(
           continue;
         }
 
-        let data: {
-          candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-        };
+        let data: GeminiResponse;
         try {
-          data = (await res.json()) as typeof data;
+          data = (await res.json()) as GeminiResponse;
         } catch {
           clearTimeout(timeout);
           if (controller.signal.aborted) {
@@ -711,9 +758,7 @@ export function createSharedGeminiClient(
           throw new Error("Gemini(공유) 응답 JSON을 해석할 수 없습니다.");
         }
         clearTimeout(timeout);
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (typeof text !== "string") throw new Error("Gemini(공유) 응답에 텍스트 없음");
-        return text;
+        return geminiOutputText(data, "Gemini(공유)");
       }
       throw lastError;
     },
@@ -786,15 +831,20 @@ export async function testByoConnection(
   credential: string,
   model: string,
 ): Promise<void> {
+  const isGemini3 = provider !== "openai" && /^gemini-3(?:[.-]|$)/.test(model);
   const options: LlmRequestOptions = {
     requestTimeoutMs: CONNECTION_TEST_TIMEOUT_MS,
     maxAttempts: 1,
     retryBaseMs: 0,
+    ...(isGemini3 ? { thinkingLevel: "LOW" as const } : {}),
   };
   const client = createByoClient(provider, credential, model, options);
 
   try {
-    await client.complete(CONNECTION_TEST_PROMPT, { temperature: 0, maxOutputTokens: 16 });
+    await client.complete(CONNECTION_TEST_PROMPT, {
+      temperature: isGemini3 ? 1 : 0,
+      maxOutputTokens: isGemini3 ? 1024 : 16,
+    });
   } catch (error) {
     throw connectionTestError(provider, error);
   }
@@ -838,11 +888,13 @@ export async function testSharedConnection(
   model: string,
   apiBase?: string,
 ): Promise<void> {
+  const isGemini3 = provider === "gemini" && /^gemini-3(?:[.-]|$)/.test(model);
   const options: SharedProxyOptions = {
     requestTimeoutMs: CONNECTION_TEST_TIMEOUT_MS,
     maxAttempts: 1,
     retryBaseMs: 0,
     apiBase,
+    ...(isGemini3 ? { thinkingLevel: "LOW" as const } : {}),
   };
   const client =
     provider === "openai"
@@ -850,7 +902,10 @@ export async function testSharedConnection(
       : createSharedGeminiClient(model, options);
 
   try {
-    await client.complete(CONNECTION_TEST_PROMPT, { temperature: 0, maxOutputTokens: 16 });
+    await client.complete(CONNECTION_TEST_PROMPT, {
+      temperature: isGemini3 ? 1 : 0,
+      maxOutputTokens: isGemini3 ? 1024 : 16,
+    });
   } catch (error) {
     throw connectionTestError(provider, error);
   }
