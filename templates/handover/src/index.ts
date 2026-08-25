@@ -11,19 +11,26 @@ import { digestScope, sha256Canonical } from "@harnest/contracts";
 export const TEMPLATE_ID = "handover";
 export const TEMPLATE_NAME = "인수인계·온보딩 문서";
 
-/** 현재 비용 상한 — 케이스당 라운드마다 2콜(responder+grader). */
-export const MAX_CASES = 9;
+/** 케이스 수 상한 — 배치 채점(라운드당 3콜)으로 콜 수는 케이스 수와 무관해졌다.
+ *  이 상한은 비용이 아니라 프롬프트 분량(케이스 전체가 생성·채점 프롬프트에 실린다)과
+ *  입력·검토 부담을 묶는 값이다. */
+export const MAX_CASES = 30;
 export const MIN_CASES = 4;
 
 /** 참고 자료 문자 수 상한 — 서버 선택 저장의 봉투 상한(1 MiB)과 매 라운드 생성 프롬프트에
  *  material이 통째로 실리는 비용 구조를 고려한 값. 질문 선언이 정본, compile이 재검증한다. */
 export const MATERIAL_MAX_CHARS = 100_000;
 
+/** 분량 상한(자) 허용 범위 — 생성 출력 토큰 예산(runtime의 maxOutputTokensFor)과 함께
+ *  움직인다. 상한을 더 올리려면 벤더별 최대 출력 토큰부터 확인할 것. */
+export const LENGTH_CAP_MIN = 500;
+export const LENGTH_CAP_MAX = 20_000;
+export const LENGTH_CAP_DEFAULT = 8_000;
+
 /** 실행 1회(라운드 0 + 루프 + 홀드아웃 2회 채점)의 모델 호출 예산 (SPEC §5.2).
- *  최대 구성(가시 6·홀드아웃 3·라운드 0+8라운드)에서 케이스당 3콜(responder+grader+형식
- *  재시도)이 전부 발생해도 (8+1)×(1+6×3) + 2×3×3 = 189회다. 220은 정상 실행에서
- *  절대 걸리지 않는 백스톱이다. */
-export const MAX_CALLS_PER_RUN = 220;
+ *  배치 채점 1회는 최악 4콜(responder+grader+형식 재시도 각 1회)이다. 라운드 0+8라운드에서
+ *  전부 발생해도 (8+1)×(1+4) + 2×4 = 53회다. 80은 정상 실행에서 절대 걸리지 않는 백스톱이다. */
+export const MAX_CALLS_PER_RUN = 80;
 
 export interface HandoverProblem {
   material: string;
@@ -64,10 +71,10 @@ export const questions: Question[] = [
     role: "criteria",
     type: "number",
     label: "문서 최대 분량 (자)",
-    help: "이 분량을 넘는 문서는 실격 처리됩니다 (500~8000자)",
-    min: 500,
-    max: 8000,
-    defaultValue: 2000,
+    help: `이 분량을 넘는 문서는 실격 처리됩니다 (${LENGTH_CAP_MIN}~${LENGTH_CAP_MAX.toLocaleString()}자). 기록 전체가 상한 안에 들어갈 만큼 넉넉하면 베끼기 방어(분량 게이트)가 약해집니다`,
+    min: LENGTH_CAP_MIN,
+    max: LENGTH_CAP_MAX,
+    defaultValue: LENGTH_CAP_DEFAULT,
   },
 ];
 
@@ -89,7 +96,7 @@ export async function compile(
 ): Promise<CompiledHandover> {
   const material = String(submission.answers["material"] ?? "").trim();
   const rawCases = submission.answers["cases"];
-  const lengthCap = Number(submission.answers["lengthCap"] ?? 2000);
+  const lengthCap = Number(submission.answers["lengthCap"] ?? LENGTH_CAP_DEFAULT);
 
   if (!Array.isArray(rawCases)) throw new Error("질문·답 기록을 입력해 주세요.");
   const cases: CaseDef[] = rawCases
@@ -106,9 +113,13 @@ export async function compile(
     .filter((c) => c.question.length > 0 && c.expectedAnswer.length > 0);
 
   if (cases.length < MIN_CASES) throw new Error(`질문·답 쌍이 ${MIN_CASES}개 이상 필요합니다.`);
-  if (cases.length > MAX_CASES) throw new Error(`질문·답 쌍은 최대 ${MAX_CASES}개입니다 (비용 상한).`);
-  if (!Number.isInteger(lengthCap) || lengthCap < 500 || lengthCap > 8000) {
-    throw new Error("문서 최대 분량은 500~8000자여야 합니다.");
+  if (cases.length > MAX_CASES) {
+    throw new Error(`질문·답 쌍은 최대 ${MAX_CASES}개입니다 (프롬프트 분량 상한).`);
+  }
+  if (!Number.isInteger(lengthCap) || lengthCap < LENGTH_CAP_MIN || lengthCap > LENGTH_CAP_MAX) {
+    throw new Error(
+      `문서 최대 분량은 ${LENGTH_CAP_MIN}~${LENGTH_CAP_MAX.toLocaleString()}자여야 합니다.`,
+    );
   }
   if (material.length > MATERIAL_MAX_CHARS) {
     throw new Error(
@@ -168,7 +179,7 @@ export async function compile(
   const pack: EvaluationPack = { ...base, definitionDigest };
 
   const loopSpec: LoopSpec = {
-    // LLM 비용: 라운드당 (1 생성 + 가시×2 채점)콜 — 짧게 돌리고 정체로 끊는다
+    // LLM 비용: 라운드당 (1 생성 + 배치 채점 2)콜 — 짧게 돌리고 정체로 끊는다
     maxRounds: 8,
     plateauRounds: 4,
     adoptionRule: "scalar_strict",

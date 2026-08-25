@@ -26,9 +26,10 @@ import {
   buildVerbosityProbe,
 } from "./probes";
 import { oneshotPrompt } from "./prompts";
-import { createScorer, gradeResponse, type LlmClient } from "./runtime";
+import { createScorer, gradeResponse, maxOutputTokensFor, type LlmClient } from "./runtime";
 
-/** 배터리 채점 케이스 상한 — 사다리 4회 채점 × 케이스 × 2콜이 비용 지배 항이다 */
+/** 배터리 채점 케이스 상한 — 배치 채점으로 콜 수는 케이스 수와 무관해졌지만,
+ *  배터리는 통과/주의/실패의 거친 판정이라 소표본이면 충분하고 프롬프트 비용을 줄인다 */
 export const BATTERY_CASE_CAP = 4;
 
 export interface BatteryArtifacts {
@@ -69,7 +70,12 @@ export async function runExaminerBattery(
   const scorer = createScorer(batteryProblem, llm);
 
   onProgress?.("검증용 문서를 만드는 중…");
-  let goodDoc = (await llm.complete(oneshotPrompt(problem), { temperature: 0.7 })).trim();
+  let goodDoc = (
+    await llm.complete(oneshotPrompt(problem), {
+      temperature: 0.7,
+      maxOutputTokens: maxOutputTokensFor(problem.lengthCap),
+    })
+  ).trim();
   // 생성 문서가 게이트를 넘으면 결정적으로 절단 — 사다리에는 유효한 문서가 필요하다
   if (goodDoc.length > problem.lengthCap) {
     goodDoc = goodDoc.slice(0, Math.floor(problem.lengthCap * 0.9));

@@ -64,20 +64,88 @@ ${violations.length > 0 ? violations.join("\n") : "(없음 — 표현을 다듬�
 수정한 문서 전문만 출력하세요. <!-- 라운드 ${round} -->`;
 }
 
-/** responder — 불변식: 문서와 해당 케이스 질문만 본다. 원문 자료도, 정답도, 다른 케이스도 없다. */
-export function responderPrompt(doc: string, question: string): string {
-  return `아래 문서만을 근거로 질문에 답하세요. 문서에 근거가 없으면 "문서에 없음"이라고 답하고 추측하지 마세요.
+/** responder 배치 — 불변식(SPEC §5.1.1): 문서와 이번 채점 대상 질문 목록만 본다.
+ *  정답·원자료는 싣지 않으며, 가시 채점과 홀드아웃 채점은 같은 호출에 섞지 않는다. */
+export function respondersPrompt(
+  doc: string,
+  cases: Array<Pick<CaseDef, "id" | "question">>,
+): string {
+  const list = cases.map((c) => `### 질문 (${c.id})\n${c.question}`).join("\n\n");
+  return `아래 문서만을 근거로 각 질문에 답하세요. 문서에 근거가 없으면 "문서에 없음"이라고 답하고 추측하지 마세요.
+질문마다 독립적으로 답하세요 — 다른 질문의 문구를 답의 근거로 삼지 마세요.
 
 ## 문서
 ${doc}
 
-## 질문
-${question}
+## 질문 목록
+${list}
 
-간결하고 구체적으로 답하세요.`;
+각 질문에 간결하고 구체적으로 답하되, 설명·코드 펜스 없이 JSON 배열 하나만 출력하세요 (질문마다 한 항목):
+[{"caseId": "<질문의 id>", "answer": "<답>"}]`;
 }
 
-/** grader — 정답 대조 단일 check, 0 / 0.5 / 1 */
+/** 답 내용은 바꾸지 않고 출력 형식만 한 번 고치게 한다 — graderRetryPrompt와 같은 패턴 */
+export function respondersRetryPrompt(
+  doc: string,
+  cases: Array<Pick<CaseDef, "id" | "question">>,
+  malformed: string,
+): string {
+  return `${respondersPrompt(doc, cases)}
+
+이전 출력은 형식 검증에 실패했습니다:
+<invalid-output>
+${malformed}
+</invalid-output>
+
+설명·코드 펜스 없이 위 스키마의 유효한 JSON 배열 하나만 다시 출력하세요.`;
+}
+
+export interface GraderItem {
+  caseId: string;
+  question: string;
+  expected: string;
+  response: string;
+}
+
+/** grader 배치 — 케이스별 (질문·참조 답·응답)을 한 번에 채점, 0 / 0.5 / 1.
+ *  점수 앵커링을 줄이기 위해 케이스마다 독립 채점을 명시한다. */
+export function gradersPrompt(items: GraderItem[]): string {
+  const blocks = items
+    .map(
+      (it) => `### 케이스 (${it.caseId})
+질문: ${it.question}
+참조 답 (기록된 실제 답): ${it.expected}
+채점할 응답: ${it.response}`,
+    )
+    .join("\n\n");
+  return `## 채점 목록
+각 케이스의 응답이 참조 답의 핵심을 담고 있는지, 케이스마다 독립적으로 채점하세요.
+
+${blocks}
+
+엄격하게:
+- 1 — 참조 답의 핵심 사실·해법을 담음
+- 0.5 — 방향은 맞지만 핵심 요소가 빠졌거나 잘못된 주장 추가
+- 0 — 틀림, 무관, 또는 "문서에 없음"
+
+설명·코드 펜스 없이 JSON 배열 하나만 출력하세요 (케이스마다 한 항목):
+[{"caseId": "<케이스 id>", "score": 0 | 0.5 | 1, "why": "<한 문장>"}]`;
+}
+
+/** 채점 내용은 바꾸지 않고 출력 형식만 한 번 고치게 한다 */
+export function gradersRetryPrompt(items: GraderItem[], malformed: string): string {
+  return `${gradersPrompt(items)}
+
+이전 출력은 형식 검증에 실패했습니다:
+<invalid-output>
+${malformed}
+</invalid-output>
+
+설명·코드 펜스 없이 위 스키마의 유효한 JSON 배열 하나만 다시 출력하세요.`;
+}
+
+/** grader 단건 — 정답 대조 단일 check, 0 / 0.5 / 1. 루프 채점은 배치(gradersPrompt)로
+ *  이동했고, 이 형태는 시험관 배터리의 오염 응답 프로브(케이스 1개 조작)만 사용한다. */
 export function graderPrompt(question: string, expected: string, response: string): string {
   return `응답이 참조 답의 핵심을 담고 있는지 채점하세요.
 
@@ -99,7 +167,8 @@ JSON만 출력: {"score": 0 | 0.5 | 1, "why": "<한 문장>"}`;
 }
 
 /** 케이스 초안 보조(인터뷰 단계) 프롬프트 마커 — 모의 클라이언트가 이 문자열로 분기한다.
- *  기존 마커("아래 문서만을 근거로"·"JSON만 출력"·"## 실패 목록")와 겹치면 안 되고,
+ *  기존 마커("아래 문서만을 근거로"[responder 배치]·"## 채점 목록"[grader 배치]·
+ *  "JSON만 출력"[grader 단건]·"## 실패 목록"[변이])와 겹치면 안 되고,
  *  이 프롬프트 본문에도 그 문자열들이 등장해서는 안 된다(테스트로 고정). */
 export const DRAFT_CASES_MARKER = "## 케이스 초안 요청";
 

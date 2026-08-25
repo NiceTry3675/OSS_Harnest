@@ -42,8 +42,10 @@ interface BatteryLlm extends LlmClient {
   prompts: string[];
 }
 
-/** 문자열 규칙 모의 LLM — responder는 문서 포함 여부, grader는 참조 답 포함 여부로 채점.
- *  strictGrader: 무관 응답 0점(실제 루브릭에 가까움). 기본은 0.5(부분 점수 관대 모형). */
+/** 문자열 규칙 모의 LLM — responder 배치는 문서 포함 여부, grader는 참조 답 포함 여부로 채점.
+ *  strictGrader: 무관 응답 0점(실제 루브릭에 가까움). 기본은 0.5(부분 점수 관대 모형).
+ *  graderOverride의 call은 채점 호출 순번 — 배치 grader와 단건 grader(오염 프로브)가 카운터를
+ *  공유한다: 배치 0(좋음)·1(훼손)·2(빈)·3(재채점), 단건 4(날조)·5(아첨). */
 function createBatteryLlm(opts: {
   cases: CaseDef[];
   oneshotDoc: string;
@@ -59,14 +61,46 @@ function createBatteryLlm(opts: {
     prompts,
     async complete(prompt) {
       prompts.push(prompt);
+      // responder 배치
       if (prompt.includes("아래 문서만을 근거로")) {
-        const doc = prompt.split("## 문서")[1]?.split("## 질문")[0] ?? "";
-        const q = prompt.split("## 질문")[1] ?? "";
-        const found = opts.cases.find((c) => q.includes(c.question));
-        if (!found) return "문서에 없음";
-        const has = doc.includes(found.expectedAnswer);
-        return (opts.invertResponder ? !has : has) ? found.expectedAnswer : "문서에 없음";
+        const doc = prompt.split("## 문서")[1]?.split("## 질문 목록")[0] ?? "";
+        const listBlock = prompt.split("## 질문 목록")[1] ?? "";
+        const ids = [...listBlock.matchAll(/### 질문 \(([^)]+)\)/g)].map((m) => m[1]);
+        return JSON.stringify(
+          ids.map((id) => {
+            const found = opts.cases.find((c) => c.id === id);
+            if (!found) return { caseId: id, answer: "문서에 없음" };
+            const has = doc.includes(found.expectedAnswer);
+            const covered = opts.invertResponder ? !has : has;
+            return { caseId: id, answer: covered ? found.expectedAnswer : "문서에 없음" };
+          }),
+        );
       }
+      // grader 배치
+      if (prompt.includes("## 채점 목록")) {
+        const call = graderCalls;
+        graderCalls += 1;
+        return JSON.stringify(
+          prompt.split("### 케이스 (").slice(1).map((chunk) => {
+            const caseId = chunk.split(")")[0];
+            const expected =
+              chunk.split("\n참조 답 (기록된 실제 답): ")[1]?.split("\n채점할 응답: ")[0] ?? "";
+            const response = (chunk.split("\n채점할 응답: ")[1] ?? "")
+              .split("\n\n엄격하게")[0]
+              .trim();
+            let score = response.includes("문서에 없음")
+              ? 0
+              : response.includes(expected)
+                ? 1
+                : opts.strictGrader
+                  ? 0
+                  : 0.5;
+            if (opts.graderOverride) score = opts.graderOverride(call, score);
+            return { caseId, score, why: "규칙 채점" };
+          }),
+        );
+      }
+      // grader 단건 — 오염 응답 프로브
       if (prompt.includes("JSON만 출력")) {
         const expected = (prompt.split("## 참조 답 (기록된 실제 답)")[1] ?? "")
           .split("## 채점할 응답")[0]
@@ -149,12 +183,12 @@ describe("runExaminerBattery — 판정 규칙", () => {
   it("재채점이 크게 흔들리면 안정성 fail", async () => {
     const { compiled, oneshotDoc } = await compileScenarioB();
     const { problem, pack } = compiled;
-    // grader 호출 순서: 좋음(0~3)·훼손(4~7)·빈(8~11)·재채점(12~15) — 재채점만 0점으로 무너뜨린다
+    // 채점 호출 순서: 좋음(0)·훼손(1)·빈(2)·재채점(3) — 재채점만 0점으로 무너뜨린다
     const llm = createBatteryLlm({
       cases: [...problem.visibleCases, ...problem.holdoutCases],
       oneshotDoc,
       strictGrader: true,
-      graderOverride: (call, def) => (call >= 12 && call <= 15 ? 0 : def),
+      graderOverride: (call, def) => (call === 3 ? 0 : def),
     });
 
     const run = await runExaminerBattery(problem, pack, llm);
@@ -207,12 +241,12 @@ describe("runExaminerBattery — 경계", () => {
   it("grader가 오염 응답(날조·아첨)을 정답 처리하면 꼼수 내성 fail", async () => {
     const { compiled, oneshotDoc } = await compileScenarioB();
     const { problem, pack } = compiled;
-    // grader 호출 16·17 = 날조·아첨 프로브 — 정답(1점) 처리로 조작
+    // 채점 호출 4·5 = 날조·아첨 프로브(단건) — 정답(1점) 처리로 조작
     const llm = createBatteryLlm({
       cases: [...problem.visibleCases, ...problem.holdoutCases],
       oneshotDoc,
       strictGrader: true,
-      graderOverride: (call, def) => (call >= 16 ? 1 : def),
+      graderOverride: (call, def) => (call >= 4 ? 1 : def),
     });
 
     const run = await runExaminerBattery(problem, pack, llm);
@@ -292,8 +326,8 @@ describe("runExaminerBattery — 불변식·비용", () => {
     });
 
     await runExaminerBattery(problem, pack, llm);
-    // 생성 1 + 사다리 4회 채점 × (케이스 4 × 2콜) + 오염 응답 grader 2 = 35
-    expect(llm.prompts).toHaveLength(1 + 4 * (BATTERY_CASE_CAP * 2) + 2);
+    // 생성 1 + 사다리 4회 채점 × 2콜(responder·grader 배치) + 오염 응답 grader 단건 2 = 11
+    expect(llm.prompts).toHaveLength(1 + 4 * 2 + 2);
     // 부풀린 프로브 문서가 모델에 전달된 적이 없다
     expect(llm.prompts.every((p) => !p.includes("(중요한 내용이므로 한 번 더 강조합니다)"))).toBe(
       true,

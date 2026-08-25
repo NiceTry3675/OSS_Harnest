@@ -9,6 +9,7 @@ import { mutatePrompt, oneshotPrompt } from "./prompts";
 import {
   CallBudgetExceededError,
   createGenerator,
+  createInitial,
   createScorer,
   gradeResponse,
   scoreHoldout,
@@ -34,8 +35,8 @@ function makeSubmission(caseCount: number, lengthCap: number = 2000): InterviewS
 }
 
 /** 프롬프트 기록형 모의 LLM — prompts.ts의 고정 마커로 역할을 판별하는 문자열 규칙.
- *  responder: 프롬프트 속 문서에 해당 케이스의 정답이 있으면 그 정답, 없으면 "문서에 없음".
- *  grader: 응답이 "문서에 없음"이면 0, 참조 답을 그대로 담으면 1, 그 외 0.5. */
+ *  responder 배치: 질문 목록의 케이스마다 문서에 정답이 있으면 그 정답, 없으면 "문서에 없음".
+ *  grader 배치: 응답이 "문서에 없음"이면 0, 참조 답을 그대로 담으면 1, 그 외 0.5. */
 interface RecordingLlm extends LlmClient {
   prompts: string[];
 }
@@ -48,21 +49,34 @@ function createRecordingLlm(allCases: CaseDef[]): RecordingLlm {
     prompts,
     async complete(prompt) {
       prompts.push(prompt);
-      // responder — 문서·질문만 담긴 프롬프트
+      // responder 배치 — 문서·질문 목록만 담긴 프롬프트
       if (prompt.includes("아래 문서만을 근거로")) {
-        const doc = prompt.split("## 문서")[1]?.split("## 질문")[0] ?? "";
-        const q = prompt.split("## 질문")[1] ?? "";
-        const found = allCases.find((c) => q.includes(c.question));
-        return found && doc.includes(found.expectedAnswer) ? found.expectedAnswer : "문서에 없음";
+        const doc = prompt.split("## 문서")[1]?.split("## 질문 목록")[0] ?? "";
+        const listBlock = prompt.split("## 질문 목록")[1] ?? "";
+        const ids = [...listBlock.matchAll(/### 질문 \(([^)]+)\)/g)].map((m) => m[1]);
+        return JSON.stringify(
+          ids.map((id) => {
+            const found = allCases.find((c) => c.id === id);
+            const covered = found && doc.includes(found.expectedAnswer);
+            return { caseId: id, answer: covered ? found.expectedAnswer : "문서에 없음" };
+          }),
+        );
       }
-      // grader — 참조 답 대조
-      if (prompt.includes("JSON만 출력")) {
-        const expected = (prompt.split("## 참조 답 (기록된 실제 답)")[1] ?? "")
-          .split("## 채점할 응답")[0]
-          .trim();
-        const response = (prompt.split("## 채점할 응답")[1] ?? "").split("엄격하게:")[0].trim();
-        const score = response.includes("문서에 없음") ? 0 : response.includes(expected) ? 1 : 0.5;
-        return `{"score": ${score}, "why": "문자열 규칙 채점"}`;
+      // grader 배치 — 참조 답 대조
+      if (prompt.includes("## 채점 목록")) {
+        return JSON.stringify(
+          prompt.split("### 케이스 (").slice(1).map((chunk) => {
+            const caseId = chunk.split(")")[0];
+            const expected =
+              chunk.split("\n참조 답 (기록된 실제 답): ")[1]?.split("\n채점할 응답: ")[0] ?? "";
+            const response = (chunk.split("\n채점할 응답: ")[1] ?? "")
+              .split("\n\n엄격하게")[0]
+              .trim();
+            const score =
+              response.includes("문서에 없음") ? 0 : response.includes(expected) ? 1 : 0.5;
+            return { caseId, score, why: "문자열 규칙 채점" };
+          }),
+        );
       }
       // 변이(mutate)
       if (prompt.includes("## 실패 목록")) return "변이된 문서";
@@ -100,13 +114,13 @@ describe("compile", () => {
     );
   });
 
-  it("케이스 10개는 비용 상한으로 거부한다 (최대 9개)", async () => {
+  it("케이스 상한을 넘는 입력은 거부한다", async () => {
     await expect(compile(makeSubmission(MAX_CASES + 1), mockJudge)).rejects.toThrow("최대");
   });
 
-  it("분량 범위(500~8000자) 밖은 거부한다", async () => {
-    await expect(compile(makeSubmission(6, 499), mockJudge)).rejects.toThrow("500~8000");
-    await expect(compile(makeSubmission(6, 8001), mockJudge)).rejects.toThrow("500~8000");
+  it("분량 범위(500~20,000자) 밖은 거부한다", async () => {
+    await expect(compile(makeSubmission(6, 499), mockJudge)).rejects.toThrow("500~20,000");
+    await expect(compile(makeSubmission(6, 20_001), mockJudge)).rejects.toThrow("500~20,000");
   });
 
   it("judge 옵션은 pack에 동결되며 다이제스트에 결속된다", async () => {
@@ -211,10 +225,10 @@ describe("createScorer", () => {
     expect(result.violations[0]).toContain("case-3");
     expect(result.violations[1]).toContain("case-4");
 
-    // responder는 가시 케이스 수만큼만 호출된다 (케이스당 responder+grader 2콜)
+    // 배치 채점: responder 1콜 + grader 1콜 — 케이스 수와 무관
     const responderPrompts = llm.prompts.filter((p) => p.includes("아래 문서만을 근거로"));
-    expect(responderPrompts).toHaveLength(problem.visibleCases.length);
-    expect(llm.prompts).toHaveLength(problem.visibleCases.length * 2);
+    expect(responderPrompts).toHaveLength(1);
+    expect(llm.prompts).toHaveLength(2);
 
     // 불변식: 홀드아웃 케이스의 질문·정답은 어떤 프롬프트에도 등장하지 않는다
     for (const h of problem.holdoutCases) {
@@ -227,6 +241,55 @@ describe("createScorer", () => {
     for (const v of problem.visibleCases) {
       expect(responderPrompts.some((p) => p.includes(v.question))).toBe(true);
     }
+  });
+});
+
+describe("배치 채점 — 형식 오류", () => {
+  const sequenceLlm = (outputs: string[]): LlmClient & { prompts: string[] } => {
+    const prompts: string[] = [];
+    return {
+      providerId: "mock",
+      model: "배치-형식-테스트",
+      prompts,
+      async complete(prompt) {
+        prompts.push(prompt);
+        return outputs.shift() ?? "";
+      },
+    };
+  };
+
+  it("responder 배치가 요청 케이스를 모두 담지 않으면 형식 재시도 1회 후 성공한다", async () => {
+    const { problem } = await compile(makeSubmission(6), mockJudge);
+    const answers = problem.visibleCases.map((c) => ({ caseId: c.id, answer: c.expectedAnswer }));
+    const grades = problem.visibleCases.map((c) => ({ caseId: c.id, score: 1, why: "정답" }));
+    const llm = sequenceLlm([
+      JSON.stringify(answers.slice(0, 1)), // 케이스 누락 — 부분 결과로 채점하지 않는다
+      JSON.stringify(answers),
+      JSON.stringify(grades),
+    ]);
+
+    const result = await createScorer(problem, llm)("문서");
+    expect(result.total).toBe(100);
+    expect(llm.prompts).toHaveLength(3);
+    expect(llm.prompts[1]).toContain("<invalid-output>");
+  });
+
+  it("grader 배치가 재시도까지 실패하면 GradeFormatError를 던진다", async () => {
+    const { problem } = await compile(makeSubmission(6), mockJudge);
+    const answers = problem.visibleCases.map((c) => ({ caseId: c.id, answer: c.expectedAnswer }));
+    const llm = sequenceLlm([
+      JSON.stringify(answers),
+      "배열 아님",
+      '[{"caseId": "case-1", "score": 2, "why": "허용되지 않은 점수"}]',
+    ]);
+
+    const thrown = await createScorer(problem, llm)("문서").then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(thrown).toBeInstanceOf(GradeFormatError);
+    expect(String(thrown)).toContain("형식 수정 요청 1회 후에도");
+    expect(llm.prompts).toHaveLength(3);
   });
 });
 
@@ -294,7 +357,7 @@ describe("scoreHoldout", () => {
     expect(result.perCase.map((g) => g.score)).toEqual([1, 0]);
 
     const responderPrompts = llm.prompts.filter((p) => p.includes("아래 문서만을 근거로"));
-    expect(responderPrompts).toHaveLength(problem.holdoutCases.length);
+    expect(responderPrompts).toHaveLength(1);
     // 가시 케이스의 질문은 어떤 responder 프롬프트에도 등장하지 않는다
     for (const v of problem.visibleCases) {
       for (const p of responderPrompts) expect(p).not.toContain(v.question);
@@ -366,6 +429,29 @@ describe("createGenerator", () => {
   });
 });
 
+describe("생성 출력 토큰 예산", () => {
+  it("원샷·변이 호출에 분량 상한 연동 maxOutputTokens가 실린다 — 기본 상한의 조용한 절단 방지", async () => {
+    const { problem } = await compile(makeSubmission(6, 8000), mockJudge);
+    const optsSeen: Array<number | undefined> = [];
+    const llm: LlmClient = {
+      providerId: "mock",
+      model: "테스트-모의",
+      async complete(_prompt, opts) {
+        optsSeen.push(opts?.maxOutputTokens);
+        return "문서";
+      },
+    };
+
+    await createInitial(problem, llm)(() => 0);
+    await createGenerator(problem, llm)("챔피언 문서", () => 0, {
+      round: 1,
+      championScore: 0,
+      championViolations: [],
+    });
+    expect(optsSeen).toEqual([16_000, 16_000]);
+  });
+});
+
 describe("withCallBudget", () => {
   it("예산 안에서는 그대로 위임하고, 소진 후에는 원 클라이언트 호출 없이 차단한다", async () => {
     let underlyingCalls = 0;
@@ -386,11 +472,10 @@ describe("withCallBudget", () => {
   });
 
   it("선언된 실행 예산은 최대 구성의 이론적 최악 호출 수를 넘는 백스톱이다", async () => {
-    const { problem, loopSpec } = await compile(makeSubmission(MAX_CASES), mockJudge);
-    const perCaseWorst = 3; // responder + grader + 형식 재시도 1회
-    const worst =
-      (loopSpec.maxRounds + 1) * (1 + problem.visibleCases.length * perCaseWorst) +
-      2 * problem.holdoutCases.length * perCaseWorst;
+    const { loopSpec } = await compile(makeSubmission(MAX_CASES), mockJudge);
+    // 배치 채점 1회 최악 = responder + 형식 재시도 + grader + 형식 재시도 = 4콜
+    const perScoringWorst = 4;
+    const worst = (loopSpec.maxRounds + 1) * (1 + perScoringWorst) + 2 * perScoringWorst;
     expect(MAX_CALLS_PER_RUN).toBeGreaterThan(worst);
   });
 });

@@ -18,7 +18,9 @@ const KEY_STORAGE: Record<ByoProvider, string> = {
   gemini: "harnest.byo.gemini",
   openai: "harnest.byo.openai",
 };
-const DEFAULT_TIMEOUT_MS = 30_000;
+// 긴 문서 생성(분량 상한 최대 20,000자 → 출력 수만 토큰)은 수 분이 걸릴 수 있어 5분 여유를 둔다.
+// 연결 테스트는 fail-fast 목적이라 별도의 짧은 상한(CONNECTION_TEST_TIMEOUT_MS)을 유지한다.
+const DEFAULT_TIMEOUT_MS = 300_000;
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_RETRY_BASE_MS = 1_500;
 const CONNECTION_TEST_TIMEOUT_MS = 15_000;
@@ -582,16 +584,37 @@ export function createMockClient(problem: HandoverProblem): LlmClient {
     providerId: "mock",
     model: "모의 모델 (결정적)",
     async complete(prompt) {
-      // responder: 문서에 정답의 핵심 토큰이 있으면 그 답을, 없으면 "문서에 없음"
+      // responder 배치: 질문 목록의 케이스마다, 문서에 정답의 핵심 토큰이 있으면 그 답을
       if (prompt.includes("아래 문서만을 근거로")) {
-        const doc = prompt.split("## 문서")[1]?.split("## 질문")[0] ?? "";
-        const q = (prompt.split("## 질문")[1] ?? "").trim();
-        const found = allCases.find(
-          (c) => q.includes(c.question.slice(0, 12)) && doc.includes(keyToken(c.expectedAnswer)),
-        );
-        return found ? found.expectedAnswer : "문서에 없음";
+        const doc = prompt.split("## 문서")[1]?.split("## 질문 목록")[0] ?? "";
+        const listBlock = prompt.split("## 질문 목록")[1] ?? "";
+        const ids = [...listBlock.matchAll(/### 질문 \(([^)]+)\)/g)].map((m) => m[1]);
+        const answers = ids.map((id) => {
+          const found = allCases.find((c) => c.id === id);
+          const covered = found && doc.includes(keyToken(found.expectedAnswer));
+          return { caseId: id, answer: covered ? found.expectedAnswer : "문서에 없음" };
+        });
+        return JSON.stringify(answers);
       }
-      // grader: 응답이 참조 답의 핵심 토큰을 담으면 1, "문서에 없음"이면 0
+      // grader 배치: 케이스마다 응답이 참조 답의 핵심 토큰을 담으면 1, "문서에 없음"이면 0
+      if (prompt.includes("## 채점 목록")) {
+        const grades = prompt.split("### 케이스 (").slice(1).map((chunk) => {
+          const caseId = chunk.split(")")[0];
+          const expected =
+            chunk.split("\n참조 답 (기록된 실제 답): ")[1]?.split("\n채점할 응답: ")[0] ?? "";
+          const response = (chunk.split("\n채점할 응답: ")[1] ?? "")
+            .split("\n\n엄격하게")[0]
+            .trim();
+          const score = response.includes("문서에 없음")
+            ? 0
+            : response.includes(keyToken(expected))
+              ? 1
+              : 0.5;
+          return { caseId, score, why: "모의 채점 — 핵심 토큰 대조" };
+        });
+        return JSON.stringify(grades);
+      }
+      // grader 단건(시험관 오염 응답 프로브): 응답이 핵심 토큰을 담으면 1, "문서에 없음"이면 0
       if (prompt.includes("JSON만 출력")) {
         const expected = prompt.split("## 참조 답")[1]?.split("## 채점할 응답")[0] ?? "";
         // 루브릭 문구("문서에 없음" 포함)가 응답 구간에 딸려 오지 않게 "엄격하게" 앞에서 자른다
