@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { Link, Route, Routes } from "react-router-dom";
+import { Link, Route, Routes, useLocation } from "react-router-dom";
 import { HomePage } from "./pages/HomePage";
 import { WizardPage } from "./pages/WizardPage";
 import { ApprovalPage } from "./pages/ApprovalPage";
 import { ConsolePage } from "./pages/ConsolePage";
 import { ResultsPage } from "./pages/ResultsPage";
+import { StepBar } from "./components/StepBar";
 import { useProject } from "./state";
 import {
   applyTheme, nextTheme, readTheme, saveTheme, THEME_ICON, THEME_LABEL,
@@ -42,17 +43,19 @@ function ThemeToggle() {
 
 export function App() {
   const { hydrated } = useProject();
+  const { pathname } = useLocation();
 
   return (
     <div className="app">
       <header className="topbar">
         <Link to="/" className="brand">Harnest</Link>
-        <span className="tagline">당신이 승인한 평가 절차로, 정해진 범위 안에서 개선을 측정하는 AI</span>
         <div className="topbar-right">
+          <StepBar />
           <ThemeToggle />
         </div>
       </header>
-      <main>
+      {/* key를 경로로 두면 화면이 바뀔 때마다 진입 애니메이션이 다시 돈다 */}
+      <main key={pathname} className="route-swap">
         {hydrated ? (
           <Routes>
             <Route path="/" element={<HomePage />} />

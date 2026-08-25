@@ -15,7 +15,7 @@ function verdict(r: RoundRecord): string {
 export function ExperimentTree({ tree }: { tree: readonly RoundRecord[] }) {
   if (tree.length === 0) {
     return (
-      <p style={{ color: "var(--ink-3)", fontSize: 13, margin: 0 }}>
+      <p className="hint" style={{ margin: 0 }}>
         아직 실험 기록이 없습니다. 실행을 시작하면 라운드별 판정이 여기에 쌓입니다.
       </p>
     );
@@ -24,11 +24,13 @@ export function ExperimentTree({ tree }: { tree: readonly RoundRecord[] }) {
   const latestFirst = [...tree].reverse();
 
   return (
-    <ul className="tree" style={{ maxHeight: 280, overflowY: "auto" }}>
+    <ul className="rounds">
       {latestFirst.map((r) => (
-        <li key={r.round} className={r.adopted ? "adopted" : "rejected"}>
-          라운드 {r.round} — 후보 {fmt(r.candidateScore)}점 vs 챔피언 {fmt(r.championScore)}점 →{" "}
-          {verdict(r)}
+        <li key={r.round} className={`round${r.adopted ? " is-adopted" : ""}`}>
+          <span className="round-no">라운드 {r.round}</span>
+          <span className="round-say">
+            후보 {fmt(r.candidateScore)}점 vs 챔피언 {fmt(r.championScore)}점 → {verdict(r)}
+          </span>
         </li>
       ))}
     </ul>

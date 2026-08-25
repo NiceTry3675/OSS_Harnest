@@ -13,3 +13,6 @@ dist/
 apps/api/harnest.db*
 __pycache__/
 *.py[cod]
+
+# 디자인 시안 - 개발 중에만 띄워 보는 정적 파일
+apps/web/public/lab*.html

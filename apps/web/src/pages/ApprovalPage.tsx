@@ -21,6 +21,7 @@ import {
   type ExaminerCheckId,
   type ExaminerVerdict,
 } from "@harnest/contracts";
+import { SealPanel } from "../components/SealPanel";
 import { useProject } from "../state";
 import { getTemplate, type TemplateEntry } from "../templates";
 import { countCaseProvenance } from "../lib/case-provenance";
@@ -297,6 +298,49 @@ export function ApprovalPage() {
     }
   };
 
+  // 승인된 뒤에는 이 화면이 통째로 봉인 장면이 된다. 기준 상세는 접어 두고,
+  // 펼쳐야 볼 수 있게 한다 — 잠갔다는 사실이 먼저 읽혀야 한다.
+  if (approved) {
+    return (
+      <div className="sealed-page">
+        <SealPanel digest={pack.definitionDigest}>
+          <button className="primary seal-go" onClick={() => navigate("/console")}>
+            실행 화면으로
+          </button>
+        </SealPanel>
+
+        <details className="sealed-detail">
+          <summary>동결된 채점 기준 보기</summary>
+          <table className="grid">
+            <thead>
+              <tr>
+                <th style={{ textAlign: "left" }}>기준</th>
+                <th>가중치</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pack.criteria.map((c) => (
+                <tr key={c.id}>
+                  <td style={{ textAlign: "left" }}>{c.label}</td>
+                  <td>{Math.round(c.weight * 100)}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {pack.gates.length > 0 ? (
+            <ul className="sealed-gates">
+              {pack.gates.map((g) => (
+                <li key={g.id}>
+                  {g.label} <span className="badge muted">미충족 시 탈락</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </details>
+      </div>
+    );
+  }
+
   return (
     <div>
       <h1>채점 기준 승인</h1>
@@ -527,21 +571,7 @@ export function ApprovalPage() {
           </>
         ) : null}
 
-        {approved ? (
-          <div style={{ marginTop: 18 }}>
-            <div className="hint">동결 다이제스트</div>
-            <div className="mono digest">{pack.definitionDigest}</div>
-            <p className="hint" style={{ marginTop: 10 }}>
-              동결된 기준은 여기서 수정할 수 없습니다. 바꾸려면 처음부터 새 기준을 만들어
-              다시 승인해야 합니다.
-            </p>
-            <div style={{ marginTop: 12 }}>
-              <button className="primary" onClick={() => navigate("/console")}>
-                실행 화면으로
-              </button>
-            </div>
-          </div>
-        ) : (
+        {(
           <div style={{ marginTop: 18 }}>
             {blockers.length > 0 ? (
               <ul style={{ margin: "0 0 10px", paddingLeft: 18, fontSize: 13, color: "var(--ink-3)" }}>

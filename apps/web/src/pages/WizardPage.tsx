@@ -9,6 +9,7 @@ import type { Question } from "@harnest/contracts";
 import type { LlmClient } from "@harnest/template-handover";
 import { getTemplate } from "../templates";
 import { WizardBlueprint } from "../components/WizardBlueprint";
+import { StreamConsole } from "../components/StreamConsole";
 import { WizardCaseList, textareaStyle, type CasePair } from "../components/WizardCaseList";
 import { appendFileTexts, extractFileText, FILE_ACCEPT } from "../lib/attachText";
 import {
@@ -45,6 +46,26 @@ const JUDGE_MODEL: Record<JudgeChoice, string> = {
   openai: "gpt-5.6-sol",
 };
 
+/** 남은 분량을 원으로 보여준다 — 숫자만 있으면 얼마나 찼는지 감이 안 온다 */
+function CharRing({ filled, max }: { filled: number; max: number }) {
+  const r = 11;
+  const circumference = 2 * Math.PI * r;
+  const ratio = Math.min(1, max > 0 ? filled / max : 0);
+  return (
+    <svg className="char-ring" viewBox="0 0 26 26" aria-hidden="true">
+      <circle className="bg" cx="13" cy="13" r={r} />
+      <circle
+        className="fg"
+        cx="13"
+        cy="13"
+        r={r}
+        strokeDasharray={circumference}
+        strokeDashoffset={circumference * (1 - ratio)}
+      />
+    </svg>
+  );
+}
+
 export function WizardPage() {
   const { templateId, answers: savedAnswers, setAnswers, setCompiled } = useProject();
   const navigate = useNavigate();
@@ -67,8 +88,7 @@ export function WizardPage() {
                 : {}),
             }))
           : [];
-        const min = q.min ?? CASE_MIN_DEFAULT;
-        while (pairs.length < min) pairs.push({ question: "", expectedAnswer: "" });
+        // 빈 카드를 미리 깔지 않는다 — 입력창에서 하나씩 추가한다
         init[q.id] = pairs;
         continue;
       }
@@ -82,6 +102,11 @@ export function WizardPage() {
     return init;
   });
   const [step, setStep] = useState(0);
+
+  // 단계가 바뀌면 맨 위에서 시작한다 — 긴 목록 중간에서 열리면 어디인지 알 수 없다
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, [step]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [judgeChoice, setJudgeChoice] = useState<JudgeChoice>("mock");
@@ -90,6 +115,8 @@ export function WizardPage() {
   // 클릭 1회에 요청할 초안 개수 — 남은 슬롯까지 자유롭게 고른다(호출은 개수와 무관하게 클릭당 1회)
   const [assistCount, setAssistCount] = useState(3);
   const [attachBusy, setAttachBusy] = useState(false);
+  const [assistText, setAssistText] = useState("");
+  const [attached, setAttached] = useState<Array<{ name: string; size: string }>>([]);
   const [keyDrafts, setKeyDrafts] = useState<Record<ByoProvider, string>>(() => ({
     gemini: getByoKey("gemini") ?? "",
     openai: getByoKey("openai") ?? "",
@@ -155,6 +182,7 @@ export function WizardPage() {
     e.target.value = ""; // 같은 파일 재첨부 허용
     if (files.length === 0) return;
     setAttachBusy(true);
+    const added: Array<{ name: string; size: string }> = [];
     let current = typeof draft[q.id] === "string" ? (draft[q.id] as string) : "";
     let changed = false;
     let failure: string | null = null;
@@ -173,7 +201,9 @@ export function WizardPage() {
       }
       current = next;
       changed = true;
+      added.push({ name: file.name, size: `${Math.max(1, Math.round(file.size / 1024))}KB` });
     }
+    if (added.length > 0) setAttached((prev) => [...prev, ...added]);
     if (changed) onChange(current); // onChange가 error를 지우므로 실패 메시지는 그 뒤에 싣는다
     if (failure) setError(failure);
     setAttachBusy(false);
@@ -212,6 +242,7 @@ export function WizardPage() {
     }
 
     setAssistBusy(true);
+    setAssistText("");
     setError(null);
     try {
       const existing = pairs
@@ -226,6 +257,11 @@ export function WizardPage() {
         setError("새 초안이 없습니다 — 모두 기존 질문과 중복이었습니다.");
         return;
       }
+      setAssistText(
+        drafted
+          .map((d, n) => `${n + 1}. ${d.question}\n   ${d.expectedAnswer}`)
+          .join("\n\n"),
+      );
       // 빈 행부터 채우고, 모자라면 상한까지 행을 추가한다
       const next = [...pairs];
       for (const d of drafted) {
@@ -293,15 +329,13 @@ export function WizardPage() {
   }
 
   return (
-    <div>
-      <h1>{entry.name}</h1>
-      <p className="sub">몇 가지 질문에 답하면, 오른쪽에 채점 기준이 실시간으로 만들어집니다.</p>
-
-      <div className="row">
-        <div className="card grow">
-          <div style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 6 }}>
-            <span className="badge">{step + 1} / {questions.length} 단계</span>
-            <span className="badge muted">{ROLE_LABEL[q.role]}</span>
+    <div className="wizard">
+      <div className="wizard-grid">
+        <div className="wizard-main route-swap" key={step}>
+          <div className="wizard-tags">
+            <span className="eyebrow">
+              {step + 1}단계 · {ROLE_LABEL[q.role]}
+            </span>
             {entry.devSample ? (
               <button
                 type="button"
@@ -318,13 +352,11 @@ export function WizardPage() {
             ) : null}
           </div>
 
-          <form onSubmit={onSubmit}>
+          <h2 className="q-big">{q.label}</h2>
+          {q.help ? <p className="q-help">{q.help}</p> : null}
+
+          <form id="wizard-form" onSubmit={onSubmit}>
             <div className="field">
-              {q.type === "caseList" ? (
-                <label>{q.label}</label>
-              ) : (
-                <label htmlFor={`q-${q.id}`}>{q.label}</label>
-              )}
               {q.type === "caseList" ? (
                 <>
                   <WizardCaseList
@@ -334,8 +366,30 @@ export function WizardPage() {
                     onChange={onChange}
                   />
                   {entry.caseAssist ? (
-                    <div style={{ marginTop: 12, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
-                      <label>AI 초안 도우미 (선택)</label>
+                    <div className="assist">
+                      <div className="assist-line">
+                        <span>자료에서 초안을 뽑아 드립니다</span>
+                        <button
+                          type="button"
+                          className="primary assist-go"
+                          disabled={busy}
+                          onClick={onDraftCases}
+                        >
+                          {assistBusy ? "초안 만드는 중…" : `AI 초안 ${assistEffective}개 넣기`}
+                        </button>
+                      </div>
+                      {assistBusy || assistText ? (
+                        <StreamConsole
+                          title={assistBusy ? "AI가 초안을 쓰는 중" : "AI가 쓴 초안"}
+                          model={
+                            assistChoice === "mock" ? "모의 모델" : JUDGE_MODEL[assistChoice]
+                          }
+                          text={assistText}
+                          running={assistBusy}
+                        />
+                      ) : null}
+                      <details className="assist-more">
+                        <summary>초안 설정</summary>
                       <div style={{ display: "grid", gap: 6, fontSize: 14 }}>
                         {(["mock", "gemini", "openai"] as const).map((choice) => (
                           <label
@@ -394,11 +448,7 @@ export function WizardPage() {
                         />
                         <span className="badge muted">{assistEffective}개</span>
                       </div>
-                      <div style={{ marginTop: 8 }}>
-                        <button type="button" disabled={busy} onClick={onDraftCases}>
-                          {assistBusy ? "초안 생성 중…" : "AI로 질답 초안 만들기"}
-                        </button>
-                      </div>
+                      </details>
                       <div className="hint">
                         {entry.caseAssist.nudge} 이 호출은 클릭당 1회이며 실행 비용 예산과
                         별개입니다. 초안은 각 쌍의 확인 버튼을 눌러야만 제출에 포함됩니다.
@@ -408,35 +458,66 @@ export function WizardPage() {
                 </>
               ) : q.type === "textarea" ? (
                 <>
-                  <textarea
-                    id={`q-${q.id}`}
-                    rows={8}
-                    style={textareaStyle}
-                    value={typeof draft[q.id] === "string" ? (draft[q.id] as string) : ""}
-                    placeholder={q.placeholder}
-                    autoFocus
-                    onChange={(e) => onChange(e.target.value)}
-                  />
-                  {q.attachText ? (
-                    <div style={{ marginTop: 8 }}>
-                      <input
-                        type="file"
-                        multiple
-                        accept={FILE_ACCEPT}
-                        disabled={busy}
-                        style={{ width: "auto" }}
-                        onChange={onAttachFiles}
-                      />
-                      <div className="hint">
-                        {attachBusy
-                          ? "파일에서 텍스트를 추출하는 중…"
-                          : `현재 ${(typeof draft[q.id] === "string" ? (draft[q.id] as string) : "").length.toLocaleString()}자` +
-                            (q.maxChars !== undefined
-                              ? ` / 최대 ${q.maxChars.toLocaleString()}자`
-                              : "") +
-                            " · 파일은 이 브라우저에서만 읽히며 서버로 전송되지 않습니다."}
-                      </div>
+                  {/* 문서를 쓰는 면처럼 보이게 한다 — 빈 칸 하나보다 손이 덜 무겁다 */}
+                  <div className="paper">
+                    <div className="paper-top">
+                      {q.shortLabel ?? q.label}
+                      <span className="right">
+                        <span>
+                          {(typeof draft[q.id] === "string"
+                            ? (draft[q.id] as string)
+                            : ""
+                          ).length.toLocaleString()}
+                          자
+                        </span>
+                        {q.maxChars !== undefined ? (
+                          <CharRing
+                            filled={
+                              (typeof draft[q.id] === "string" ? (draft[q.id] as string) : "").length
+                            }
+                            max={q.maxChars}
+                          />
+                        ) : null}
+                      </span>
                     </div>
+                    <textarea
+                      id={`q-${q.id}`}
+                      rows={10}
+                      value={typeof draft[q.id] === "string" ? (draft[q.id] as string) : ""}
+                      placeholder={q.placeholder}
+                      autoFocus
+                      onChange={(e) => onChange(e.target.value)}
+                    />
+                  </div>
+                  {q.attachText ? (
+                    <>
+                      <label className="dropzone">
+                        <input
+                          type="file"
+                          multiple
+                          accept={FILE_ACCEPT}
+                          disabled={busy}
+                          onChange={onAttachFiles}
+                        />
+                        {attachBusy
+                          ? "파일에서 글을 뽑는 중…"
+                          : "파일을 끌어다 놓거나 눌러서 고르세요 · txt md pdf docx"}
+                      </label>
+                      {attached.length > 0 ? (
+                        <div className="chips">
+                          {attached.map((f) => (
+                            <span key={f.name} className="chip">
+                              <span aria-hidden="true">📄</span>
+                              {f.name}
+                              <span className="chip-size">{f.size}</span>
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                      <p className="hint">
+                        파일은 이 브라우저에서만 읽히며 서버로 전송되지 않습니다.
+                      </p>
+                    </>
                   ) : null}
                 </>
               ) : (
@@ -451,7 +532,6 @@ export function WizardPage() {
                   onChange={(e) => onChange(e.target.value)}
                 />
               )}
-              {q.help ? <div className="hint">{q.help}</div> : null}
             </div>
 
             {isLast && entry.needsModel ? (
@@ -459,47 +539,34 @@ export function WizardPage() {
                 className="field"
                 style={{ borderTop: "1px solid var(--border)", paddingTop: 14 }}
               >
-                <label>채점 모델 선택</label>
-                <div style={{ display: "grid", gap: 6, fontSize: 14 }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
-                    <input
-                      type="radio"
-                      name="judge-model"
-                      style={{ width: "auto" }}
-                      checked={judgeChoice === "mock"}
-                      onChange={() => {
-                        setJudgeChoice("mock");
+                <label className="q-big" style={{ fontSize: "var(--t-h2)" }}>
+                  무엇으로 채점할까요?
+                </label>
+                <p className="sub" style={{ marginBottom: 16 }}>
+                  여기서 고른 모델은 판정 절차의 일부로 함께 잠깁니다. 나중에 바꾸려면 처음부터
+                  다시 승인해야 합니다.
+                </p>
+                <div className="models">
+                  {([
+                    ["openai", "OpenAI", JUDGE_MODEL.openai, "가장 안정적으로 채점합니다. 키가 필요합니다."],
+                    ["gemini", "Google Gemini", JUDGE_MODEL.gemini, "빠르고 저렴합니다. 키가 필요합니다."],
+                    ["mock", "모의 모델", "키 없이 사용", "실제 채점 없이 화면만 둘러볼 때 씁니다."],
+                  ] as const).map(([id, name, model, desc]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      className={`model${judgeChoice === id ? " is-on" : ""}`}
+                      aria-pressed={judgeChoice === id}
+                      onClick={() => {
+                        setJudgeChoice(id);
                         setError(null);
                       }}
-                    />
-                    모의 모델 (무료 · 데모용 결정적 채점)
-                  </label>
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
-                    <input
-                      type="radio"
-                      name="judge-model"
-                      style={{ width: "auto" }}
-                      checked={judgeChoice === "gemini"}
-                      onChange={() => {
-                        setJudgeChoice("gemini");
-                        setError(null);
-                      }}
-                    />
-                    Gemini (BYO 키 — 키는 이 브라우저에만 저장됩니다)
-                  </label>
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
-                    <input
-                      type="radio"
-                      name="judge-model"
-                      style={{ width: "auto" }}
-                      checked={judgeChoice === "openai"}
-                      onChange={() => {
-                        setJudgeChoice("openai");
-                        setError(null);
-                      }}
-                    />
-                    OpenAI · GPT-5.6 Sol (BYO 키 — 브라우저 직행)
-                  </label>
+                    >
+                      <b>{name}</b>
+                      <div className="model-id">{model}</div>
+                      <p>{desc}</p>
+                    </button>
+                  ))}
                 </div>
                 {judgeChoice !== "mock" ? (
                   <div style={{ marginTop: 8 }}>
@@ -540,31 +607,40 @@ export function WizardPage() {
 
             {error ? <div className="error" style={{ marginBottom: 12 }}>{error}</div> : null}
 
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                type="button"
-                disabled={step === 0 || busy}
-                onClick={() => {
-                  setError(null);
-                  setStep(step - 1);
-                }}
-              >
-                이전
-              </button>
-              <button type="submit" className="primary" disabled={busy}>
-                {isLast
-                  ? submitting
-                    ? judgeChoice === "mock"
-                      ? "확인 중…"
-                      : "모델 연결 확인 중…"
-                    : "작성 완료 — 승인 화면으로"
-                  : "다음"}
-              </button>
-            </div>
+            {step > 0 ? (
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    setError(null);
+                    setStep(step - 1);
+                  }}
+                >
+                  이전 단계로
+                </button>
+              </div>
+            ) : null}
           </form>
         </div>
 
-        <WizardBlueprint entry={entry} answers={liveAnswers} judge={judge} />
+        <div className="wizard-side">
+          <WizardBlueprint entry={entry} answers={liveAnswers} judge={judge} />
+          <button
+            type="submit"
+            form="wizard-form"
+            className="primary wizard-go"
+            disabled={busy}
+          >
+            {isLast
+              ? submitting
+                ? judgeChoice === "mock"
+                  ? "확인 중…"
+                  : "모델 연결 확인 중…"
+                : (q.nextLabel ?? "작성 완료 — 승인 화면으로")
+              : (q.nextLabel ?? "다음")}
+          </button>
+        </div>
       </div>
     </div>
   );
