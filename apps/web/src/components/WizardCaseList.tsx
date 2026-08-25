@@ -18,7 +18,7 @@ export interface CasePair {
   /** AI 초안 미확인 — 확인 전에는 스텝 검증에 걸리고 answers에 절대 실리지 않는다 */
   needsConfirm?: boolean;
   /** 멀티홉 초안의 근거 인용 — 확인용 표시 전용. toAnswers가 싣지 않아 제출·다이제스트에
-   *  절대 유입되지 않는다. found=false는 원료에서 인용을 찾지 못했다는 경고 신호. */
+   *  절대 유입되지 않는다. found=false는 글자 그대로 일치를 확인하지 못했다는 낮은 확신의 경고. */
   evidence?: Array<{ quote: string; found: boolean }>;
 }
 
@@ -216,7 +216,14 @@ export function WizardCaseList({
                           padding: "2px 0",
                         }}
                       >
-                        {!e.found ? <span className="badge">자료에서 찾을 수 없음</span> : null}
+                        {!e.found ? (
+                          <span
+                            className="badge"
+                            title="공백·구두점 차이를 무시하고 대조했지만 자료에서 같은 대목을 찾지 못했습니다 — 실제 자료와 직접 비교해 주세요."
+                          >
+                            자료와 그대로 일치하지 않음
+                          </span>
+                        ) : null}
                         <span style={{ fontStyle: "italic" }}>“{e.quote}”</span>
                       </div>
                     ))}

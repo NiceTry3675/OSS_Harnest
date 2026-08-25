@@ -98,7 +98,7 @@ describe("draftCases", () => {
   });
 
   it("hops 2는 멀티홉 규칙을 요구하고 근거 인용을 원료와 대조해 표시용 found를 채운다", async () => {
-    const inMaterial = "사내 배포 파이프라인을   관리하는"; // 공백 차이는 정규화로 흡수
+    const inMaterial = "사내 배포, 파이프라인을   관리하는"; // 공백·구두점 차이는 정규화로 흡수
     const notInMaterial = "자료에 없는 지어낸 근거 인용";
     const llm = sequenceLlm([
       JSON.stringify([
@@ -121,24 +121,27 @@ describe("draftCases", () => {
     ]);
   });
 
-  it("hops 2에서 evidence가 모자라면 형식 오류로 재시도하고, 재시도까지 실패하면 거부한다", async () => {
-    const ok = JSON.stringify([
-      { question: "질문 1", expectedAnswer: "답 1", evidence: ["근거 A", "근거 B"] },
+  it("hops 2에서 evidence가 모자라거나 없어도 재시도 없이 받고, 초과분만 hops개로 자른다", async () => {
+    const llm = sequenceLlm([
+      JSON.stringify([
+        { question: "질문 1", expectedAnswer: "답 1", evidence: ["하나뿐"] },
+        { question: "질문 2", expectedAnswer: "답 2" },
+        { question: "질문 3", expectedAnswer: "답 3", evidence: ["근거 A", "근거 B", "근거 C"] },
+      ]),
     ]);
-    const recovered = sequenceLlm([JSON.stringify([pair(1)]), ok]);
-    const result = await draftCases(recovered, MATERIAL, [], 1, 2);
-    expect(result[0].evidence).toHaveLength(2);
-    expect(recovered.prompts).toHaveLength(2);
-    expect(recovered.prompts[1]).toContain("<invalid-output>");
+    const result = await draftCases(llm, MATERIAL, [], 3, 2);
+    expect(llm.prompts).toHaveLength(1);
+    expect(result[0].evidence).toHaveLength(1);
+    expect(result[1].evidence).toBeUndefined();
+    expect(result[2].evidence?.map((e) => e.quote)).toEqual(["근거 A", "근거 B"]);
+  });
 
-    const failed = sequenceLlm([
-      JSON.stringify([pair(1)]),
-      JSON.stringify([{ question: "질문 1", expectedAnswer: "답 1", evidence: ["하나뿐"] }]),
+  it("구두점뿐인 인용은 정규화 후 빈 문자열이라 found로 치지 않는다", async () => {
+    const llm = sequenceLlm([
+      JSON.stringify([{ question: "질문 1", expectedAnswer: "답 1", evidence: ["…?!", "근거"] }]),
     ]);
-    await expect(draftCases(failed, MATERIAL, [], 1, 2)).rejects.toThrow(
-      "초안 출력을 해석할 수 없습니다",
-    );
-    expect(failed.prompts.length).toBeLessThanOrEqual(ASSIST_CALLS_PER_CLICK);
+    const result = await draftCases(llm, MATERIAL, [], 1, 2);
+    expect(result[0].evidence?.[0]).toEqual({ quote: "…?!", found: false });
   });
 
   it("hops 2는 근거 분량을 고려해 출력 토큰 예산을 3항목분으로 늘린다", async () => {

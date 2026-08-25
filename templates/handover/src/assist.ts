@@ -18,7 +18,8 @@ export const ASSIST_CALLS_PER_CLICK = 2;
 export const ASSIST_MIN_MATERIAL_CHARS = 50;
 
 /** 멀티홉 초안의 근거 인용 — 확인 UI 표시 전용이며 제출·다이제스트에 실리지 않는다.
- *  found는 공백 정규화 부분 문자열 대조 결과(실측 multihop-01: 실존율 93~100%). */
+ *  found는 문자·숫자만 남긴 부분 문자열 대조 결과로, 낮은 확신의 경고 신호일 뿐이다
+ *  (실측 multihop-01: 모델 인용 실존율 93~100%). */
 export interface DraftEvidence {
   quote: string;
   found: boolean;
@@ -33,9 +34,9 @@ export interface DraftedCase {
 /** 형식 오류 구분용 모듈 지역 타입 — 위저드 인라인 표시 전용이라 계약 오류로 승격하지 않는다 */
 class DraftFormatError extends Error {}
 
-/** 근거 대조용 정규화 — 모델 인용의 공백·개행 차이를 흡수한다 */
+/** 근거 대조용 정규화 — 문자·숫자만 남겨 모델 인용의 공백·구두점·따옴표 차이를 흡수한다 */
 function normalizeForMatch(text: string): string {
-  return text.replace(/\s+/g, " ").trim().toLowerCase();
+  return text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 }
 
 function parseDraftedCases(raw: string, hops: number): DraftedCase[] {
@@ -63,14 +64,17 @@ function parseDraftedCases(raw: string, hops: number): DraftedCase[] {
       question: value.question.trim(),
       expectedAnswer: value.expectedAnswer.trim(),
     };
-    if (hops >= 2) {
-      const quotes = Array.isArray(value.evidence)
-        ? value.evidence.filter((e): e is string => typeof e === "string" && e.trim().length > 0)
-        : [];
-      if (quotes.length < hops) {
-        throw new DraftFormatError(`초안의 evidence는 자료 인용 ${hops}개를 담은 배열이어야 합니다.`);
+    if (hops >= 2 && Array.isArray(value.evidence)) {
+      // 인용 개수 부족은 형식 오류로 승격하지 않는다 — 표시 전용 신호에 재시도 호출을 태우지 않고,
+      // 온 만큼만 받아 확인 UI에 넘긴다(개수 상한만 hops로 유지)
+      const quotes = value.evidence.filter(
+        (e): e is string => typeof e === "string" && e.trim().length > 0,
+      );
+      if (quotes.length > 0) {
+        drafted.evidence = quotes
+          .slice(0, hops)
+          .map((quote) => ({ quote: quote.trim(), found: false }));
       }
-      drafted.evidence = quotes.slice(0, hops).map((quote) => ({ quote: quote.trim(), found: false }));
     }
     return drafted;
   });
@@ -127,7 +131,9 @@ export async function draftCases(
   const normalizedMaterial = normalizeForMatch(material);
   for (const c of drafted) {
     for (const e of c.evidence ?? []) {
-      e.found = normalizedMaterial.includes(normalizeForMatch(e.quote));
+      const normalizedQuote = normalizeForMatch(e.quote);
+      // 구두점뿐인 인용은 정규화 후 빈 문자열이라 includes가 항상 참이 된다 — found로 치지 않는다
+      e.found = normalizedQuote.length > 0 && normalizedMaterial.includes(normalizedQuote);
     }
   }
 
