@@ -2,8 +2,8 @@
 
 import {
   createProjectExportEnvelope,
-  type CalibrationResult,
   type EvaluationPack,
+  type ExaminerReport,
   type HoldoutPhaseRecord,
   type HoldoutRecord,
   type HoldoutScores,
@@ -11,13 +11,12 @@ import {
   type ProjectExportEnvelope,
   ProjectExportContractError,
 } from "@harnest/contracts";
-import type { CompiledGeneric, ExaminerRunGeneric } from "../state";
+import type { CompiledGeneric } from "../state";
 
 export interface ProjectExportSource<A = unknown> {
   compiled: CompiledGeneric;
   answers: Record<string, unknown>;
-  examinerRun: ExaminerRunGeneric | null;
-  calibration: CalibrationResult | null;
+  examinerReport: ExaminerReport | null;
   /** 승인 순간 캡처한 값이어야 한다. 현재 Pack에서 다시 파생하지 않는다. */
   approvedDigest: string;
   approvedAt: string;
@@ -88,7 +87,7 @@ function holdoutRecord(pack: EvaluationPack, holdout: HoldoutScores): HoldoutRec
   };
 }
 
-/** 명시한 상태만 복사한다. examiner artifacts·재검증 계수·localStorage는 접근하지 않는다. */
+/** 명시한 상태만 복사한다. localStorage는 접근하지 않는다. */
 export async function buildProjectExport<A>(
   source: ProjectExportSource<A>,
 ): Promise<ProjectExportEnvelope<A>> {
@@ -102,8 +101,7 @@ export async function buildProjectExport<A>(
       },
       evaluation: {
         pack: source.compiled.pack,
-        examinerReport: source.examinerRun?.report ?? null,
-        calibration: source.calibration,
+        examinerReport: source.examinerReport,
         approval: {
           forDigest: source.approvedDigest,
           approvedAt: source.approvedAt,

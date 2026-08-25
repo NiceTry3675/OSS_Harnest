@@ -1,9 +1,8 @@
 /** 모의 모델 회귀 테스트 — 관통 시나리오: 원샷은 부분 커버, 변이가 실패 케이스를 흡수해 등반.
- *  승인 전 요건(검증 배터리 → 캘리브레이션 → 차단 해제)도 같은 모의 모델로 관통한다. */
+ *  승인 전 요건(검증 배터리 → 차단 해제)도 같은 모의 모델로 관통한다. */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { approvalBlockers, judgeCalibration, type CaseDef } from "@harnest/contracts";
+import { approvalBlockers, type CaseDef } from "@harnest/contracts";
 import {
-  buildCalibrationPairs,
   compile,
   createGenerator,
   createInitial,
@@ -15,15 +14,24 @@ import {
 import type { HandoverProblem } from "@harnest/template-handover";
 import {
   createAssistMockClient,
+  createAnthropicClient,
+  createDetectedByoClient,
   createGeminiClient,
   createMockClient,
+  createOllamaClient,
   createOpenAIClient,
+  createOpenRouterClient,
   createVertexClient,
+  detectAndListModels,
+  detectByoCredential,
   getByoCredential,
+  listAvailableModels,
   normalizeVertexServiceAccount,
+  normalizeOllamaBaseUrl,
   parseVertexServiceAccount,
   setByoCredential,
   testByoConnection,
+  testDetectedByoConnection,
 } from "./llm";
 
 const c = (id: string, q: string, a: string): CaseDef => ({ id, question: q, expectedAnswer: a });
@@ -40,12 +48,14 @@ const problem: HandoverProblem = {
     c("case-5", "비밀 키는 어디에 보관하나요?", "모든 비밀 키는 볼트에 저장하며 저장소에 넣는 것은 금지입니다."),
   ],
   lengthCap: 2000,
+  // 간결성 끔 — 이 파일의 관통 시나리오는 순수 커버리지 등반을 검증한다
+  useConciseness: false,
 };
 
 describe("BYO 키 저장", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("Gemini·Vertex·OpenAI 자격 증명을 서로 다른 localStorage 슬롯에 보관한다", () => {
+  it("각 공급자 자격 증명을 서로 다른 localStorage 슬롯에 보관한다", () => {
     const values = new Map<string, string>();
     vi.stubGlobal("localStorage", {
       getItem: (key: string) => values.get(key) ?? null,
@@ -56,9 +66,15 @@ describe("BYO 키 저장", () => {
     setByoCredential("gemini", "gemini-key");
     setByoCredential("vertex", "vertex-credential");
     setByoCredential("openai", "openai-key");
+    setByoCredential("anthropic", "anthropic-key");
+    setByoCredential("openrouter", "openrouter-key");
+    setByoCredential("ollama", "http://localhost:11434");
     expect(getByoCredential("gemini")).toBe("gemini-key");
     expect(getByoCredential("vertex")).toBe("vertex-credential");
     expect(getByoCredential("openai")).toBe("openai-key");
+    expect(getByoCredential("anthropic")).toBe("anthropic-key");
+    expect(getByoCredential("openrouter")).toBe("openrouter-key");
+    expect(getByoCredential("ollama")).toBe("http://localhost:11434");
 
     setByoCredential("openai", null);
     expect(getByoCredential("openai")).toBeNull();
@@ -97,7 +113,7 @@ describe("모의 모델 관통", () => {
     expect(h.perCase).toHaveLength(1);
   });
 
-  it("승인 전 요건 관통: 검증 배터리 → 캘리브레이션(꼼수 쌍 포함) → 승인 차단 해제", async () => {
+  it("승인 전 요건 관통: 검증 배터리 → 승인 차단 해제", async () => {
     // 같은 케이스로 compile해 다이제스트가 결속된 팩을 얻는다 (5케이스 → 가시 4 / 홀드아웃 1)
     const { problem: p, pack } = await compile(
       {
@@ -115,42 +131,21 @@ describe("모의 모델 관통", () => {
     );
     const llm = createMockClient(p);
 
-    const run = await runExaminerBattery(p, pack, llm);
-    expect(run.report.forDigest).toBe(pack.definitionDigest);
-    // 종합 "주의"의 출처까지 고정: 순서(절단본 0 = 빈 문서 0 동점)와 꼼수 내성(모의 grader가
-    // 오염 응답에 부분 점수) — 정직 표기가 그대로 판정에 남는다
-    expect(run.report.checks.map((c) => `${c.id}:${c.verdict}`)).toEqual([
-      "ordering:warn",
-      "discrimination:pass",
+    // 리포트가 없으면 승인이 차단된다
+    expect(approvalBlockers(pack, null)).toHaveLength(1);
+
+    const report = await runExaminerBattery(p, pack, llm);
+    expect(report.forDigest).toBe(pack.definitionDigest);
+    // 종합 "주의"의 출처까지 고정: 꼼수 내성(모의 grader가 오염 응답에 부분 점수) —
+    // 정직 표기가 그대로 판정에 남는다
+    expect(report.checks.map((c) => `${c.id}:${c.verdict}`)).toEqual([
       "stability:pass",
       "hack_resistance:warn",
     ]);
-    expect(run.report.overall).toBe("warn");
+    expect(report.overall).toBe("warn");
 
-    const pairs = buildCalibrationPairs(run, pack);
-    expect(pairs.length).toBeGreaterThanOrEqual(2);
-    expect(pairs[0].kind).toBe("hack_probe");
-
-    // 승인 요건: 리포트만으로는 부족하고, 사용자 판정이 모두 모여야 차단이 풀린다
-    expect(approvalBlockers(pack, run.report, null)).toHaveLength(1);
-    const calibration = judgeCalibration(
-      pairs,
-      pairs.map((s) => s.examinerChoice),
-      pack,
-      run.report,
-    );
-    expect(calibration.verdict).toBe("pass");
-    expect(approvalBlockers(pack, run.report, calibration)).toEqual([]);
-
-    // 검증을 다시 실행하면(새 리포트 인스턴스) 이전 캘리브레이션은 자동 무효
-    // (리포트 인스턴스 결속 규칙 자체는 contracts/examiner.test.ts가 결정적으로 검증)
-    expect(
-      approvalBlockers(
-        pack,
-        { ...run.report, ranAt: "2026-08-23T23:59:59.000Z" },
-        calibration,
-      ).some((b) => b.includes("검증이 다시 실행")),
-    ).toBe(true);
+    // warn은 승인을 허용한다 — 표기가 따라갈 뿐 차단하지 않는다
+    expect(approvalBlockers(pack, report)).toEqual([]);
   });
 });
 
@@ -202,6 +197,184 @@ const openAISuccessResponse = (...texts: string[]): Response =>
       ],
     }),
   }) as Response;
+
+const jsonResponse = (body: unknown): Response =>
+  ({ ok: true, status: 200, json: async () => body }) as Response;
+
+describe("자격 증명 공급자 자동 판별", () => {
+  it.each([
+    [`sk-proj-${"a".repeat(24)}`, "openai"],
+    [`sk-ant-api03-${"b".repeat(24)}`, "anthropic"],
+    [`sk-or-v1-${"c".repeat(24)}`, "openrouter"],
+    [`AIza${"d".repeat(32)}`, "gemini"],
+    ["ollama://localhost:11434", "ollama"],
+    ["http://127.0.0.1:11434/api", "ollama"],
+  ])("%s 형식을 %s로 판별한다", (credential, provider) => {
+    const result = detectByoCredential(credential);
+    expect(result.status).toBe("detected");
+    if (result.status === "detected") expect(result.value.provider).toBe(provider);
+  });
+
+  it("알 수 없는 키는 여러 공급자에 전송하지 않고 판별 불가로 남긴다", () => {
+    const result = detectByoCredential("vendor-neutral-secret");
+    expect(result.status).toBe("unknown");
+    if (result.status === "unknown") expect(result.reason).toContain("판별할 수 없습니다");
+  });
+
+  it("Ollama endpoint를 base URL로 정규화하고 위험한 URL 구성요소를 거부한다", () => {
+    expect(normalizeOllamaBaseUrl("localhost:11434/api/")).toBe("http://localhost:11434");
+    expect(() => normalizeOllamaBaseUrl("ftp://localhost:11434")).toThrow("HTTP 또는 HTTPS");
+    expect(() => normalizeOllamaBaseUrl("http://user:pass@localhost:11434")).toThrow(
+      "사용자 정보",
+    );
+  });
+});
+
+describe("공급자별 모델 버전 목록", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("자동 판별한 Claude 키로 접근 가능한 모델과 메타데이터를 조회한다", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      jsonResponse({
+        data: [
+          {
+            id: "claude-sonnet-test",
+            display_name: "Claude Sonnet Test",
+            created_at: "2026-01-01T00:00:00Z",
+            max_input_tokens: 200_000,
+            max_tokens: 64_000,
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await detectAndListModels(`sk-ant-api03-${"x".repeat(24)}`);
+    expect(result.provider).toBe("anthropic");
+    expect(result.models).toEqual([
+      expect.objectContaining({
+        id: "claude-sonnet-test",
+        label: "Claude Sonnet Test",
+        contextWindow: 200_000,
+        maxOutputTokens: 64_000,
+      }),
+    ]);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://api.anthropic.com/v1/models?limit=1000");
+    expect(fetchMock.mock.calls[0][1]?.headers).toMatchObject({
+      "x-api-key": `sk-ant-api03-${"x".repeat(24)}`,
+      "anthropic-version": "2023-06-01",
+    });
+  });
+
+  it("Gemini 목록에서 generateContent 지원 모델만 반환하고 resource prefix를 제거한다", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          models: [
+            {
+              name: "models/gemini-text-test",
+              displayName: "Gemini Text Test",
+              supportedGenerationMethods: ["generateContent"],
+              inputTokenLimit: 1000,
+            },
+            {
+              name: "models/embedding-test",
+              displayName: "Embedding",
+              supportedGenerationMethods: ["embedContent"],
+            },
+          ],
+        }),
+      ),
+    );
+    await expect(listAvailableModels("gemini", `AIza${"g".repeat(32)}`)).resolves.toEqual([
+      expect.objectContaining({ id: "gemini-text-test", contextWindow: 1000 }),
+    ]);
+  });
+
+  it("OpenAI·OpenRouter·Ollama 응답을 공통 모델 항목으로 변환한다", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ data: [{ id: "gpt-test", owned_by: "openai" }] }))
+      .mockResolvedValueOnce(
+        jsonResponse({ data: [{ id: "anthropic/claude-test", name: "Claude Test", context_length: 99 }] }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          models: [
+            {
+              model: "qwen:test",
+              modified_at: "2026-01-01T00:00:00Z",
+              details: { parameter_size: "7B", quantization_level: "Q4" },
+            },
+          ],
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(listAvailableModels("openai", `sk-${"o".repeat(24)}`)).resolves.toEqual([
+      expect.objectContaining({ id: "gpt-test", ownedBy: "openai" }),
+    ]);
+    await expect(
+      listAvailableModels("openrouter", `sk-or-v1-${"r".repeat(24)}`),
+    ).resolves.toEqual([
+      expect.objectContaining({ id: "anthropic/claude-test", contextWindow: 99 }),
+    ]);
+    await expect(listAvailableModels("ollama", "http://localhost:11434")).resolves.toEqual([
+      expect.objectContaining({ id: "qwen:test", label: "qwen:test (7B · Q4)" }),
+    ]);
+    expect(fetchMock.mock.calls[2][0]).toBe("http://localhost:11434/api/tags");
+  });
+});
+
+describe("Claude·OpenRouter·Ollama 호출 어댑터", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("각 공급자 요청 형식과 텍스트 응답을 처리한다", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ content: [{ type: "text", text: "Claude 응답" }] }))
+      .mockResolvedValueOnce(jsonResponse({ choices: [{ message: { content: "Router 응답" } }] }))
+      .mockResolvedValueOnce(jsonResponse({ message: { role: "assistant", content: "Ollama 응답" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createAnthropicClient("ant-key", "claude-test").complete("요청")).resolves.toBe(
+      "Claude 응답",
+    );
+    await expect(createOpenRouterClient("or-key", "vendor/model").complete("요청")).resolves.toBe(
+      "Router 응답",
+    );
+    await expect(createOllamaClient("ollama://localhost:11434", "qwen:test").complete("요청"))
+      .resolves.toBe("Ollama 응답");
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "https://api.anthropic.com/v1/messages",
+      "https://openrouter.ai/api/v1/chat/completions",
+      "http://localhost:11434/api/chat",
+    ]);
+    expect(fetchMock.mock.calls[0][1]?.headers).toMatchObject({
+      "x-api-key": "ant-key",
+      "anthropic-dangerous-direct-browser-access": "true",
+    });
+    expect(fetchMock.mock.calls[1][1]?.headers).toMatchObject({ Authorization: "Bearer or-key" });
+    expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toMatchObject({
+      model: "qwen:test",
+      stream: false,
+      options: { num_predict: 8192 },
+    });
+  });
+
+  it("자동 판별 클라이언트와 연결 테스트가 판별된 provider를 보존한다", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ choices: [{ message: { content: "OK" } }] })),
+    );
+    const key = `sk-or-v1-${"z".repeat(24)}`;
+    const client = createDetectedByoClient(key, "openai/test");
+    expect(client.providerId).toBe("openrouter");
+    await expect(testDetectedByoConnection(key, "openai/test")).resolves.toBe("openrouter");
+  });
+});
 
 async function vertexCredential(): Promise<string> {
   const pair = await crypto.subtle.generateKey(
@@ -255,6 +428,12 @@ describe("Vertex 서비스 계정 어댑터", () => {
     expect(parsed.project_id).toBe("vertex-project");
     expect(parsed.client_email).toBe("harnest@vertex-project.iam.gserviceaccount.com");
     expect(normalizeVertexServiceAccount(raw)).not.toContain("client_x509_cert_url");
+    const detection = detectByoCredential(raw);
+    expect(detection.status).toBe("detected");
+    if (detection.status === "detected") expect(detection.value.provider).toBe("vertex");
+    await expect(listAvailableModels("vertex", raw)).resolves.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "gemini-3.7-flash", source: "catalog" })]),
+    );
 
     expect(() => parseVertexServiceAccount("not-json")).toThrow("해석할 수 없습니다");
     expect(() => parseVertexServiceAccount(JSON.stringify({ type: "authorized_user" }))).toThrow(
@@ -314,6 +493,57 @@ describe("Vertex 서비스 계정 어댑터", () => {
       contents: [{ role: "user", parts: [{ text: "요청 본문" }] }],
       generationConfig: { temperature: 0, maxOutputTokens: 64 },
     });
+  });
+
+  it("여러 텍스트 part를 합치고 공개된 thinking part는 답변에서 제외한다", async () => {
+    const raw = await vertexCredential();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(tokenResponse())
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  { text: "내부 생각", thought: true },
+                  { thoughtSignature: "서명만 있는 part" },
+                  { text: "최종" },
+                  { text: " 응답" },
+                ],
+              },
+              finishReason: "STOP",
+            },
+          ],
+        }),
+      } as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createVertexClient(raw, "gemini-3.7-flash", { retryBaseMs: 0 });
+    await expect(client.complete("요청")).resolves.toBe("최종 응답");
+  });
+
+  it("thinking이 출력 한도를 소진하면 Vertex 종료 사유를 보존한다", async () => {
+    const raw = await vertexCredential();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(tokenResponse())
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [{ content: { parts: [] }, finishReason: "MAX_TOKENS" }],
+          usageMetadata: { thoughtsTokenCount: 16 },
+        }),
+      } as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createVertexClient(raw, "gemini-3.7-flash", { retryBaseMs: 0 });
+    await expect(client.complete("요청")).rejects.toThrow(
+      "출력 토큰 한도에 도달해 텍스트를 만들지 못했습니다 (thinking 16 tokens)",
+    );
   });
 
   it("만료 60초 전에는 access token을 갱신한다", async () => {
@@ -552,6 +782,28 @@ describe("승인 전 BYO 1콜 연결 테스트", () => {
       model: "gpt-test",
       temperature: 0,
       max_output_tokens: 16,
+    });
+  });
+
+  it("Gemini 3.7 Vertex 연결 테스트는 low thinking과 충분한 출력 한도를 쓴다", async () => {
+    const raw = await vertexCredential();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(tokenResponse())
+      .mockResolvedValueOnce(successResponse("OK"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      testByoConnection("vertex", raw, "gemini-3.7-flash"),
+    ).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [, vertexInit] = fetchMock.mock.calls[1];
+    expect(JSON.parse(String(vertexInit?.body))).toMatchObject({
+      generationConfig: {
+        temperature: 1,
+        maxOutputTokens: 1024,
+        thinkingConfig: { thinkingLevel: "LOW" },
+      },
     });
   });
 

@@ -11,7 +11,7 @@ const base: Omit<EvaluationPack, "definitionDigest"> = {
   gates: [],
   judgeProcedure: {
     kind: "deterministic_only",
-    exemptions: { examinerReport: "-", calibration: "-", pairwise: "-" },
+    exemptions: { examinerReport: "-", pairwise: "-" },
   },
   holdoutPolicy: { mode: "none", note: "-" },
 };

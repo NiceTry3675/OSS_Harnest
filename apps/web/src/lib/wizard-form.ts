@@ -27,6 +27,7 @@ export function validate(q: Question, value: DraftValue): string | null {
     return null;
   }
   const v = typeof value === "string" ? value.trim() : "";
+  if (q.type === "toggle") return null; // 켬/끔 — 기본값이 있으므로 항상 유효
   if (q.type === "textarea") {
     if (q.maxChars !== undefined && v.length > q.maxChars) {
       return `최대 ${q.maxChars.toLocaleString()}자까지 입력할 수 있습니다 (현재 ${v.length.toLocaleString()}자).`;
@@ -77,6 +78,11 @@ export function toAnswers(
       continue;
     }
     const raw = typeof value === "string" ? value.trim() : "";
+    if (q.type === "toggle") {
+      // 명시적 "false"만 끔 — 손대지 않은 초안은 선언된 기본값(없으면 켬)을 따른다
+      answers[q.id] = raw === "" ? q.defaultValue !== false : raw !== "false";
+      continue;
+    }
     answers[q.id] = q.type === "number" ? Number(raw) : raw;
   }
   return answers;

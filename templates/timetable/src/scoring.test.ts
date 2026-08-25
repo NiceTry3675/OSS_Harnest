@@ -179,7 +179,7 @@ describe("score — 가중 합산", () => {
 });
 
 describe("결정적 전용 면제 (SPEC §10)", () => {
-  it("실제 timetable 팩은 리포트·캘리브레이션 없이도 승인 차단이 없다", async () => {
+  it("실제 timetable 팩은 리포트 없이도 승인 차단이 없다", async () => {
     const { approvalBlockers } = await import("@harnest/contracts");
     const { compile } = await import("./index");
     const { pack } = await compile({
@@ -188,6 +188,6 @@ describe("결정적 전용 면제 (SPEC §10)", () => {
       answers: { staff: "가람, 나래, 다온", period: 7, maxConsecutive: 3 },
     });
     expect(pack.judgeProcedure.kind).toBe("deterministic_only");
-    expect(approvalBlockers(pack, null, null)).toEqual([]);
+    expect(approvalBlockers(pack, null)).toEqual([]);
   });
 });

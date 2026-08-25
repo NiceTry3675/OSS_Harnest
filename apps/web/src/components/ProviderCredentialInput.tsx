@@ -2,11 +2,11 @@ import type { ChangeEvent } from "react";
 import {
   parseVertexServiceAccount,
   PROVIDER_LABEL,
-  type ByoProvider,
+  type CredentialProvider,
 } from "../lib/llm";
 
 interface ProviderCredentialInputProps {
-  provider: ByoProvider;
+  provider: CredentialProvider;
   value: string;
   storedCredential?: string | null;
   sharedAvailable?: boolean;

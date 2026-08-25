@@ -7,6 +7,7 @@ import type {
   CaseDef, EvaluationPack, InterviewSubmission, JudgeProvider, LoopSpec, Question,
 } from "@harnest/contracts";
 import { digestScope, sha256Canonical } from "@harnest/contracts";
+import { CONCISENESS_WEIGHT, COVERAGE_WEIGHT } from "./runtime";
 
 export const TEMPLATE_ID = "handover";
 export const TEMPLATE_NAME = "인수인계·온보딩 문서";
@@ -40,6 +41,9 @@ export interface HandoverProblem {
   holdoutCases: CaseDef[];
   /** 사용자가 정한 절대 분량 상한(자) — hard gate */
   lengthCap: number;
+  /** 간결성 가점 사용 여부 — 켜면 커버리지 0.8 + 간결성 0.2 가중(./runtime.ts).
+   *  criteria 배열을 바꾸므로 다이제스트에 자동 결속된다. */
+  useConciseness: boolean;
 }
 
 /** 산출물 = 문서 텍스트 */
@@ -75,12 +79,25 @@ export const questions: Question[] = [
     role: "criteria",
     type: "number",
     label: "문서는 몇 자까지 허용할까요?",
-    shortLabel: "분량·모델",
-    nextLabel: "작성 완료 — 승인 화면으로",
+    shortLabel: "분량",
+    nextLabel: "간결성 설정으로",
     help: `이 분량을 넘는 문서는 실격 처리됩니다 (${LENGTH_CAP_MIN}~${LENGTH_CAP_MAX.toLocaleString()}자). 기록 전체가 상한 안에 들어갈 만큼 넉넉하면 베끼기 방어(분량 게이트)가 약해집니다`,
     min: LENGTH_CAP_MIN,
     max: LENGTH_CAP_MAX,
     defaultValue: LENGTH_CAP_DEFAULT,
+  },
+  {
+    id: "conciseness",
+    role: "criteria",
+    type: "toggle",
+    label: "분량을 아껴 쓰면 가점을 줄까요?",
+    shortLabel: "간결성·모델",
+    nextLabel: "작성 완료 — 승인 화면으로",
+    help:
+      "켜면 커버리지 80% + 간결성 20%로 채점합니다 — 같은 커버리지면 짧은 문서가 더 높은 점수를 받아, " +
+      "상한이 넉넉해도 만점 포화 없이 문서를 계속 다듬습니다. 답변력이 0인 문서는 간결성 점수도 0입니다. " +
+      "끄면 케이스 답변력 100%로만 채점합니다.",
+    defaultValue: true,
   },
 ];
 
@@ -88,6 +105,9 @@ export interface CompiledHandover {
   problem: HandoverProblem;
   pack: EvaluationPack;
   loopSpec: LoopSpec;
+  /** 설정의 산술적 성질에 대한 정적 안내 — 승인 화면이 그대로 표시한다.
+   *  (예: 기록 전체가 분량 상한 안 = 베끼기 방어(분량 게이트) 약화, 실측 교훈 ①) */
+  notices: string[];
 }
 
 export interface CompileOptions {
@@ -103,6 +123,8 @@ export async function compile(
   const material = String(submission.answers["material"] ?? "").trim();
   const rawCases = submission.answers["cases"];
   const lengthCap = Number(submission.answers["lengthCap"] ?? LENGTH_CAP_DEFAULT);
+  // 명시적 false만 끔 — 키가 없는 구버전 답변은 기본값(켬)을 따른다
+  const useConciseness = submission.answers["conciseness"] !== false;
 
   if (!Array.isArray(rawCases)) throw new Error("질문·답 기록을 입력해 주세요.");
   const cases: CaseDef[] = rawCases
@@ -138,7 +160,13 @@ export async function compile(
   const visibleCases = cases.slice(0, cases.length - holdoutCount);
   const holdoutCases = cases.slice(cases.length - holdoutCount);
 
-  const problem: HandoverProblem = { material, visibleCases, holdoutCases, lengthCap };
+  const problem: HandoverProblem = {
+    material,
+    visibleCases,
+    holdoutCases,
+    lengthCap,
+    useConciseness,
+  };
 
   // 케이스 본문·자료의 지문을 판정 절차에 결속 — 내용이 다른 시험지는 다른 다이제스트를
   // 갖는다(같은 개수·같은 상한이어도). 체크포인트 귀속·시드가 실제 시험지 내용에 잠긴다.
@@ -153,9 +181,23 @@ export async function compile(
         kind: "case_answering",
         scorer: "handover_case_answering",
         params: { visibleCases: visibleCases.length, scale: "0/0.5/1", casesDigest },
-        weight: 1.0,
+        weight: useConciseness ? COVERAGE_WEIGHT : 1.0,
         label: `문서만 보고 실제 질문에 답할 수 있는가 (가시 케이스 ${visibleCases.length}개 실측)`,
       },
+      // 간결성(선택) — 상한 대비 여유의 결정적 산술. 커버리지와 정면으로 충돌하는 축이라
+      // "전부 담으면 만점" 포화를 없앤다. 답변력 0이면 0점(빈 문서 역전 방지, runtime.ts).
+      ...(useConciseness
+        ? [
+            {
+              id: "conciseness",
+              kind: "deterministic" as const,
+              scorer: "length_headroom",
+              params: { maxChars: lengthCap },
+              weight: CONCISENESS_WEIGHT,
+              label: `간결성 (분량 상한 ${lengthCap.toLocaleString()}자 대비 여유 — 답변력이 0이면 0점)`,
+            },
+          ]
+        : []),
     ],
     gates: [
       {
@@ -170,7 +212,7 @@ export async function compile(
     judgeProcedure: {
       kind: "case_answering",
       judge: { provider: opts.judgeProvider, model: opts.judgeModel },
-      // 검증 리포트·캘리브레이션은 승인 전 요건으로 구현됨(./examiner.ts) — forDigest 결속이라 팩 필드가 아니다
+      // 검증 리포트는 승인 전 요건으로 구현됨(./examiner.ts) — forDigest 결속이라 팩 필드가 아니다
       pairwiseNotice:
         "미적용 — 케이스 집계 스칼라가 엄격히 개선될 때만 채택합니다(SPEC §5.1.1)",
     },
@@ -192,7 +234,22 @@ export async function compile(
     seed: parseInt(definitionDigest.slice(0, 8), 16),
   };
 
-  return { problem, pack, loopSpec };
+  // 베끼기 방어 안내 — 가시 기록 전체가 상한 안에 들어가면 정답을 통째로 옮겨 적는 문서를
+  // 분량 게이트가 걸러내지 못한다(게이트 밴드 교훈 ①). LLM 호출 없는 두 숫자의 산술이므로
+  // 배터리 판정이 아니라 컴파일 시 정적 안내로 알린다.
+  const verbatimLength = visibleCases
+    .map((c) => `질문: ${c.question}\n답: ${c.expectedAnswer}`)
+    .join("\n\n").length;
+  const notices: string[] = [];
+  if (verbatimLength <= lengthCap) {
+    notices.push(
+      `기록 전체(약 ${verbatimLength.toLocaleString()}자)가 분량 상한 ${lengthCap.toLocaleString()}자 안에 들어갑니다 — ` +
+        "정답을 통째로 옮겨 적는 문서를 분량 게이트가 걸러내지 못하는 설정입니다. " +
+        "상한을 낮추면 베끼기 방어가 살아나며, 결과에서는 숨김 케이스 점수를 함께 확인하세요.",
+    );
+  }
+
+  return { problem, pack, loopSpec, notices };
 }
 
 export * from "./assist";

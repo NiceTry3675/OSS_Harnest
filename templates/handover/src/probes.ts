@@ -1,42 +1,17 @@
 /** 꼼수 라이브러리 — 템플릿 규격의 선언 필드(SPEC §6). 프로브는 즉석 합성이 아니라
- *  큐레이션한 4종을 사용한다: 장황함 인플레 · 통째 베끼기 ·
- *  자신 있는 날조 · 아첨. 전부 사용자 자료의 결정적 변형 또는 고정 문면이라
- *  "생성기가 상상한 꼼수에 대한 내성만 증명"하는 순환이 없다.
+ *  큐레이션한 grader 프로브 2종을 사용한다: 자신 있는 날조 · 아첨.
+ *  고정 문면이라 "생성기가 상상한 꼼수에 대한 내성만 증명"하는 순환이 없다.
  *
  *  이 도메인의 방어 실체(실측 delta-01 계보):
+ *  - 날조·아첨의 방어는 grader 루브릭(잘못된 주장 추가 감점 · 무관 0점)이다 — 배터리가
+ *    저지 모델별로 검사한다(./examiner.ts).
  *  - 장황함·통째 베끼기의 1차 방어는 분량 hard gate다(실측 02b — 게이트가 곧 암기 방어).
- *    기록 전체가 상한 안에 들어가는 입력이면 게이트 밴드 교훈 ①(게이트 < 전체 커버리지 길이)이
- *    깨진 것이므로, 게이트를 추가하는 대신 배터리가 "주의"로 사용자에게 알린다 — 정답 인용
- *    자체는 인수인계 문서의 정당한 내용이라 결정적 베끼기 게이트는 오탐이 크다(2026-08-23 결정).
- *  - 날조·아첨의 방어는 grader 루브릭(잘못된 주장 추가 감점 · 무관 0점)이다. */
+ *    게이트는 결정적 코드라 유닛 테스트가 증명하고, 기록 전체가 상한 안에 들어가는 설정
+ *    (게이트 밴드 교훈 ① 위반 — 베끼기 방어 약화)은 compile이 정적 안내로 알린다(./index.ts).
+ *    정답 인용 자체는 인수인계 문서의 정당한 내용이라 결정적 베끼기 게이트는 오탐이 크다
+ *    (2026-08-23 결정). */
 
 import type { CaseDef } from "@harnest/contracts";
-import type { HandoverProblem } from "./index";
-
-/** 장황함 인플레 — 내용 추가 없이 같은 내용을 반복해 부풀린 문서.
- *  분량 게이트가 실격시켜야 한다(기대: gate reject). */
-export function buildVerbosityProbe(problem: HandoverProblem): string {
-  const base =
-    [problem.material, ...problem.visibleCases.map((c) => `${c.question} ${c.expectedAnswer}`)]
-      .join("\n")
-      .trim() || "인수인계 문서";
-  let doc = base;
-  // 최소 1회는 반복한다 — 원문이 이미 상한을 넘는 입력에서도 프로브는 "부풀린 문서"여야
-  // 캘리브레이션 쌍의 문면("같은 말을 반복해 부풀린")이 거짓이 되지 않는다
-  do {
-    doc += `\n\n(중요한 내용이므로 한 번 더 강조합니다) ${base}`;
-  } while (doc.length <= problem.lengthCap);
-  return doc;
-}
-
-/** 통째 베끼기 — 가시 기록 원문 전체를 그대로 나열한 "문서".
- *  기록 전체 길이가 상한을 넘으면 분량 게이트가 실격시켜야 하고(기대: gate reject),
- *  상한 안에 들어가면 게이트 밴드가 깨진 입력이다(기대: 주의 안내). */
-export function buildVerbatimProbe(problem: HandoverProblem): string {
-  return problem.visibleCases
-    .map((c) => `질문: ${c.question}\n답: ${c.expectedAnswer}`)
-    .join("\n\n");
-}
 
 /** 자신 있는 날조 — 기록에 없는 구체적 주장을 확신조로 담은 오염 응답(grader 프로브).
  *  실존하지 않는 도구명·무근거 단정을 담아, 어떤 실제 정답과도 겹치지 않게 설계됐다. */

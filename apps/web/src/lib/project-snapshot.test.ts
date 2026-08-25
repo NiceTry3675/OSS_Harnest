@@ -3,8 +3,6 @@
 import { describe, expect, it } from "vitest";
 import { indexedDB as fakeIndexedDB } from "fake-indexeddb";
 import {
-  approvalBlockers,
-  type CalibrationResult,
   type EvaluationPack,
   type ExaminerReport,
   type LoopCheckpoint,
@@ -17,6 +15,7 @@ import {
   PROJECT_SNAPSHOT_VERSION,
   restoreProjectSnapshot,
   type ProjectSnapshot,
+  type StoredProjectSnapshot,
 } from "./project-snapshot";
 
 const pack: EvaluationPack = {
@@ -40,27 +39,14 @@ const compiled: CompiledGeneric = {
 };
 
 const report: ExaminerReport = {
-  checks: [],
+  checks: [
+    { id: "stability", verdict: "pass", note: "-" },
+    { id: "hack_resistance", verdict: "pass", note: "-" },
+  ],
   overall: "pass",
   forDigest: pack.definitionDigest,
   judge: { provider: "mock", model: "모의 모델" },
   ranAt: "2026-08-23T00:00:00.000Z",
-};
-
-const failedCalibration: CalibrationResult = {
-  pairs: [
-    {
-      id: "hack-1",
-      kind: "hack_probe",
-      userChoice: "A",
-      examinerChoice: "B",
-      agreed: false,
-    },
-  ],
-  verdict: "fail",
-  forDigest: pack.definitionDigest,
-  forReportAt: report.ranAt,
-  ranAt: "2026-08-23T00:01:00.000Z",
 };
 
 function makeSnapshot(overrides: Partial<ProjectSnapshot> = {}): ProjectSnapshot {
@@ -69,8 +55,7 @@ function makeSnapshot(overrides: Partial<ProjectSnapshot> = {}): ProjectSnapshot
     templateId: "handover",
     answers: { material: "공개 자료" },
     compiled,
-    examinerRun: { report, artifacts: { goodDoc: "좋은 문서" } },
-    calibration: null,
+    examinerReport: report,
     approvedDigest: pack.definitionDigest,
     approvedAt: "2026-08-23T00:02:00.000Z",
     runId: "snapshot-run",
@@ -122,30 +107,49 @@ describe("IndexedDbProjectStore", () => {
     });
   });
 
-  it("승인 전 캘리브레이션 실패는 새로고침 뒤에도 같은 다이제스트에 고착된다", () => {
-    const restored = restoreProjectSnapshot(
-      makeSnapshot({
-        calibration: failedCalibration,
-        approvedDigest: null,
-        approvedAt: null,
-        runId: null,
-      }),
-    )!;
+  it("v1 스냅샷은 검사 4종 리포트를 2종으로 줄이고 overall을 다시 계산해 마이그레이션한다", () => {
+    const v1Report: ExaminerReport = {
+      ...report,
+      checks: [
+        { id: "ordering" as never, verdict: "warn", note: "-" },
+        { id: "discrimination" as never, verdict: "pass", note: "-" },
+        { id: "stability", verdict: "pass", note: "-" },
+        { id: "hack_resistance", verdict: "pass", note: "-" },
+      ],
+      overall: "warn",
+    };
+    const base = makeSnapshot();
+    const v1: StoredProjectSnapshot = {
+      schemaVersion: 1,
+      templateId: base.templateId,
+      answers: base.answers,
+      compiled: base.compiled,
+      examinerRun: { report: v1Report },
+      approvedDigest: base.approvedDigest,
+      approvedAt: base.approvedAt,
+      runId: base.runId,
+      holdout: base.holdout,
+    };
 
-    expect(restored.calibration).toEqual(failedCalibration);
-    expect(approvalBlockers(pack, report, restored.calibration).some((b) => b.includes("캘리브레이션 실패")))
-      .toBe(true);
-  });
+    const restored = restoreProjectSnapshot(v1)!;
+    // ordering·discrimination이 떨어지고, warn의 출처가 사라졌으므로 overall은 pass로 재계산된다
+    expect(restored.examinerReport?.checks.map((c) => c.id)).toEqual([
+      "stability",
+      "hack_resistance",
+    ]);
+    expect(restored.examinerReport?.overall).toBe("pass");
+    // 승인·실행 상태는 v2와 같은 규칙으로 복원된다
+    expect(restored.approvedAt).toBe(base.approvedAt);
 
-  it("검증 실행 계수는 새로고침 뒤에도 유지되고, 구버전 스냅샷은 0으로 읽는다", () => {
-    const attempts = { forDigest: pack.definitionDigest, count: 2 };
-    const restored = restoreProjectSnapshot(makeSnapshot({ examinerAttempts: attempts }))!;
-    expect(restored.examinerAttempts).toEqual(attempts);
+    // 현재 배터리 2종을 담지 못한 v1 리포트는 리포트 없음으로 마이그레이션 — 자동 재검증 대상
+    const partial = restoreProjectSnapshot({
+      ...v1,
+      examinerRun: { report: { ...v1Report, checks: v1Report.checks.slice(0, 2) } },
+    })!;
+    expect(partial.examinerReport).toBeNull();
 
-    // 필드가 없던 구버전 스냅샷 — 관용적으로 null(계수 0)로 복원한다
-    const legacy = makeSnapshot();
-    delete legacy.examinerAttempts;
-    expect(restoreProjectSnapshot(legacy)!.examinerAttempts).toBeNull();
+    // 알 수 없는 미래 버전은 복원하지 않는다
+    expect(restoreProjectSnapshot({ ...base, schemaVersion: 99 as never })).toBeNull();
   });
 
   it("재진입 시 지난 시작 홀드아웃만 복원 불가로 확정하고 종료 단계는 대기로 둔다", () => {

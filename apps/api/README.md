@@ -89,18 +89,18 @@ localStorage에만 저장됩니다(SPEC §3 원칙 1). `SHARED_OPENAI_API_KEY` /
 | POST | `/proxy/openai` | 본문을 그대로 OpenAI Responses API에 전달 (공유 키 미설정 시 404) |
 | POST | `/proxy/gemini/{model}` | 본문을 그대로 Gemini generateContent에 전달 (공유 키 미설정 시 404) |
 
-`POST /exports`는 `kind: "harnest.project-export"`, `envelopeVersion: 1`, `exportedAt`와
+`POST /exports`는 `kind: "harnest.project-export"`, `envelopeVersion: 2`, `exportedAt`와
 `project.interview`·`project.evaluation`·`project.loopSpec`, `result.checkpoint`·`result.holdout`의
-완전한 v1 봉투 골격을 요구합니다. 인터뷰·Pack은 `skeleton-1`이고 같은 비어 있지 않은
+완전한 v2 봉투 골격을 요구합니다. 인터뷰·Pack은 `skeleton-1`이고 같은 비어 있지 않은
 `templateId`를 가져야 하며, judge 절차에 맞는 null 또는 객체형 승인 증거를 요구합니다. Pack의
 `templateId`, `packVersion`, 소문자 SHA-256 `definitionDigest`를 색인하고, approval·examiner report·
-calibration·checkpoint의 귀속 식별자가 현재 Pack과 리포트에 결속되는지 확인합니다. checkpoint는
+checkpoint의 귀속 식별자가 현재 Pack에 결속되는지 확인합니다. checkpoint는
 `status: "done"` 및 `doneReason`을 가져야 하며,
 `holdoutPolicy.mode`가 `none`이면 결과도 `none`, `auto_tail`이면 baseline/final의 scored 또는
 failed 기록을 가진 `measured`여야 합니다. 고정 계층의 알 수 없는 필드, 배열 안의 잘못된 원소 타입,
 중복 JSON 키와 잘못된 Unicode surrogate는 거부합니다.
 
-이는 저장소의 구조·귀속 검사일 뿐입니다. Pack 다이제스트 재계산, examiner/calibration 판정,
+이는 저장소의 구조·귀속 검사일 뿐입니다. Pack 다이제스트 재계산, examiner 판정,
 체크포인트 곡선과 홀드아웃 점수의 의미 검증은 브라우저의 `packages/contracts` 생산자 계약이
 권위이며 서버가 중복해서 판정하지 않습니다. 응답의 `Location`은 저장된 봉투 경로이고, GET
 응답의 `X-Content-SHA256`은 원문 바이트의 SHA-256입니다.

@@ -277,7 +277,15 @@ function lengthGateViolation(problem: HandoverProblem, doc: HandoverDoc): string
     : null;
 }
 
-/** 동결 평가자 — 게이트(분량) → 가시 케이스 실측 평균 ×100 */
+/** 간결성 사용 시 가중 배분 — 합 1.0 (pack.criteria의 weight와 같은 값이어야 한다).
+ *  0.8/0.2: 케이스 4개 기준 케이스 하나의 커버리지 가치(20점)와 간결성 최대 가점(20점)이
+ *  같아, 커버된 케이스를 버리고 줄이는 교환이 소케이스 구성에서는 성립하지 않는다. */
+export const COVERAGE_WEIGHT = 0.8;
+export const CONCISENESS_WEIGHT = 0.2;
+
+const round1 = (x: number): number => Math.round(x * 10) / 10;
+
+/** 동결 평가자 — 게이트(분량) → 가시 케이스 실측 평균 ×100 (+ 선택적 간결성 가중) */
 export function createScorer(problem: HandoverProblem, llm: LlmClient) {
   return async (doc: HandoverDoc): Promise<ScoreResult> => {
     const gateViolation = lengthGateViolation(problem, doc);
@@ -290,12 +298,19 @@ export function createScorer(problem: HandoverProblem, llm: LlmClient) {
       };
     }
     const grades = await gradeCases(llm, doc, problem.visibleCases);
-    const total =
-      Math.round((grades.reduce((a, g) => a + g.score, 0) / grades.length) * 1000) / 10;
+    const coverage = (grades.reduce((a, g) => a + g.score, 0) / grades.length) * 100;
+    const violations = grades.filter((g) => g.score < 1).map(summarize);
+    if (!problem.useConciseness) {
+      const total = round1(coverage);
+      return { total, violations, parts: { case_answerability: total }, gateRejected: false };
+    }
+    // 답변력이 0이면 간결성도 0 — 빈 문서가 간결성만으로 저커버리지 문서를 이기는 역전 방지
+    const headroom =
+      coverage > 0 ? Math.max(0, 1 - doc.length / problem.lengthCap) * 100 : 0;
     return {
-      total,
-      violations: grades.filter((g) => g.score < 1).map(summarize),
-      parts: { case_answerability: total },
+      total: round1(COVERAGE_WEIGHT * coverage + CONCISENESS_WEIGHT * headroom),
+      violations,
+      parts: { case_answerability: round1(coverage), conciseness: round1(headroom) },
       gateRejected: false,
     };
   };

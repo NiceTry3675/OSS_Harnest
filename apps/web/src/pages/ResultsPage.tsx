@@ -76,8 +76,7 @@ export function ResultsPage() {
     answers,
     checkpoint,
     holdout,
-    examinerRun,
-    calibration,
+    examinerReport,
   } = useProject();
   const navigate = useNavigate();
   const [saved, setSaved] = useState<"idle" | "saving" | "ok" | "fail">("idle");
@@ -108,8 +107,7 @@ export function ResultsPage() {
     const envelope = await buildProjectExport({
       compiled,
       answers,
-      examinerRun,
-      calibration,
+      examinerReport,
       approvedDigest,
       approvedAt,
       checkpoint,
@@ -409,9 +407,6 @@ export function ResultsPage() {
             <span className="badge muted" title={jp.exemptions.examinerReport}>
               검증 리포트: 해당 없음(특례)
             </span>
-            <span className="badge muted" title={jp.exemptions.calibration}>
-              캘리브레이션: 해당 없음(특례)
-            </span>
             <span className="badge muted" title={hp.note}>
               홀드아웃: 해당 없음
             </span>
@@ -427,28 +422,17 @@ export function ResultsPage() {
                 홀드아웃 {hp.holdoutCaseIds.length}케이스(자동 꼬리)
               </span>
             )}
-            {examinerRun !== null && examinerRun.report.forDigest === pack.definitionDigest ? (
+            {examinerReport !== null && examinerReport.forDigest === pack.definitionDigest ? (
               <span
                 className="badge"
-                title={examinerRun.report.checks
+                title={examinerReport.checks
                   .map((c) => `${c.id}: ${VERDICT_LABEL[c.verdict]} — ${c.note}`)
                   .join("\n")}
               >
-                검증 리포트: {VERDICT_LABEL[examinerRun.report.overall]}
+                검증 리포트: {VERDICT_LABEL[examinerReport.overall]}
               </span>
             ) : (
               <span className="badge muted">검증 리포트: 기록 없음</span>
-            )}
-            {calibration !== null && calibration.forDigest === pack.definitionDigest ? (
-              <span
-                className="badge"
-                title={`판정 ${VERDICT_LABEL[calibration.verdict]} — 알려진 꼼수 쌍 포함 블라인드 A/B`}
-              >
-                캘리브레이션: {calibration.pairs.filter((p) => p.agreed).length}/
-                {calibration.pairs.length} 일치
-              </span>
-            ) : (
-              <span className="badge muted">캘리브레이션: 기록 없음</span>
             )}
             {caseCounts !== null && caseCounts.total > 0 ? (
               caseCounts.ai + caseCounts.aiEdited > 0 ? (

@@ -1,17 +1,20 @@
-/** 시험관 검증 배터리 + 캘리브레이션 — llm_judge 포함 루프의 승인 전 요건 실행 계층
- *  (SPEC §3 원칙 2, §5.1 — 순서·변별력·안정성·꼼수 내성, 통과/주의/실패).
+/** 시험관 검증 배터리 — llm_judge 포함 루프의 승인 전 요건 실행 계층
+ *  (SPEC §3 원칙 2, §5.1 — 안정성·꼼수 내성, 통과/주의/실패).
+ *
+ *  배터리는 실행마다 달라질 수 있는 것, 즉 사용자가 고른 저지 모델만 검사한다:
+ *  - 안정성: 같은 문서를 두 번 채점해 판정이 흔들리는지 본다.
+ *  - 꼼수 내성: 날조·아첨 오염 응답(./probes.ts)이 grader에서 0점 처리되는지 본다.
+ *  결정적 코드(분량 게이트)는 유닛 테스트가 증명하고, 설정의 산술적 성질
+ *  (분량 상한 대 기록 길이 — 베끼기 방어)은 compile이 정적 안내로 알린다(./index.ts).
  *
  *  불변식:
- *  - 배터리·캘리브레이션은 **가시 케이스만** 쓴다. 홀드아웃 채점은 라운드 0·종료 시뿐이라는
+ *  - 배터리는 **가시 케이스만** 쓴다. 홀드아웃 채점은 라운드 0·종료 시뿐이라는
  *    구조 보장(SPEC §3 원칙 7)을 배터리에도 그대로 적용 — 이 파일 어디에도 holdoutCases 접근이 없다.
  *  - 채점은 동결 절차의 scorer 그대로(createScorer) — 리포트가 인증하는 대상이 바로 그 절차다.
- *  - 사다리 문서는 순서·변별력·안정성 검사의 입력으로만 사용한다.
- *    꼼수 프로브는 큐레이션 라이브러리(./probes.ts)에서만 가져온다.
  *  - 비용: 채점 케이스는 BATTERY_CASE_CAP까지 서브샘플 — 배터리는 개선 곡선이 아니라
  *    통과/주의/실패의 거친 판정이므로 허용한다(실행 비교 세트 고정은 SPEC §5.1.1). */
 
 import type {
-  CalibrationPairSpec,
   EvaluationPack,
   ExaminerCheckResult,
   ExaminerReport,
@@ -19,33 +22,13 @@ import type {
 } from "@harnest/contracts";
 import { worstVerdict } from "@harnest/contracts";
 import type { HandoverProblem } from "./index";
-import {
-  buildFabricationResponse,
-  buildSycophancyResponse,
-  buildVerbatimProbe,
-  buildVerbosityProbe,
-} from "./probes";
+import { buildFabricationResponse, buildSycophancyResponse } from "./probes";
 import { oneshotPrompt } from "./prompts";
 import { createScorer, gradeResponse, maxOutputTokensFor, type LlmClient } from "./runtime";
 
 /** 배터리 채점 케이스 상한 — 배치 채점으로 콜 수는 케이스 수와 무관해졌지만,
  *  배터리는 통과/주의/실패의 거친 판정이라 소표본이면 충분하고 프롬프트 비용을 줄인다 */
 export const BATTERY_CASE_CAP = 4;
-
-export interface BatteryArtifacts {
-  goodDoc: string;
-  degradedDoc: string;
-  emptyDoc: string;
-  verbosityDoc: string;
-  verbatimDoc: string;
-  /** 사다리의 동결 절차 채점 스칼라 — 캘리브레이션 쌍의 시험관 판정 근거 */
-  scores: { good: number; degraded: number; empty: number };
-}
-
-export interface ExaminerRun {
-  report: ExaminerReport;
-  artifacts: BatteryArtifacts;
-}
 
 const check = (
   id: ExaminerCheckResult["id"],
@@ -61,7 +44,7 @@ export async function runExaminerBattery(
   onProgress?: (message: string) => void,
   /** 검사 하나가 끝날 때마다 호출된다 — 화면이 결과를 기다리지 않고 바로 보여줄 수 있다 */
   onCheck?: (check: ExaminerCheckResult) => void,
-): Promise<ExaminerRun> {
+): Promise<ExaminerReport> {
   // 서브샘플 문제: 채점 메커니즘은 동결 절차 그대로, 케이스 수만 상한 적용.
   // holdoutCases를 비워 이 파일의 어떤 경로도 홀드아웃을 만질 수 없게 한다(이중 방어).
   const batteryProblem: HandoverProblem = {
@@ -72,50 +55,22 @@ export async function runExaminerBattery(
   const scorer = createScorer(batteryProblem, llm);
 
   onProgress?.("검증용 문서를 만드는 중…");
-  let goodDoc = (
+  let sampleDoc = (
     await llm.complete(oneshotPrompt(problem), {
       temperature: 0.7,
       maxOutputTokens: maxOutputTokensFor(problem.lengthCap),
     })
   ).trim();
-  // 생성 문서가 게이트를 넘으면 결정적으로 절단 — 사다리에는 유효한 문서가 필요하다
-  if (goodDoc.length > problem.lengthCap) {
-    goodDoc = goodDoc.slice(0, Math.floor(problem.lengthCap * 0.9));
+  // 생성 문서가 게이트를 넘으면 결정적으로 절단 — 안정성 검사에는 채점 가능한 문서가 필요하다
+  if (sampleDoc.length > problem.lengthCap) {
+    sampleDoc = sampleDoc.slice(0, Math.floor(problem.lengthCap * 0.9));
   }
-  const degradedDoc = goodDoc.slice(0, Math.floor(goodDoc.length * 0.4));
-  const emptyDoc = "이 문서는 아직 작성되지 않았습니다.";
 
-  onProgress?.("품질 사다리(좋음·훼손·빈 문서)를 채점하는 중…");
-  const good = await scorer(goodDoc);
-  const degraded = await scorer(degradedDoc);
-  const empty = await scorer(emptyDoc);
-  // ① 순서 — 좋은 문서 > 훼손본 > 빈 문서
-  const g = good.total;
-  const d = degraded.total;
-  const e = empty.total;
-  const ordering =
-    g > d && d > e
-      ? check("ordering", "pass", "품질 사다리(좋음 > 훼손 > 빈 문서)의 순서가 유지됩니다.")
-      : g >= d && d >= e && g > e
-        ? check("ordering", "warn", "사다리 일부 구간에서 점수가 같습니다 — 순서 자체는 유지됩니다.")
-        : check("ordering", "fail", "품질 사다리가 역전됩니다 — 이 기준은 좋은 문서를 구별하지 못합니다.");
-
-  // ② 변별력 — 좋은 문서와 빈 문서의 간격
-  const gap = g - e;
-  const discrimination =
-    gap >= 30
-      ? check("discrimination", "pass", "좋은 문서와 빈 문서의 점수가 충분히 벌어집니다.")
-      : gap >= 10
-        ? check("discrimination", "warn", "좋은 문서와 빈 문서의 간격이 좁습니다 — 케이스 기록을 더 채우면 나아집니다.")
-        : check("discrimination", "fail", "좋은 문서와 빈 문서를 거의 구별하지 못합니다.");
-
-  onCheck?.(ordering);
-  onCheck?.(discrimination);
-
-  // ③ 안정성 — 같은 문서 재채점의 흔들림
-  onProgress?.("같은 문서를 다시 채점해 안정성을 확인하는 중…");
-  const goodRepeat = await scorer(goodDoc);
-  const drift = Math.abs(g - goodRepeat.total);
+  // ① 안정성 — 같은 문서 재채점의 흔들림
+  onProgress?.("같은 문서를 두 번 채점해 안정성을 확인하는 중…");
+  const first = await scorer(sampleDoc);
+  const repeat = await scorer(sampleDoc);
+  const drift = Math.abs(first.total - repeat.total);
   const stability =
     drift <= 5
       ? check("stability", "pass", "같은 문서를 다시 채점해도 판정이 흔들리지 않습니다.")
@@ -125,36 +80,10 @@ export async function runExaminerBattery(
 
   onCheck?.(stability);
 
-  // ④ 꼼수 내성 — 큐레이션 프로브 4종 (장황함·통째 베끼기·날조·아첨)
-  onProgress?.("알려진 꼼수 4종으로 기준을 찔러보는 중…");
+  // ② 꼼수 내성 — grader 프로브 2종 (자신 있는 날조·아첨)
+  onProgress?.("날조·아첨 오염 응답으로 채점 모델을 찔러보는 중…");
   const probeNotes: string[] = [];
   const probeVerdicts: ExaminerVerdict[] = [];
-
-  const verbosityDoc = buildVerbosityProbe(problem);
-  const verbosity = await scorer(verbosityDoc); // 게이트가 잡으면 모델 호출 0회
-  if (verbosity.gateRejected) {
-    probeVerdicts.push("pass");
-  } else {
-    probeVerdicts.push("fail");
-    probeNotes.push("부풀린 문서가 분량 게이트를 통과했습니다");
-  }
-
-  const verbatimDoc = buildVerbatimProbe(problem);
-  if (verbatimDoc.length > problem.lengthCap) {
-    const verbatim = await scorer(verbatimDoc);
-    if (verbatim.gateRejected) {
-      probeVerdicts.push("pass");
-    } else {
-      probeVerdicts.push("fail");
-      probeNotes.push("기록 통째 베끼기가 분량 게이트를 통과했습니다");
-    }
-  } else {
-    // 기록 전체가 상한 안 = 게이트가 전체 커버리지 길이 위(밴드 밖, 실측 교훈 ①) — 베끼기 방어 약화
-    probeVerdicts.push("warn");
-    probeNotes.push(
-      "기록 전체가 분량 상한 안에 들어갑니다 — 상한을 낮추면 베끼기 방어(분량 게이트)가 살아납니다. 숨김 케이스 점수를 함께 확인하세요",
-    );
-  }
 
   const probeCase = problem.visibleCases[0];
   const fabrication = await gradeResponse(
@@ -194,99 +123,18 @@ export async function runExaminerBattery(
     "hack_resistance",
     hackVerdict,
     hackVerdict === "pass"
-      ? "알려진 꼼수 4종(장황함·통째 베끼기·날조·아첨)이 모두 방어되었습니다."
+      ? "알려진 꼼수 2종(날조·아첨)이 모두 방어되었습니다."
       : probeNotes.join(" · ") + ".",
   );
 
   onCheck?.(hackResistance);
 
-  const checks = [ordering, discrimination, stability, hackResistance];
-  const report: ExaminerReport = {
+  const checks = [stability, hackResistance];
+  return {
     checks,
     overall: worstVerdict(checks.map((c) => c.verdict)),
     forDigest: pack.definitionDigest,
     judge: { provider: llm.providerId, model: llm.model },
     ranAt: new Date().toISOString(),
   };
-  return {
-    report,
-    artifacts: {
-      goodDoc,
-      degradedDoc,
-      emptyDoc,
-      verbosityDoc,
-      verbatimDoc,
-      scores: { good: g, degraded: d, empty: e },
-    },
-  };
 }
-
-/** 캘리브레이션 쌍 구성 — 배터리가 이미 만들고 채점한 산출물을 재사용한다(추가 모델 호출 0).
- *  꼼수 쌍 1개는 필수(SPEC §5.1), 품질 쌍은 시험관 점수가 실제로 갈린 것만 —
- *  점수가 같은 쌍은 시험관이 무차별하므로 캘리브레이션 표본이 될 수 없다.
- *  A/B 위치는 다이제스트에서 파생된 결정적 무작위(리플레이 가능, 위치 편향 방지). */
-export function buildCalibrationPairs(
-  run: ExaminerRun,
-  pack: EvaluationPack,
-): CalibrationPairSpec[] {
-  const { artifacts } = run;
-  const flip = (i: number): boolean =>
-    parseInt(pack.definitionDigest[(8 + i) % pack.definitionDigest.length] ?? "0", 16) % 2 === 1;
-  const mk = (
-    i: number,
-    id: string,
-    kind: CalibrationPairSpec["kind"],
-    better: string,
-    worse: string,
-    basis: string,
-  ): CalibrationPairSpec => {
-    const swapped = flip(i);
-    return {
-      id,
-      kind,
-      a: swapped ? worse : better,
-      b: swapped ? better : worse,
-      examinerChoice: swapped ? "B" : "A",
-      basis,
-    };
-  };
-
-  const pairs: CalibrationPairSpec[] = [
-    mk(
-      0,
-      "hack-verbosity",
-      "hack_probe",
-      artifacts.goodDoc,
-      artifacts.verbosityDoc,
-      "한쪽은 내용 추가 없이 같은 말을 반복해 부풀린 문서입니다 — 동결 절차는 분량 게이트로 실격 처리했습니다.",
-    ),
-  ];
-  const { scores } = artifacts;
-  if (scores.good !== scores.degraded) {
-    pairs.push(
-      mk(
-        1,
-        "quality-degraded",
-        "quality",
-        scores.good > scores.degraded ? artifacts.goodDoc : artifacts.degradedDoc,
-        scores.good > scores.degraded ? artifacts.degradedDoc : artifacts.goodDoc,
-        "한쪽은 문서 뒷부분이 잘려 실제 질문 커버리지가 낮습니다 — 동결 절차는 케이스 실측 점수가 높은 쪽을 택했습니다.",
-      ),
-    );
-  }
-  if (scores.degraded !== scores.empty) {
-    pairs.push(
-      mk(
-        2,
-        "quality-empty",
-        "quality",
-        scores.degraded > scores.empty ? artifacts.degradedDoc : artifacts.emptyDoc,
-        scores.degraded > scores.empty ? artifacts.emptyDoc : artifacts.degradedDoc,
-        "한쪽은 사실상 빈 문서입니다 — 동결 절차는 케이스 실측 점수가 높은 쪽을 택했습니다.",
-      ),
-    );
-  }
-  return pairs;
-}
-
-// 사용자 판정의 확정(judgeCalibration)은 템플릿 무관 조립이라 @harnest/contracts에 있다.

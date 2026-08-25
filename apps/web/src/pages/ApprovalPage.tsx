@@ -1,31 +1,21 @@
 /** 승인 화면 — 판정 절차 전체를 사용자 앞에 펼치고, 승인 순간 동결한다(SPEC §3 원칙 4).
- *  llm_judge 포함 루프는 시험관 검증 배터리(순서·변별력·안정성·꼼수 내성)와
- *  캘리브레이션(A/B 블라인드 판정, 꼼수 쌍 포함)이 승인 전 요건이다(SPEC §3 원칙 2·§5.1).
+ *  llm_judge 포함 루프는 시험관 검증 배터리(안정성·꼼수 내성)가 승인 전 요건이다
+ *  (SPEC §3 원칙 2·§5.1). 배터리는 이 화면이 자동 실행한다 — 기준이 수정되면(다이제스트 변경)
+ *  이전 리포트가 forDigest 불일치로 무효화되고, 새 다이제스트에 대한 검증이 다시 자동으로 돈다.
  *
- *  실패의 의미론(2026-08-23 적대 리뷰 반영):
- *  - 검증 리포트 fail → 캘리브레이션으로 진행하지 않는다(판정해도 승인 전에 폐기될 운명).
- *  - 캘리브레이션 fail → 같은 판정 절차(다이제스트)에서는 재판정·재검증 불가. 판정이 공개된
- *    뒤의 재시도는 블라인드가 아니므로, 판정 절차를 수정해 새 다이제스트로 다시 시작한다.
- *  - "다시 판정" 버튼은 없다 — 재판정 경로는 재검증(새 쌍)뿐이며, 옛 판정은 forReportAt
- *    불일치로 계약 계층에서 자동 무효화된다.
+ *  실패의 의미론:
+ *  - 검증 리포트 fail → 승인 차단(approvalBlockers). 기준을 수정하면 새 다이제스트로 재검증.
+ *  - 전송·형식 오류는 판정 결과가 아니다 — "다시 검증"으로 언제든 재실행할 수 있다.
  *  결정적 전용 루프의 면제(SPEC §10)는 그대로 노출한다 — 정직 표기가 계약이다.
  *  pack만 보고 렌더하며 템플릿별 분기를 갖지 않는다(judgeProcedure union + 등록소 examiner로 분기). */
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import {
-  judgeCalibration,
-  MAX_EXAMINER_RUNS_PER_DIGEST,
-  type AbChoice,
-  type CalibrationPairSpec,
-  type ExaminerCheckId,
-  type ExaminerVerdict,
-} from "@harnest/contracts";
-import type { ExaminerCheckResult } from "@harnest/contracts";
+import type { ExaminerCheckId, ExaminerCheckResult, ExaminerVerdict } from "@harnest/contracts";
 import { setFlowStep } from "../lib/flowStep";
 import { SealPanel } from "../components/SealPanel";
 import { useProject } from "../state";
-import { getTemplate, type TemplateEntry } from "../templates";
+import { getTemplate } from "../templates";
 import { countCaseProvenance } from "../lib/case-provenance";
 import { ProviderCredentialInput } from "../components/ProviderCredentialInput";
 import {
@@ -42,25 +32,9 @@ const VERDICT_COLOR: Record<ExaminerVerdict, string> = {
   warn: "var(--warn)",
   fail: "var(--bad)",
 };
-const CHECK_LABEL: Record<ExaminerCheckId, string> = {
-  ordering: "순서 (좋은 문서가 더 높은가)",
-  discrimination: "변별력 (차이가 벌어지는가)",
-  stability: "안정성 (재채점이 흔들리지 않는가)",
-  hack_resistance: "꼼수 내성 (알려진 꼼수 4종)",
-};
 
-/** 시험 카드에 쓰는 짧은 이름과 설명. 표의 긴 라벨(CHECK_LABEL)은 그대로 둔다. */
+/** 시험 카드에 쓰는 짧은 이름과 설명. cue는 진행 메시지에서 현재 검사를 찾는 마커다. */
 const CHECK_CARD: Record<ExaminerCheckId, { name: string; desc: string; cue: string }> = {
-  ordering: {
-    name: "순서를 지키는가",
-    desc: "더 좋은 문서에 더 높은 점수를 주는지",
-    cue: "품질 사다리",
-  },
-  discrimination: {
-    name: "차이를 가려내는가",
-    desc: "비슷한 문서 사이를 구분하는지",
-    cue: "품질 사다리",
-  },
   stability: {
     name: "같은 답에 같은 점수인가",
     desc: "같은 문서를 다시 채점해도 흔들리지 않는지",
@@ -68,17 +42,12 @@ const CHECK_CARD: Record<ExaminerCheckId, { name: string; desc: string; cue: str
   },
   hack_resistance: {
     name: "꼼수에 속지 않는가",
-    desc: "길게 늘이거나 베껴 쓴 문서를 걸러내는지",
-    cue: "꼼수",
+    desc: "날조·아첨 응답을 정답으로 치지 않는지",
+    cue: "날조",
   },
 };
 
-const CHECK_ORDER: ExaminerCheckId[] = [
-  "ordering",
-  "discrimination",
-  "stability",
-  "hack_resistance",
-];
+const CHECK_ORDER: ExaminerCheckId[] = ["stability", "hack_resistance"];
 
 const VERDICT_CLASS: Record<ExaminerVerdict, string> = {
   pass: "is-pass",
@@ -145,7 +114,6 @@ function VerdictBadge({ verdict }: { verdict: ExaminerVerdict }) {
 
 const EXEMPTION_LABEL = {
   examinerReport: "검증 리포트",
-  calibration: "캘리브레이션",
   pairwise: "쌍대 비교",
 } as const;
 
@@ -164,35 +132,18 @@ function ExemptionTable({ rows }: { rows: Record<keyof typeof EXEMPTION_LABEL, s
   );
 }
 
-function PairPane({
-  label,
-  artifact,
-  problem,
-  entry,
-}: {
-  label: string;
-  artifact: unknown;
-  problem: unknown;
-  entry: TemplateEntry;
-}) {
-  const ArtifactView = entry.ArtifactView;
+/** 컴파일이 계산한 설정 안내(예: 베끼기 방어 약화) — 판정이 아니라 정적 사실이므로
+ *  검사 카드가 아니라 안내문으로 보여준다 */
+function ComplianceNotices({ notices }: { notices: string[] | undefined }) {
+  if (!notices || notices.length === 0) return null;
   return (
-    <div className="grow" style={{ minWidth: 0 }}>
-      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-3)", marginBottom: 4 }}>
-        {label}
-      </div>
-      <div
-        style={{
-          border: "1px solid var(--border)",
-          borderRadius: 8,
-          padding: 10,
-          maxHeight: 220,
-          overflowY: "auto",
-        }}
-      >
-        <ArtifactView problem={problem} artifact={artifact} />
-      </div>
-    </div>
+    <>
+      {notices.map((n, i) => (
+        <p key={i} className="hint" style={{ margin: "8px 0 0", color: "var(--warn)" }}>
+          {n}
+        </p>
+      ))}
+    </>
   );
 }
 
@@ -201,12 +152,8 @@ export function ApprovalPage() {
     templateId,
     compiled,
     answers,
-    examinerRun,
-    setExaminerRun,
-    examinerAttempts,
-    noteExaminerAttempt,
-    calibration,
-    setCalibration,
+    examinerReport,
+    setExaminerReport,
     blockers,
     approvedDigest,
     approvedAt,
@@ -235,7 +182,6 @@ export function ApprovalPage() {
   const [storedVertexCredential, setStoredVertexCredential] = useState<string | null>(() =>
     getByoCredential("vertex"),
   );
-  const [choices, setChoices] = useState<(AbChoice | null)[] | null>(null);
 
   const pack = compiled?.pack ?? null;
   // 케이스 출처 공개 — AI 초안이 0개여도 표시한다(공개가 원칙)
@@ -248,6 +194,8 @@ export function ApprovalPage() {
   packDigestRef.current = pack?.definitionDigest ?? null;
   const approvedRef = useRef(false);
   const activeRef = useRef(false);
+  // 자동 검증은 다이제스트당 한 번만 시도한다 — 오류 시 무한 재시도로 비용이 새지 않게
+  const autoRunDigestRef = useRef<string | null>(null);
 
   useEffect(() => {
     activeRef.current = true;
@@ -258,29 +206,8 @@ export function ApprovalPage() {
   }, []);
 
   const validReport =
-    examinerRun !== null && pack !== null && examinerRun.report.forDigest === pack.definitionDigest;
-  const staleReport = examinerRun !== null && !validReport;
-  const reportFailed = validReport && examinerRun!.report.overall === "fail";
-
-  /** 재검증 쿼터(SPEC §5.2) — 배터리 1회도 십여 회 호출이므로 같은 다이제스트 실행 횟수를 제한한다 */
-  const attemptsForPack =
-    examinerAttempts !== null && pack !== null && examinerAttempts.forDigest === pack.definitionDigest
-      ? examinerAttempts.count
-      : 0;
-  const quotaExhausted = attemptsForPack >= MAX_EXAMINER_RUNS_PER_DIGEST;
-
-  const calibForPack =
-    calibration !== null && pack !== null && calibration.forDigest === pack.definitionDigest;
-  /** 실패 고착 — 같은 다이제스트에서는 재판정·재검증으로 씻을 수 없다 */
-  const failedCalibration = calibForPack && calibration!.verdict === "fail";
-  const validCalibration =
-    calibForPack && validReport && calibration!.forReportAt === examinerRun!.report.ranAt;
-  const staleCalibration = calibration !== null && !calibForPack;
-
-  const pairs = useMemo<CalibrationPairSpec[] | null>(() => {
-    if (!validReport || !entry?.examiner || !compiled || !examinerRun) return null;
-    return entry.examiner.buildPairs(examinerRun, compiled.pack);
-  }, [validReport, entry, compiled, examinerRun]);
+    examinerReport !== null && pack !== null && examinerReport.forDigest === pack.definitionDigest;
+  const reportFailed = validReport && examinerReport!.overall === "fail";
 
   const approved =
     pack !== null && approvedAt !== null && approvedDigest === pack.definitionDigest;
@@ -291,6 +218,52 @@ export function ApprovalPage() {
     setFlowStep({ kind: "approval" });
   }, []);
   approvedRef.current = approved;
+
+  const runBattery = async (): Promise<void> => {
+    if (!entry?.examiner || !compiled || !pack || running || approved) return;
+    setBatteryError(null);
+    let llm;
+    try {
+      llm = entry.createLlm(compiled);
+    } catch (e) {
+      setBatteryError(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    if (!llm) return;
+    const startedDigest = pack.definitionDigest;
+    setRunning(true);
+    try {
+      setLiveChecks([]);
+      const report = await entry.examiner.runBattery(compiled, llm, setProgress, (c) =>
+        setLiveChecks((prev) => [...prev.filter((p) => p.id !== c.id), c]),
+      );
+      // 실행 중 기준이 재컴파일·승인됐거나 화면을 떠났다면 이 결과는 현재 승인 증거가 아니다.
+      if (
+        !activeRef.current ||
+        approvedRef.current ||
+        packDigestRef.current !== startedDigest
+      ) return;
+      setExaminerReport(report);
+    } catch (e) {
+      if (!activeRef.current || packDigestRef.current !== startedDigest) return;
+      setBatteryError(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (activeRef.current) {
+        setRunning(false);
+        setProgress("");
+      }
+    }
+  };
+
+  // 수정→재검증 자동 왕복 — 유효한 리포트가 없으면 배터리를 자동으로 시작한다.
+  // 키 없음·전송 오류로 멈춘 경우는 아래 오류 상자에서 수동으로 다시 시작한다.
+  useEffect(() => {
+    if (!entry?.examiner || pack === null || approved || running || validReport) return;
+    if (autoRunDigestRef.current === pack.definitionDigest) return;
+    autoRunDigestRef.current = pack.definitionDigest;
+    void runBattery();
+    // eslint 미사용 — runBattery는 렌더마다 새로 만들어지므로 다이제스트 기준으로만 발화한다
+  }, [entry, pack?.definitionDigest, approved, running, validReport]);
 
   if (!compiled || !entry || !pack) {
     return (
@@ -306,47 +279,6 @@ export function ApprovalPage() {
 
   const jp = pack.judgeProcedure;
   const hp = pack.holdoutPolicy;
-
-  const runBattery = async (): Promise<void> => {
-    if (!entry.examiner || running || approved || failedCalibration || quotaExhausted) return;
-    setBatteryError(null);
-    let llm;
-    try {
-      llm = entry.createLlm(compiled);
-    } catch (e) {
-      setBatteryError(e instanceof Error ? e.message : String(e));
-      return;
-    }
-    if (!llm) return;
-    const startedDigest = pack.definitionDigest;
-    // 전송 실패도 호출을 소모하므로 완료가 아니라 시작 시점에 계수한다
-    noteExaminerAttempt(startedDigest);
-    setRunning(true);
-    try {
-      setLiveChecks([]);
-      const run = await entry.examiner.runBattery(compiled, llm, setProgress, (c) =>
-        setLiveChecks((prev) => [...prev.filter((p) => p.id !== c.id), c]),
-      );
-      // 실행 중 기준이 재컴파일·승인됐거나 화면을 떠났다면 이 결과는 현재 승인 증거가 아니다.
-      if (
-        !activeRef.current ||
-        approvedRef.current ||
-        packDigestRef.current !== startedDigest
-      ) return;
-      setExaminerRun(run);
-      // 새 리포트 = 새 쌍: 이전 판정은 forReportAt 불일치로 계약에서도 무효지만 상태도 정리한다
-      setCalibration(null);
-      setChoices(null);
-    } catch (e) {
-      if (!activeRef.current || packDigestRef.current !== startedDigest) return;
-      setBatteryError(e instanceof Error ? e.message : String(e));
-    } finally {
-      if (activeRef.current) {
-        setRunning(false);
-        setProgress("");
-      }
-    }
-  };
 
   const saveCredentialAndRetry = async (): Promise<void> => {
     if (jp.kind !== "case_answering" || jp.judge.provider === "mock") return;
@@ -400,48 +332,11 @@ export function ApprovalPage() {
               {credentialBusy ? "연결 확인 중…" : "연결 확인 후 다시 검증"}
             </button>
           </div>
-        ) : null}
+        ) : (
+          <button onClick={() => void runBattery()}>다시 검증</button>
+        )}
       </div>
     ) : null;
-
-  const quotaHint =
-    attemptsForPack > 0 && !quotaExhausted ? (
-      <p className="hint" style={{ margin: "6px 0 0" }}>
-        검증 실행 {attemptsForPack}/{MAX_EXAMINER_RUNS_PER_DIGEST}회 사용 — 같은 기준에서는 최대{" "}
-        {MAX_EXAMINER_RUNS_PER_DIGEST}회까지 실행할 수 있습니다 (1회당 십여 회의 모델 호출).
-      </p>
-    ) : null;
-
-  const quotaExhaustedBox = quotaExhausted ? (
-    <div style={{ marginTop: 8 }}>
-      <p className="error" style={{ margin: "0 0 8px" }}>
-        이 기준으로 검증을 {MAX_EXAMINER_RUNS_PER_DIGEST}회 실행했습니다 — 비용 보호를 위해 같은
-        기준의 추가 검증은 막혀 있습니다. 기준을 수정하면 새 절차로 다시 검증할 수 있습니다.
-      </p>
-      <button onClick={() => navigate("/wizard")}>기준을 수정하러 가기</button>
-    </div>
-  ) : null;
-
-  const effectiveChoices: (AbChoice | null)[] =
-    choices ??
-    (pairs
-      ? pairs.map(
-          (p) =>
-            (validCalibration
-              ? calibration!.pairs.find((r) => r.id === p.id)?.userChoice
-              : null) ?? null,
-        )
-      : []);
-
-  const pick = (index: number, choice: AbChoice): void => {
-    if (approved || validCalibration || failedCalibration || !pairs || !examinerRun) return;
-    const next = [...effectiveChoices];
-    next[index] = choice;
-    setChoices(next);
-    if (next.every((c) => c !== null)) {
-      setCalibration(judgeCalibration(pairs, next as AbChoice[], pack, examinerRun.report));
-    }
-  };
 
   // 승인된 뒤에는 이 화면이 통째로 봉인 장면이 된다. 기준 상세는 접어 두고,
   // 펼쳐야 볼 수 있게 한다 — 잠갔다는 사실이 먼저 읽혀야 한다.
@@ -487,6 +382,7 @@ export function ApprovalPage() {
           ) : (
             <p className="hint">이 절차에는 별도의 필수 관문이 없습니다.</p>
           )}
+          <ComplianceNotices notices={compiled.notices} />
 
           {jp.kind === "case_answering" ? (
             <>
@@ -535,71 +431,16 @@ export function ApprovalPage() {
               {validReport ? (
                 <>
                   <div style={{ marginBottom: 8 }}>
-                    종합: <VerdictBadge verdict={examinerRun!.report.overall} />
+                    종합: <VerdictBadge verdict={examinerReport!.overall} />
                     <span className="hint" style={{ marginLeft: 6 }}>
-                      구동 저지: {PROVIDER_LABEL[examinerRun!.report.judge.provider]} ·{" "}
-                      {examinerRun!.report.judge.model}
+                      구동 저지: {PROVIDER_LABEL[examinerReport!.judge.provider]} ·{" "}
+                      {examinerReport!.judge.model}
                     </span>
                   </div>
-                  <CheckCards checks={examinerRun!.report.checks} progress="" />
+                  <CheckCards checks={examinerReport!.checks} progress="" />
                 </>
               ) : (
                 <p className="hint">현재 다이제스트에 결속된 시험관 검증 기록이 없습니다.</p>
-              )}
-
-              <h2>캘리브레이션 — 사용자 판단과 비교</h2>
-              {validCalibration && pairs !== null ? (
-                <>
-                  {pairs.map((pair, i) => {
-                    const result = calibration!.pairs.find((item) => item.id === pair.id);
-                    return (
-                      <div
-                        key={pair.id}
-                        style={{
-                          border: "1px solid var(--border)",
-                          borderRadius: 10,
-                          padding: 12,
-                          marginBottom: 10,
-                        }}
-                      >
-                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
-                          {i + 1}번째 쌍 · {pair.kind === "hack_probe" ? "꼼수 내성" : "품질 비교"}
-                        </div>
-                        <div className="row">
-                          <PairPane
-                            label="A"
-                            artifact={pair.a}
-                            problem={compiled.problem}
-                            entry={entry}
-                          />
-                          <PairPane
-                            label="B"
-                            artifact={pair.b}
-                            problem={compiled.problem}
-                            entry={entry}
-                          />
-                        </div>
-                        <div style={{ marginTop: 10, fontSize: 13 }}>
-                          사용자 선택 <strong>{result?.userChoice ?? "기록 없음"}</strong> · 시험관
-                          선택 <strong>{result?.examinerChoice ?? pair.examinerChoice}</strong>
-                          {result ? ` · ${result.agreed ? "일치" : "불일치"}` : ""}
-                        </div>
-                        <p className="hint" style={{ margin: "4px 0 0" }}>
-                          판정 근거: {pair.basis}
-                        </p>
-                      </div>
-                    );
-                  })}
-                  <div style={{ marginBottom: 16 }}>
-                    캘리브레이션: <VerdictBadge verdict={calibration!.verdict} />
-                    <span className="hint" style={{ marginLeft: 6 }}>
-                      {calibration!.pairs.filter((pair) => pair.agreed).length}/
-                      {calibration!.pairs.length} 일치
-                    </span>
-                  </div>
-                </>
-              ) : (
-                <p className="hint">현재 검증 리포트에 결속된 캘리브레이션 기록이 없습니다.</p>
               )}
             </>
           ) : null}
@@ -613,10 +454,9 @@ export function ApprovalPage() {
       <h1>채점 기준 승인</h1>
       <p className="sub">채점 기준은 당신이 승인하고, 실행 중 AI는 이 기준을 변경할 수 없습니다.</p>
 
-      <div className={approved ? "card locked" : "card"}>
+      <div className="card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
           <h2 style={{ marginTop: 0 }}>채점 기준</h2>
-          {approved ? <span className="lock-badge">🔒 승인됨 · 동결</span> : null}
         </div>
 
         <table className="grid">
@@ -644,6 +484,7 @@ export function ApprovalPage() {
             </li>
           ))}
         </ul>
+        <ComplianceNotices notices={compiled.notices} />
 
         {jp.kind === "case_answering" ? (
           <>
@@ -687,146 +528,47 @@ export function ApprovalPage() {
         {jp.kind === "case_answering" && entry.examiner ? (
           <>
             <h2>시험관 검증</h2>
-            {staleReport || staleCalibration ? (
-              <p style={{ fontSize: 13, color: "var(--warn)", margin: "0 0 10px" }}>
-                기준이 수정되어 이전 {staleReport ? "검증 리포트" : "캘리브레이션"}가
-                무효화되었습니다 — 수정된 기준으로 다시 검증해 주세요.
-              </p>
-            ) : null}
+            <p style={{ fontSize: 14, margin: "0 0 10px" }}>
+              승인 전에 채점 모델 자체를 시험합니다: 같은 문서를 다시 채점했을 때의 안정성,
+              그리고 날조·아첨 오염 응답에 대한 내성. 기준이 바뀌면 자동으로 다시 검증합니다.
+            </p>
 
             {!validReport ? (
               <div>
-                <p style={{ fontSize: 14, margin: "0 0 10px" }}>
-                  승인 전에 이 채점 기준 자체를 시험합니다: 품질이 다른 문서들의 순서·변별력·
-                  안정성, 그리고 알려진 꼼수 4종(장황함·통째 베끼기·날조·아첨)에 대한 내성.
-                </p>
                 {running ? (
                   <>
                     <CheckCards checks={liveChecks} progress={progress} />
                     <p className="hint">{progress}</p>
                   </>
-                ) : quotaExhausted ? (
-                  quotaExhaustedBox
                 ) : (
-                  <>
-                    <CheckCards checks={null} progress={progress} />
-                    <div style={{ marginTop: 16 }}>
-                      <button className="primary" onClick={() => void runBattery()}>
-                        검증 실행
-                      </button>
-                    </div>
-                    {quotaHint}
-                  </>
+                  <CheckCards checks={null} progress={progress} />
                 )}
                 {batteryErrorBox}
               </div>
             ) : (
               <div>
                 <div style={{ marginBottom: 8 }}>
-                  종합: <VerdictBadge verdict={examinerRun!.report.overall} />
+                  종합: <VerdictBadge verdict={examinerReport!.overall} />
                   <span className="hint" style={{ marginLeft: 6 }}>
-                    구동 저지: {PROVIDER_LABEL[examinerRun!.report.judge.provider]} ·{" "}
-                    {examinerRun!.report.judge.model}
+                    구동 저지: {PROVIDER_LABEL[examinerReport!.judge.provider]} ·{" "}
+                    {examinerReport!.judge.model}
                   </span>
                 </div>
-                <CheckCards checks={examinerRun!.report.checks} progress="" />
-                {!approved && !failedCalibration ? (
-                  <div style={{ marginTop: 10 }}>
-                    {reportFailed ? (
-                      <p className="error" style={{ margin: "0 0 8px" }}>
-                        검증에 실패한 기준은 동결할 수 없습니다 — 기준을 수정한 뒤 다시 검증해
-                        주세요.
-                      </p>
-                    ) : null}
-                    {quotaExhausted && !reportFailed ? null : quotaExhausted ? (
-                      quotaExhaustedBox
-                    ) : (
-                      <>
-                        <button onClick={() => void runBattery()} disabled={running}>
-                          {running ? `검증 중… ${progress}` : "다시 검증"}
-                        </button>
-                        {quotaHint}
-                      </>
-                    )}
-                    {batteryErrorBox}
-                  </div>
-                ) : null}
+                <CheckCards checks={examinerReport!.checks} progress="" />
+                <div style={{ marginTop: 10 }}>
+                  {reportFailed ? (
+                    <p className="error" style={{ margin: "0 0 8px" }}>
+                      검증에 실패한 기준은 동결할 수 없습니다 — 기준을 수정하면 자동으로 다시
+                      검증됩니다.
+                    </p>
+                  ) : null}
+                  <button onClick={() => void runBattery()} disabled={running}>
+                    {running ? `검증 중… ${progress}` : "다시 검증"}
+                  </button>
+                  {batteryErrorBox}
+                </div>
               </div>
             )}
-
-            {validReport && !reportFailed && pairs !== null ? (
-              <>
-                <h2>캘리브레이션 — 당신의 판단과 비교</h2>
-                <p className="hint" style={{ margin: "0 0 10px" }}>
-                  각 쌍에서 더 나은 문서를 먼저 골라 주세요. 고른 뒤에 채점 기준의 판정이
-                  공개됩니다 — 알려진 꼼수 예시가 섞여 있습니다.
-                </p>
-                {pairs.map((pair, i) => {
-                  const chosen = effectiveChoices[i];
-                  return (
-                    <div
-                      key={pair.id}
-                      style={{
-                        border: "1px solid var(--border)",
-                        borderRadius: 10,
-                        padding: 12,
-                        marginBottom: 10,
-                      }}
-                    >
-                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
-                        {i + 1}번째 쌍
-                      </div>
-                      <div className="row">
-                        <PairPane label="A" artifact={pair.a} problem={compiled.problem} entry={entry} />
-                        <PairPane label="B" artifact={pair.b} problem={compiled.problem} entry={entry} />
-                      </div>
-                      {chosen === null ? (
-                        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                          <button onClick={() => pick(i, "A")}>A가 더 좋다</button>
-                          <button onClick={() => pick(i, "B")}>B가 더 좋다</button>
-                        </div>
-                      ) : (
-                        <div style={{ marginTop: 10, fontSize: 13 }}>
-                          <span
-                            style={{
-                              fontWeight: 600,
-                              color:
-                                chosen === pair.examinerChoice ? "var(--good)" : "var(--bad)",
-                            }}
-                          >
-                            {chosen === pair.examinerChoice
-                              ? `일치 — 당신도 채점 기준도 ${chosen}를 택했습니다.`
-                              : `불일치 — 당신은 ${chosen}, 채점 기준은 ${pair.examinerChoice}를 택했습니다.`}
-                          </span>{" "}
-                          <span className="hint">{pair.basis}</span>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </>
-            ) : null}
-
-            {calibForPack && (validCalibration || failedCalibration) ? (
-              <div style={{ marginBottom: 4 }}>
-                캘리브레이션: <VerdictBadge verdict={calibration!.verdict} />
-                <span className="hint" style={{ marginLeft: 6 }}>
-                  {calibration!.pairs.filter((p) => p.agreed).length}/{calibration!.pairs.length}{" "}
-                  일치
-                </span>
-              </div>
-            ) : null}
-
-            {failedCalibration && !approved ? (
-              <div style={{ marginTop: 8 }}>
-                <p className="error" style={{ margin: "0 0 8px" }}>
-                  캘리브레이션에 실패한 기준은 동결할 수 없습니다. 판정이 이미 공개되었으므로 같은
-                  기준으로 다시 판정하는 것은 의미가 없습니다 — 기준을 수정하면 새 검증으로
-                  이어집니다.
-                </p>
-                <button onClick={() => navigate("/wizard")}>기준을 수정하러 가기</button>
-              </div>
-            ) : null}
           </>
         ) : null}
 

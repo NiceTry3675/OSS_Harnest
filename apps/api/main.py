@@ -58,10 +58,19 @@ app.add_middleware(
 
 DB_SCHEMA_VERSION = 1
 EXPORT_KIND = "harnest.project-export"
-EXPORT_ENVELOPE_VERSION = 1
+EXPORT_ENVELOPE_VERSION = 2
 INTERVIEW_SCHEMA_VERSION = "skeleton-1"
 PACK_VERSION = "skeleton-1"
 SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
+JUDGE_PROVIDERS = {
+    "gemini",
+    "vertex",
+    "openai",
+    "anthropic",
+    "openrouter",
+    "ollama",
+    "mock",
+}
 rate_limiter = build_rate_limiter()
 
 # 관리자가 설정하지 않으면 빈 문자열이고, /proxy/* 해당 벤더는 404로 막는다.
@@ -319,7 +328,7 @@ def validate_examiner_report(value: Dict[str, Any], path: str) -> None:
         item_path = f"{path}.checks[{index}]"
         check = require_object(item, item_path)
         require_exact_members(check, {"id", "verdict", "note"}, item_path)
-        if check.get("id") not in {"ordering", "discrimination", "stability", "hack_resistance"}:
+        if check.get("id") not in {"stability", "hack_resistance"}:
             raise HTTPException(status_code=422, detail=f"{item_path}.id가 올바르지 않습니다.")
         if check.get("verdict") not in {"pass", "warn", "fail"}:
             raise HTTPException(status_code=422, detail=f"{item_path}.verdict가 올바르지 않습니다.")
@@ -329,33 +338,9 @@ def validate_examiner_report(value: Dict[str, Any], path: str) -> None:
     require_string(value.get("forDigest"), f"{path}.forDigest")
     judge = require_object(value.get("judge"), f"{path}.judge")
     require_exact_members(judge, {"provider", "model"}, f"{path}.judge")
-    if judge.get("provider") not in {"gemini", "openai", "mock"}:
+    if judge.get("provider") not in JUDGE_PROVIDERS:
         raise HTTPException(status_code=422, detail=f"{path}.judge.provider가 올바르지 않습니다.")
     require_string(judge.get("model"), f"{path}.judge.model")
-    require_string(value.get("ranAt"), f"{path}.ranAt")
-
-
-def validate_calibration(value: Dict[str, Any], path: str) -> None:
-    require_exact_members(
-        value, {"pairs", "verdict", "forDigest", "forReportAt", "ranAt"}, path
-    )
-    pairs = require_array(value.get("pairs"), f"{path}.pairs")
-    for index, item in enumerate(pairs):
-        item_path = f"{path}.pairs[{index}]"
-        pair = require_object(item, item_path)
-        require_exact_members(
-            pair, {"id", "kind", "userChoice", "examinerChoice", "agreed"}, item_path
-        )
-        require_string(pair.get("id"), f"{item_path}.id")
-        if pair.get("kind") not in {"quality", "hack_probe"}:
-            raise HTTPException(status_code=422, detail=f"{item_path}.kind가 올바르지 않습니다.")
-        if pair.get("userChoice") not in {"A", "B"} or pair.get("examinerChoice") not in {"A", "B"}:
-            raise HTTPException(status_code=422, detail=f"{item_path}의 A/B 선택이 올바르지 않습니다.")
-        require_boolean(pair.get("agreed"), f"{item_path}.agreed")
-    if value.get("verdict") not in {"pass", "warn", "fail"}:
-        raise HTTPException(status_code=422, detail=f"{path}.verdict가 올바르지 않습니다.")
-    require_string(value.get("forDigest"), f"{path}.forDigest")
-    require_string(value.get("forReportAt"), f"{path}.forReportAt")
     require_string(value.get("ranAt"), f"{path}.ranAt")
 
 
@@ -474,12 +459,12 @@ async def read_export_payload(request: Request) -> bytes:
 def extract_export_metadata(
     value: Any,
 ) -> Tuple[int, str, str, str, str]:
-    """저장 가능한 v1 봉투의 골격과 귀속만 확인한다.
+    """저장 가능한 v2 봉투의 골격과 귀속만 확인한다.
 
     이 API는 원문 JSON을 exact-byte로 보존하는 저장소다. Pack 다이제스트 재계산,
-    examiner/calibration 판정, checkpoint 곡선 같은 의미 검증은 브라우저의
+    examiner 판정, checkpoint 곡선 같은 의미 검증은 브라우저의
     `packages/contracts` 생산자 계약이 권위다. 다만 불완전하거나 다른 Pack에 결속된
-    레코드를 색인하지 않도록, 여기서는 v1 봉투의 필수 노드와 승인·실행 귀속은 확인한다.
+    레코드를 색인하지 않도록, 여기서는 v2 봉투의 필수 노드와 승인·실행 귀속은 확인한다.
     """
     body = require_object(value, "본문")
     require_exact_members(
@@ -509,7 +494,7 @@ def extract_export_metadata(
     evaluation = require_object(project.get("evaluation"), "project.evaluation")
     require_exact_members(
         evaluation,
-        {"pack", "examinerReport", "calibration", "approval"},
+        {"pack", "examinerReport", "approval"},
         "project.evaluation",
     )
     pack = require_object(evaluation.get("pack"), "project.evaluation.pack")
@@ -563,10 +548,10 @@ def extract_export_metadata(
         )
         require_exact_members(
             exemptions,
-            {"examinerReport", "calibration", "pairwise"},
+            {"examinerReport", "pairwise"},
             "project.evaluation.pack.judgeProcedure.exemptions",
         )
-        for exemption in ("examinerReport", "calibration", "pairwise"):
+        for exemption in ("examinerReport", "pairwise"):
             require_string(
                 exemptions.get(exemption),
                 f"project.evaluation.pack.judgeProcedure.exemptions.{exemption}",
@@ -586,7 +571,7 @@ def extract_export_metadata(
             {"provider", "model"},
             "project.evaluation.pack.judgeProcedure.judge",
         )
-        if judge.get("provider") not in {"gemini", "openai", "mock"}:
+        if judge.get("provider") not in JUDGE_PROVIDERS:
             raise HTTPException(status_code=422, detail="지원하지 않는 저지 provider입니다.")
         require_nonempty_string(
             judge.get("model"), "project.evaluation.pack.judgeProcedure.judge.model"
@@ -626,40 +611,23 @@ def extract_export_metadata(
         ),
         "project.evaluation.examinerReport",
     )
-    calibration = require_nullable_object(
-        require_present_object_member(
-            evaluation, "calibration", "project.evaluation.calibration"
-        ),
-        "project.evaluation.calibration",
-    )
     if judge_kind == "deterministic_only":
-        if examiner_report is not None or calibration is not None:
+        if examiner_report is not None:
             raise HTTPException(
                 status_code=422,
-                detail="결정적 전용 Pack에는 examinerReport와 calibration이 null이어야 합니다.",
+                detail="결정적 전용 Pack에는 examinerReport가 null이어야 합니다.",
             )
-    elif examiner_report is None or calibration is None:
+    elif examiner_report is None:
         raise HTTPException(
             status_code=422,
-            detail="case_answering Pack에는 examinerReport와 calibration 객체가 필요합니다.",
+            detail="case_answering Pack에는 examinerReport 객체가 필요합니다.",
         )
     else:
         validate_examiner_report(examiner_report, "project.evaluation.examinerReport")
-        validate_calibration(calibration, "project.evaluation.calibration")
         if examiner_report.get("forDigest") != definition_digest:
             raise HTTPException(
                 status_code=422,
                 detail="project.evaluation.examinerReport.forDigest가 현재 Pack과 다릅니다.",
-            )
-        if calibration.get("forDigest") != definition_digest:
-            raise HTTPException(
-                status_code=422,
-                detail="project.evaluation.calibration.forDigest가 현재 Pack과 다릅니다.",
-            )
-        if calibration.get("forReportAt") != examiner_report.get("ranAt"):
-            raise HTTPException(
-                status_code=422,
-                detail="project.evaluation.calibration.forReportAt가 현재 리포트와 다릅니다.",
             )
         report_judge = examiner_report["judge"]
         pack_judge = judge_procedure["judge"]

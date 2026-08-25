@@ -26,7 +26,7 @@ async function fixture() {
     gates: [],
     judgeProcedure: {
       kind: "deterministic_only",
-      exemptions: { examinerReport: "면제", calibration: "면제", pairwise: "면제" },
+      exemptions: { examinerReport: "면제", pairwise: "면제" },
     },
     holdoutPolicy: { mode: "none", note: "없음" },
   };
@@ -71,8 +71,7 @@ describe("결과 기록 내보내기", () => {
     const envelope = await buildProjectExport({
       compiled,
       answers: { staff: "가온, 나래, 다솜" },
-      examinerRun: null,
-      calibration: null,
+      examinerReport: null,
       approvedDigest: pack.definitionDigest,
       approvedAt: at,
       checkpoint,
@@ -93,8 +92,7 @@ describe("결과 기록 내보내기", () => {
       buildProjectExport({
         compiled,
         answers: {},
-        examinerRun: null,
-        calibration: null,
+        examinerReport: null,
         approvedDigest: "b".repeat(64),
         approvedAt: at,
         checkpoint,
@@ -151,8 +149,7 @@ describe("결과 기록 내보내기", () => {
       buildProjectExport({
         compiled: { ...compiled, pack: withHoldout },
         answers: {},
-        examinerRun: null,
-        calibration: null,
+        examinerReport: null,
         approvedDigest: withHoldout.definitionDigest,
         approvedAt: at,
         checkpoint: done,
@@ -182,8 +179,7 @@ describe("결과 기록 내보내기", () => {
     const envelope = await buildProjectExport({
       compiled: { ...compiled, pack: withHoldout },
       answers: {},
-      examinerRun: null,
-      calibration: null,
+      examinerReport: null,
       approvedDigest: withHoldout.definitionDigest,
       approvedAt: at,
       checkpoint: done,

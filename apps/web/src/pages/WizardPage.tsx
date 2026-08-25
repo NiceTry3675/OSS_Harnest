@@ -11,6 +11,7 @@ import { getTemplate } from "../templates";
 import { WizardBlueprint } from "../components/WizardBlueprint";
 import { StreamConsole } from "../components/StreamConsole";
 import { WizardCaseList, type CasePair } from "../components/WizardCaseList";
+import { ModelPicker } from "../components/ModelPicker";
 import { ProviderCredentialInput } from "../components/ProviderCredentialInput";
 import { appendFileTexts, extractFileText, FILE_ACCEPT } from "../lib/attachText";
 import {
@@ -22,6 +23,10 @@ import {
   PROVIDER_LABEL,
   setByoCredential,
   testByoConnection,
+  detectByoCredential,
+  listAvailableModels,
+  type CredentialProvider,
+  type AvailableModel,
   testSharedConnection,
   type ByoProvider,
   type SharedProvider,
@@ -42,20 +47,37 @@ const ROLE_LABEL: Record<Question["role"], string> = {
   criteria: "평가 기준",
 };
 
-type JudgeChoice = "mock" | ByoProvider;
+type JudgeChoice = "mock" | CredentialProvider;
 
+/** 목록을 불러오기 전에 쓰는 기본 모델 — 고르면 그 값이 이긴다 */
 const JUDGE_MODEL: Record<JudgeChoice, string> = {
   mock: "모의 모델",
   gemini: "gemini-3.7-flash",
   vertex: "gemini-3.7-flash",
   openai: "gpt-5.6-sol",
+  anthropic: "claude-sonnet-4-5",
+  openrouter: "openai/gpt-5.6-sol",
+  ollama: "llama3.1",
 };
+
+/** 카드로 고르는 공급자 — 모의 모델은 고르는 것이 아니라 빠져나가는 것이라 따로 둔다 */
+const PROVIDER_CHOICES: CredentialProvider[] = [
+  "openai",
+  "anthropic",
+  "gemini",
+  "openrouter",
+  "vertex",
+  "ollama",
+];
 
 const PROVIDER_OPTION_LABEL: Record<JudgeChoice, string> = {
   mock: "모의 모델 (외부 호출 없는 결정적 데모)",
   gemini: "Gemini (API 키 — 브라우저 저장·직접 호출)",
   vertex: "Vertex AI (서비스 계정 JSON — 브라우저 직접 호출)",
   openai: "OpenAI (API 키 — 브라우저 저장·직접 호출)",
+  anthropic: "Claude (API 키 — 브라우저 저장·직접 호출)",
+  openrouter: "OpenRouter (API 키 — 여러 회사 모델을 한 키로)",
+  ollama: "Ollama (내 컴퓨터 주소 — 키 없음)",
 };
 
 const PROVIDER_CARD: Record<
@@ -67,20 +89,35 @@ const PROVIDER_CARD: Record<
     model: "키 없이 사용",
     description: "외부 모델 호출 없이 결정적으로 제품 흐름을 확인합니다.",
   },
+  openai: {
+    name: "OpenAI",
+    model: JUDGE_MODEL.openai,
+    description: "API 키로 브라우저에서 직접 호출합니다. 공유 키가 설정돼 있으면 비워 둘 수 있습니다.",
+  },
+  anthropic: {
+    name: "Claude",
+    model: JUDGE_MODEL.anthropic,
+    description: "Anthropic API 키로 브라우저에서 직접 호출합니다.",
+  },
   gemini: {
     name: "Google Gemini",
     model: JUDGE_MODEL.gemini,
-    description: "Gemini API 키를 사용하며, 설정된 경우 관리자 공유 키를 선택할 수 있습니다.",
+    description: "API 키로 브라우저에서 직접 호출합니다. 공유 키가 설정돼 있으면 비워 둘 수 있습니다.",
+  },
+  openrouter: {
+    name: "OpenRouter",
+    model: JUDGE_MODEL.openrouter,
+    description: "한 키로 여러 회사 모델을 씁니다. 쓸 수 있는 모델을 목록으로 불러옵니다.",
   },
   vertex: {
     name: "Vertex AI",
     model: JUDGE_MODEL.vertex,
-    description: "Vertex AI 전용 서비스 계정 JSON으로 브라우저에서 직접 연결합니다.",
+    description: "서비스 계정 JSON을 붙여넣습니다. 사내 Google Cloud 계정을 쓸 때 고릅니다.",
   },
-  openai: {
-    name: "OpenAI",
-    model: JUDGE_MODEL.openai,
-    description: "OpenAI API 키를 사용하며, 설정된 경우 관리자 공유 키를 선택할 수 있습니다.",
+  ollama: {
+    name: "Ollama",
+    model: JUDGE_MODEL.ollama,
+    description: "내 컴퓨터에서 도는 모델입니다. 키 대신 주소를 넣습니다 (예: localhost:11434).",
   },
 };
 
@@ -149,7 +186,8 @@ export function WizardPage() {
   }, [questions, step]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [judgeChoice, setJudgeChoice] = useState<JudgeChoice>("mock");
+  // 기본값을 공급자로 둔다 — 키 칸이 처음부터 보여야 한다는 요청
+  const [judgeChoice, setJudgeChoice] = useState<JudgeChoice>("openai");
   // 초안은 실제 모델로 뽑아야 쓸 만하다 — 모의 모델은 화면 확인용이라 기본값에서 뺀다
   const [assistChoice, setAssistChoice] = useState<JudgeChoice>("gemini");
   const [assistBusy, setAssistBusy] = useState(false);
@@ -162,11 +200,22 @@ export function WizardPage() {
   const [attachBusy, setAttachBusy] = useState(false);
   const [assistText, setAssistText] = useState("");
   const [attached, setAttached] = useState<Array<{ name: string; size: string }>>([]);
-  const [credentialDrafts, setCredentialDrafts] = useState<Record<ByoProvider, string>>(() => ({
-    gemini: getByoCredential("gemini") ?? "",
-    vertex: "",
-    openai: getByoCredential("openai") ?? "",
-  }));
+  const [credentialDrafts, setCredentialDrafts] = useState<Record<CredentialProvider, string>>(
+    () => ({
+      gemini: getByoCredential("gemini") ?? "",
+      vertex: "",
+      openai: getByoCredential("openai") ?? "",
+      anthropic: getByoCredential("anthropic") ?? "",
+      openrouter: getByoCredential("openrouter") ?? "",
+      ollama: getByoCredential("ollama") ?? "",
+    }),
+  );
+  // 고른 모델 — 비어 있으면 공급자 기본값을 쓴다
+  const [judgeModel, setJudgeModel] = useState("");
+  // 공급자별로 불러온 모델 목록
+  const [modelList, setModelList] = useState<AvailableModel[]>([]);
+  const [modelBusy, setModelBusy] = useState(false);
+  const [modelNote, setModelNote] = useState<string | null>(null);
   const [storedVertexCredential, setStoredVertexCredential] = useState<string | null>(() =>
     getByoCredential("vertex"),
   );
@@ -190,7 +239,7 @@ export function WizardPage() {
   const judge = useMemo(
     () =>
       entry?.needsModel
-        ? { provider: judgeChoice, model: JUDGE_MODEL[judgeChoice] }
+        ? { provider: judgeChoice, model: judgeModel.trim() || JUDGE_MODEL[judgeChoice] }
         : { provider: "mock" as const, model: "-" },
     [entry, judgeChoice],
   );
@@ -212,15 +261,87 @@ export function WizardPage() {
 
   const busy = submitting || assistBusy || attachBusy;
 
-  const sharedAvailable = (provider: ByoProvider): boolean =>
-    provider !== "vertex" && sharedProviders[provider] === true;
+  const sharedAvailable = (provider: CredentialProvider): boolean =>
+    (provider === "gemini" || provider === "openai") && sharedProviders[provider] === true;
 
-  const credentialFor = (provider: ByoProvider): string => {
+  // 자격 증명이 채워지면 잠깐 기다렸다가 모델 목록을 스스로 불러온다.
+  // 글자를 칠 때마다 부르지 않도록 잠시 멈춘 뒤에만 호출한다.
+  useEffect(() => {
+    if (judgeChoice === "mock") return;
+    const credential =
+      judgeChoice === "vertex"
+        ? credentialDrafts.vertex.trim() || storedVertexCredential || ""
+        : credentialDrafts[judgeChoice].trim();
+    if (!credential) {
+      setModelList([]);
+      setModelNote(null);
+      return;
+    }
+    let alive = true;
+    setModelBusy(true);
+    setModelNote(null);
+    const timer = window.setTimeout(() => {
+      listAvailableModels(judgeChoice, credential)
+        .then((models) => {
+          if (!alive) return;
+          setModelList(models);
+          setJudgeModel((current) =>
+            current && models.some((m) => m.id === current) ? current : (models[0]?.id ?? current),
+          );
+        })
+        .catch((err: unknown) => {
+          if (!alive) return;
+          setModelList([]);
+          setModelNote(err instanceof Error ? err.message : "모델 목록을 불러오지 못했습니다.");
+        })
+        .finally(() => {
+          if (alive) setModelBusy(false);
+        });
+    }, 700);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+      window.clearTimeout(timer);
+    };
+  }, [judgeChoice, credentialDrafts, storedVertexCredential]);
+
+  /** 고른 공급자의 자격 증명으로 쓸 수 있는 모델을 불러온다.
+   *  OpenRouter·Ollama·OpenAI는 실제 목록을, 나머지는 정리해 둔 목록을 준다. */
+  const loadModels = async (): Promise<void> => {
+    if (judgeChoice === "mock") return;
+    const credential = credentialFor(judgeChoice);
+    if (!credential) {
+      setModelNote(
+        judgeChoice === "ollama"
+          ? "먼저 Ollama 주소를 넣어 주세요 (예: localhost:11434)."
+          : "먼저 API 키를 넣어 주세요.",
+      );
+      return;
+    }
+    setModelBusy(true);
+    setModelNote(null);
+    try {
+      const models = await listAvailableModels(judgeChoice, credential);
+      setModelList(models);
+      if (models.length === 0) {
+        setModelNote("쓸 수 있는 모델을 찾지 못했습니다.");
+      } else if (!models.some((m) => m.id === judgeModel)) {
+        setJudgeModel(models[0].id);
+      }
+    } catch (err) {
+      setModelList([]);
+      setModelNote(err instanceof Error ? err.message : "모델 목록을 불러오지 못했습니다.");
+    } finally {
+      setModelBusy(false);
+    }
+  };
+
+  const credentialFor = (provider: CredentialProvider): string => {
     const draft = credentialDrafts[provider].trim();
     return provider === "vertex" ? draft || storedVertexCredential || "" : draft;
   };
 
-  const persistCredential = (provider: ByoProvider, raw: string): void => {
+  const persistCredential = (provider: CredentialProvider, raw: string): void => {
     const saved = provider === "vertex" ? normalizeVertexServiceAccount(raw) : raw.trim();
     setByoCredential(provider, saved);
     if (provider === "vertex") {
@@ -229,7 +350,7 @@ export function WizardPage() {
     }
   };
 
-  const deleteCredential = (provider: ByoProvider): void => {
+  const deleteCredential = (provider: CredentialProvider): void => {
     setByoCredential(provider, null);
     setCredentialDrafts((current) => ({ ...current, [provider]: "" }));
     if (provider === "vertex") setStoredVertexCredential(null);
@@ -392,7 +513,7 @@ export function WizardPage() {
       if (entry!.needsModel && judgeChoice !== "mock") {
         const credential = credentialFor(judgeChoice);
         if (credential) {
-          await testByoConnection(judgeChoice, credential, JUDGE_MODEL[judgeChoice]);
+          await testByoConnection(judgeChoice, credential, judgeModel.trim() || JUDGE_MODEL[judgeChoice]);
           // 실패한 자격 증명이 기존의 정상 값을 덮지 않도록 성공한 뒤에만 저장한다.
           persistCredential(judgeChoice, credential);
         } else {
@@ -645,6 +766,31 @@ export function WizardPage() {
                     </>
                   ) : null}
                 </>
+              ) : q.type === "toggle" ? (
+                <div className="models">
+                  {(
+                    [
+                      { value: "true", name: "사용" },
+                      { value: "false", name: "사용 안 함" },
+                    ] as const
+                  ).map((opt) => {
+                    const current =
+                      typeof draft[q.id] === "string" && draft[q.id] !== ""
+                        ? (draft[q.id] as string)
+                        : String(q.defaultValue ?? true);
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        className={`model${current === opt.value ? " is-on" : ""}`}
+                        aria-pressed={current === opt.value}
+                        onClick={() => onChange(opt.value)}
+                      >
+                        <b>{opt.name}</b>
+                      </button>
+                    );
+                  })}
+                </div>
               ) : (
                 <input
                   id={`q-${q.id}`}
@@ -665,11 +811,10 @@ export function WizardPage() {
                   무엇으로 채점할까요?
                 </label>
                 <p className="sub" style={{ marginBottom: 16 }}>
-                  여기서 고른 모델은 판정 절차의 일부로 함께 잠깁니다. 나중에 바꾸려면 처음부터
-                  다시 승인해야 합니다.
+                  고른 모델은 판정 절차와 함께 잠깁니다. 바꾸려면 다시 승인해야 합니다.
                 </p>
                 <div className="models">
-                  {(["mock", "gemini", "vertex", "openai"] as const).map((id) => {
+                  {PROVIDER_CHOICES.map((id) => {
                     const card = PROVIDER_CARD[id];
                     return (
                       <button
@@ -679,12 +824,17 @@ export function WizardPage() {
                         aria-pressed={judgeChoice === id}
                         onClick={() => {
                           setJudgeChoice(id);
+                          // 공급자를 바꾸면 이전 목록·선택은 의미가 없다
+                          setModelList([]);
+                          setJudgeModel("");
+                          setModelNote(null);
                           setError(null);
                         }}
                       >
                         <b>{card.name}</b>
-                        <div className="model-id">{card.model}</div>
-                        <p>{card.description}</p>
+                        <div className="model-id">
+                          {judgeChoice === id && judgeModel ? judgeModel : card.model}
+                        </div>
                       </button>
                     );
                   })}
@@ -701,10 +851,17 @@ export function WizardPage() {
                       idPrefix="judge"
                       disabled={busy}
                       onChange={(value) => {
-                        setCredentialDrafts((current) => ({
-                          ...current,
-                          [judgeChoice]: value,
-                        }));
+                        // 키 형식으로 회사를 알아낸다 — 카드를 먼저 고르지 않아도 된다
+                        const found = detectByoCredential(value);
+                        const target =
+                          found.status === "detected" ? found.value.provider : judgeChoice;
+                        if (target !== judgeChoice) {
+                          setJudgeChoice(target);
+                          setModelList([]);
+                          setJudgeModel("");
+                          setModelNote(null);
+                        }
+                        setCredentialDrafts((current) => ({ ...current, [target]: value }));
                         setError(null);
                       }}
                       onDelete={() => deleteCredential(judgeChoice)}
@@ -730,8 +887,50 @@ export function WizardPage() {
                       )}{" "}
                       승인 화면으로 이동하기 전에 선택한 모델로 1회 연결을 확인합니다.
                     </div>
+
+                    <div className="model-pick">
+                      <label htmlFor="judge-model">모델</label>
+                      <ModelPicker
+                        models={modelList}
+                        value={judgeModel}
+                        placeholder={JUDGE_MODEL[judgeChoice]}
+                        busy={modelBusy}
+                        disabled={busy}
+                        onChange={(id) => {
+                          setJudgeModel(id);
+                          setError(null);
+                        }}
+                      />
+                    </div>
+                    <div className="hint">
+                      {modelNote
+                        ? modelNote
+                        : modelList.length > 0
+                          ? `${modelList.length}개 중에서 고르거나, 이름을 직접 적어도 됩니다.`
+                          : "이름을 직접 적어도 됩니다."}
+                    </div>
                   </div>
                 ) : null}
+
+                <div className="judge-escape">
+                  <button
+                    type="button"
+                    className={judgeChoice === "mock" ? "primary" : ""}
+                    disabled={busy}
+                    onClick={() => {
+                      setJudgeChoice("mock");
+                      setModelList([]);
+                      setJudgeModel("");
+                      setModelNote(null);
+                      setError(null);
+                    }}
+                  >
+                    {judgeChoice === "mock" ? "모의 모델로 진행합니다" : "키 없이 모의 모델로 둘러보기"}
+                  </button>
+                  <span className="hint" style={{ marginTop: 0 }}>
+                    외부 호출 없이 화면만 확인합니다. 실제 채점은 일어나지 않습니다.
+                  </span>
+                </div>
               </div>
             ) : null}
 
