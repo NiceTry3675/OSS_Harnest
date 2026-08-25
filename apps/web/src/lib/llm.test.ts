@@ -39,6 +39,8 @@ const problem: HandoverProblem = {
     c("case-5", "비밀 키는 어디에 보관하나요?", "모든 비밀 키는 볼트에 저장하며 저장소에 넣는 것은 금지입니다."),
   ],
   lengthCap: 2000,
+  // 간결성 끔 — 이 파일의 관통 시나리오는 순수 커버리지 등반을 검증한다
+  useConciseness: false,
 };
 
 describe("BYO 키 저장", () => {

@@ -7,7 +7,7 @@ export interface InterviewSubmission {
   answers: Record<string, unknown>;
 }
 
-export type QuestionType = "text" | "number" | "staffList" | "textarea" | "caseList";
+export type QuestionType = "text" | "number" | "staffList" | "textarea" | "caseList" | "toggle";
 
 /** 평가 케이스 — 케이스 기반 템플릿의 원료이자 정답(ground truth). */
 export interface CaseDef {

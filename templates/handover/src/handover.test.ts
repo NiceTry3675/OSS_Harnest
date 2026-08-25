@@ -8,6 +8,8 @@ import { compile, MAX_CALLS_PER_RUN, MAX_CASES, MIN_CASES, TEMPLATE_ID, type Com
 import { mutatePrompt, oneshotPrompt } from "./prompts";
 import {
   CallBudgetExceededError,
+  CONCISENESS_WEIGHT,
+  COVERAGE_WEIGHT,
   createGenerator,
   createInitial,
   createScorer,
@@ -19,7 +21,11 @@ import {
 
 const mockJudge: CompileOptions = { judgeProvider: "mock", judgeModel: "테스트-모의" };
 
-function makeSubmission(caseCount: number, lengthCap: number = 2000): InterviewSubmission {
+function makeSubmission(
+  caseCount: number,
+  lengthCap: number = 2000,
+  conciseness?: boolean,
+): InterviewSubmission {
   return {
     schemaVersion: "skeleton-1",
     templateId: TEMPLATE_ID,
@@ -30,6 +36,7 @@ function makeSubmission(caseCount: number, lengthCap: number = 2000): InterviewS
         expectedAnswer: `정답 ${i + 1}: 절차${i + 1}을 따르면 됩니다.`,
       })),
       lengthCap,
+      ...(conciseness === undefined ? {} : { conciseness }),
     },
   };
 }
@@ -121,6 +128,27 @@ describe("compile", () => {
   it("분량 범위(500~20,000자) 밖은 거부한다", async () => {
     await expect(compile(makeSubmission(6, 499), mockJudge)).rejects.toThrow("500~20,000");
     await expect(compile(makeSubmission(6, 20_001), mockJudge)).rejects.toThrow("500~20,000");
+  });
+
+  it("간결성 토글이 criteria와 다이제스트에 결속된다 — 키 없음(구버전 답변)은 켬", async () => {
+    const on = await compile(makeSubmission(6), mockJudge);
+    expect(on.problem.useConciseness).toBe(true);
+    expect(on.pack.criteria.map((c) => [c.id, c.weight])).toEqual([
+      ["case_answerability", COVERAGE_WEIGHT],
+      ["conciseness", CONCISENESS_WEIGHT],
+    ]);
+
+    const off = await compile(makeSubmission(6, 2000, false), mockJudge);
+    expect(off.problem.useConciseness).toBe(false);
+    expect(off.pack.criteria.map((c) => [c.id, c.weight])).toEqual([
+      ["case_answerability", 1.0],
+    ]);
+    // 토글 = 판정 절차 변경 = 다른 다이제스트 (재승인 원칙)
+    expect(off.pack.definitionDigest).not.toBe(on.pack.definitionDigest);
+
+    // 명시적 켬과 키 없음은 같은 criteria → 같은 다이제스트
+    const explicitOn = await compile(makeSubmission(6, 2000, true), mockJudge);
+    expect(explicitOn.pack.definitionDigest).toBe(on.pack.definitionDigest);
   });
 
   it("기록 전체가 상한 안이면 베끼기 방어 정적 안내를 남기고, 상한을 넘으면 안내가 없다", async () => {
@@ -224,7 +252,8 @@ describe("createScorer", () => {
   });
 
   it("가시 케이스만 채점한다 — 홀드아웃 질문은 responder 프롬프트에 등장하지 않는다(불변식)", async () => {
-    const { problem } = await compile(makeSubmission(6), mockJudge);
+    // 간결성 끔 — 순수 커버리지 산술을 검증한다 (켠 경로는 아래 간결성 describe)
+    const { problem } = await compile(makeSubmission(6, 2000, false), mockJudge);
     const llm = createRecordingLlm([...problem.visibleCases, ...problem.holdoutCases]);
     const scorer = createScorer(problem, llm);
 
@@ -264,6 +293,51 @@ describe("createScorer", () => {
   });
 });
 
+describe("createScorer — 간결성 가점", () => {
+  const round1 = (x: number): number => Math.round(x * 10) / 10;
+
+  it("켜면 커버리지 0.8 + 상한 대비 여유 0.2로 합산하고, 같은 커버리지면 짧을수록 높다", async () => {
+    const { problem } = await compile(makeSubmission(6), mockJudge); // 기본 켬
+    const llm = createRecordingLlm([...problem.visibleCases, ...problem.holdoutCases]);
+    const scorer = createScorer(problem, llm);
+
+    // 가시 4케이스 중 2개 정답 = 커버리지 50
+    const doc =
+      "배포 파이프라인 안내. " +
+      problem.visibleCases[0].expectedAnswer +
+      " " +
+      problem.visibleCases[1].expectedAnswer;
+    const result = await scorer(doc);
+    const headroom = Math.max(0, 1 - doc.length / problem.lengthCap) * 100;
+    expect(result.gateRejected).toBe(false);
+    expect(result.parts).toEqual({
+      case_answerability: 50,
+      conciseness: round1(headroom),
+    });
+    expect(result.total).toBe(round1(0.8 * 50 + 0.2 * headroom));
+
+    // 같은 커버리지, 더 짧은 문서 → 더 높은 점수
+    const shorter = await scorer(
+      problem.visibleCases[0].expectedAnswer + " " + problem.visibleCases[1].expectedAnswer,
+    );
+    expect(shorter.total).toBeGreaterThan(result.total);
+
+    // 만점 포화 없음 — 전 케이스 커버리지(100)여도 total은 100에 못 미친다
+    const full = await scorer(problem.visibleCases.map((c) => c.expectedAnswer).join(" "));
+    expect(full.parts["case_answerability"]).toBe(100);
+    expect(full.total).toBeLessThan(100);
+  });
+
+  it("답변력이 0이면 간결성도 0 — 빈 문서가 간결성만으로 점수를 받지 못한다", async () => {
+    const { problem } = await compile(makeSubmission(6), mockJudge);
+    const llm = createRecordingLlm([...problem.visibleCases, ...problem.holdoutCases]);
+    const result = await createScorer(problem, llm)("관련 없는 짧은 문서");
+
+    expect(result.total).toBe(0);
+    expect(result.parts).toEqual({ case_answerability: 0, conciseness: 0 });
+  });
+});
+
 describe("배치 채점 — 형식 오류", () => {
   const sequenceLlm = (outputs: string[]): LlmClient & { prompts: string[] } => {
     const prompts: string[] = [];
@@ -279,7 +353,7 @@ describe("배치 채점 — 형식 오류", () => {
   };
 
   it("responder 배치가 요청 케이스를 모두 담지 않으면 형식 재시도 1회 후 성공한다", async () => {
-    const { problem } = await compile(makeSubmission(6), mockJudge);
+    const { problem } = await compile(makeSubmission(6, 2000, false), mockJudge);
     const answers = problem.visibleCases.map((c) => ({ caseId: c.id, answer: c.expectedAnswer }));
     const grades = problem.visibleCases.map((c) => ({ caseId: c.id, score: 1, why: "정답" }));
     const llm = sequenceLlm([
@@ -441,11 +515,24 @@ describe("createGenerator", () => {
     expect(prompt).toContain("현재 문서 (점수 42/100)");
     expect(prompt).toContain("현재 챔피언 문서 본문");
     expect(prompt).toContain("라운드 3");
+    // 간결성이 켜진 절차의 변이 프롬프트에는 가점 힌트가 실린다 (강제는 scorer, 프롬프트는 힌트)
+    expect(prompt).toContain("간결성 가점");
     // 변이 프롬프트도 가시 케이스만 본다 — 홀드아웃 유입 금지
     for (const h of problem.holdoutCases) {
       expect(prompt).not.toContain(h.question);
       expect(prompt).not.toContain(h.expectedAnswer);
     }
+  });
+
+  it("간결성을 끈 절차의 변이 프롬프트에는 가점 힌트가 없다", async () => {
+    const { problem } = await compile(makeSubmission(6, 2000, false), mockJudge);
+    const llm = createRecordingLlm([...problem.visibleCases, ...problem.holdoutCases]);
+    await createGenerator(problem, llm)("챔피언 문서", () => 0, {
+      round: 1,
+      championScore: 0,
+      championViolations: [],
+    });
+    expect(llm.prompts[0]).not.toContain("간결성 가점");
   });
 });
 

@@ -77,3 +77,26 @@ describe("toAnswers — caseList provenance", () => {
     expect(JSON.stringify(answers)).not.toContain("needsConfirm");
   });
 });
+
+describe("toggle 질문", () => {
+  const toggleQ: Question = {
+    id: "conciseness",
+    role: "criteria",
+    type: "toggle",
+    label: "간결성",
+    defaultValue: true,
+  };
+
+  it("항상 유효하고, 명시적 false만 끔으로 변환한다", () => {
+    expect(validate(toggleQ, "")).toBeNull();
+    expect(validate(toggleQ, "false")).toBeNull();
+    expect(toAnswers([toggleQ], { conciseness: "true" })).toEqual({ conciseness: true });
+    expect(toAnswers([toggleQ], { conciseness: "false" })).toEqual({ conciseness: false });
+  });
+
+  it("손대지 않은 초안(빈 값)은 선언된 기본값을 따른다", () => {
+    expect(toAnswers([toggleQ], { conciseness: "" })).toEqual({ conciseness: true });
+    const offDefault: Question = { ...toggleQ, defaultValue: false };
+    expect(toAnswers([offDefault], { conciseness: "" })).toEqual({ conciseness: false });
+  });
+});

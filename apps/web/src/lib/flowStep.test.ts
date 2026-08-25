@@ -22,12 +22,13 @@ function template(id: string): FlowSource {
 }
 
 describe("buildFlowSteps", () => {
-  it("인수인계 템플릿의 정확한 7단계를 선언 순서대로 만든다", () => {
+  it("인수인계 템플릿의 정확한 8단계를 선언 순서대로 만든다", () => {
     const entry = template("handover");
     expect(buildFlowSteps(entry.questions, entry.flow).map((step) => step.label)).toEqual([
       "업무 소개",
       "질문과 답",
-      "분량·모델",
+      "분량",
+      "간결성·모델",
       "검증·승인",
       "동결",
       "실행",
@@ -113,12 +114,12 @@ describe("digest-bound approval step", () => {
     };
     const resolved = resolveFlow(entry, { kind: "approval" }, approval);
     expect(resolved?.approvedForCurrentDigest).toBe(true);
-    expect(resolved?.index).toBe(4);
+    expect(resolved?.index).toBe(5);
     expect(resolved?.current.label).toBe("동결");
   });
 
   it("실행과 결과는 승인 전·후 두 칸 다음의 고정 의미 위치를 가리킨다", () => {
-    expect(resolveFlow(entry, { kind: "run" }, unapproved)?.index).toBe(5);
-    expect(resolveFlow(entry, { kind: "result" }, unapproved)?.index).toBe(6);
+    expect(resolveFlow(entry, { kind: "run" }, unapproved)?.index).toBe(6);
+    expect(resolveFlow(entry, { kind: "result" }, unapproved)?.index).toBe(7);
   });
 });

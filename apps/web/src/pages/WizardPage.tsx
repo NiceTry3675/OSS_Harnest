@@ -641,6 +641,31 @@ export function WizardPage() {
                     </>
                   ) : null}
                 </>
+              ) : q.type === "toggle" ? (
+                <div className="models">
+                  {(
+                    [
+                      { value: "true", name: "사용" },
+                      { value: "false", name: "사용 안 함" },
+                    ] as const
+                  ).map((opt) => {
+                    const current =
+                      typeof draft[q.id] === "string" && draft[q.id] !== ""
+                        ? (draft[q.id] as string)
+                        : String(q.defaultValue ?? true);
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        className={`model${current === opt.value ? " is-on" : ""}`}
+                        aria-pressed={current === opt.value}
+                        onClick={() => onChange(opt.value)}
+                      >
+                        <b>{opt.name}</b>
+                      </button>
+                    );
+                  })}
+                </div>
               ) : (
                 <input
                   id={`q-${q.id}`}

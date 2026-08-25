@@ -47,7 +47,11 @@ export function mutatePrompt(
 평가 방식: 문서만 읽은 응답자가 실제 질문들에 답하고, 기록된 정답과 대조했습니다.
 실패 목록을 고치되 이미 맞는 내용을 깨지 마세요.
 내용을 추가해야 한다면 먼저 덜 중요한 내용을 비슷한 분량만큼 삭제하세요 — 분량 제한이 있습니다.
-${limitBlock(problem.lengthCap)}
+${limitBlock(problem.lengthCap)}${
+    problem.useConciseness
+      ? `\n간결성 가점: 같은 커버리지면 짧은 문서가 더 높은 점수를 받습니다 (현재 ${championDoc.length.toLocaleString()}자).`
+      : ""
+  }
 
 ## 업무 소개 · 참고 자료
 ${problem.material || "(제공되지 않음)"}
