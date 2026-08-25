@@ -1,12 +1,7 @@
 /** 케이스 초안 보조 테스트 — 파싱·재시도·호출 상한과 모의 마커 충돌 방지. */
 
 import { describe, expect, it } from "vitest";
-import {
-  ASSIST_CALLS_PER_CLICK,
-  ASSIST_MIN_MATERIAL_CHARS,
-  draftCases,
-  MAX_DRAFTS_PER_CLICK,
-} from "./assist";
+import { ASSIST_CALLS_PER_CLICK, ASSIST_MIN_MATERIAL_CHARS, draftCases } from "./assist";
 import { DRAFT_CASES_MARKER, draftCasesPrompt, draftCasesRetryPrompt } from "./prompts";
 import type { LlmClient } from "./runtime";
 
@@ -36,6 +31,7 @@ describe("draftCasesPrompt — 모의 마커 충돌 방지", () => {
       expect(prompt).toContain(DRAFT_CASES_MARKER);
       expect(prompt).toContain("생성 개수: 3");
       expect(prompt).not.toContain("아래 문서만을 근거로");
+      expect(prompt).not.toContain("## 채점 목록");
       expect(prompt).not.toContain("JSON만 출력");
       expect(prompt).not.toContain("## 실패 목록");
     }
@@ -66,12 +62,12 @@ describe("draftCases", () => {
     expect(llm.prompts.length).toBeLessThanOrEqual(ASSIST_CALLS_PER_CLICK);
   });
 
-  it("count는 클릭당 상한으로 잘리고, 초과 반환분도 잘라낸다", async () => {
+  it("count는 그대로 요청하고, 모델의 초과 반환분은 잘라낸다", async () => {
     const many = Array.from({ length: 9 }, (_, i) => pair(i + 1));
     const llm = sequenceLlm([JSON.stringify(many)]);
-    const result = await draftCases(llm, MATERIAL, [], 9);
-    expect(result).toHaveLength(MAX_DRAFTS_PER_CLICK);
-    expect(llm.prompts[0]).toContain(`생성 개수: ${MAX_DRAFTS_PER_CLICK}`);
+    const result = await draftCases(llm, MATERIAL, [], 5);
+    expect(result).toHaveLength(5);
+    expect(llm.prompts[0]).toContain("생성 개수: 5");
   });
 
   it("기존 질문과 정규화 기준으로 같은 초안은 제거한다", async () => {

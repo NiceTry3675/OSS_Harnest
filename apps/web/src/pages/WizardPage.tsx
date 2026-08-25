@@ -87,6 +87,8 @@ export function WizardPage() {
   const [judgeChoice, setJudgeChoice] = useState<JudgeChoice>("mock");
   const [assistChoice, setAssistChoice] = useState<JudgeChoice>("mock");
   const [assistBusy, setAssistBusy] = useState(false);
+  // 클릭 1회에 요청할 초안 개수 — 남은 슬롯까지 자유롭게 고른다(호출은 개수와 무관하게 클릭당 1회)
+  const [assistCount, setAssistCount] = useState(3);
   const [attachBusy, setAttachBusy] = useState(false);
   const [keyDrafts, setKeyDrafts] = useState<Record<ByoProvider, string>>(() => ({
     gemini: getByoKey("gemini") ?? "",
@@ -133,6 +135,13 @@ export function WizardPage() {
   const isLast = step === questions.length - 1;
 
   const busy = submitting || assistBusy || attachBusy;
+
+  // AI 초안 슬라이더 범위 — 남은 슬롯을 넘겨 요청할 수 없다(빈 행은 채울 슬롯으로 계산)
+  const casePairs =
+    q.type === "caseList" && Array.isArray(draft[q.id]) ? (draft[q.id] as CasePair[]) : [];
+  const caseFilled = casePairs.filter((p) => p.question.trim() || p.expectedAnswer.trim()).length;
+  const assistSliderMax = Math.max(1, (q.max ?? CASE_MAX_DEFAULT) - caseFilled);
+  const assistEffective = Math.min(assistCount, assistSliderMax);
 
   function onChange(value: DraftValue) {
     setDraft((d) => ({ ...d, [q.id]: value }));
@@ -208,7 +217,7 @@ export function WizardPage() {
       const existing = pairs
         .filter((p) => p.question.trim() && p.expectedAnswer.trim())
         .map((p) => ({ question: p.question.trim(), expectedAnswer: p.expectedAnswer.trim() }));
-      const drafted = await assist.draft(material, existing, remaining, client);
+      const drafted = await assist.draft(material, existing, Math.min(assistCount, remaining), client);
       if (assistChoice !== "mock") {
         // 실패한 키가 기존의 정상 키를 덮지 않도록 성공한 뒤에만 저장한다.
         setByoKey(assistChoice, keyDrafts[assistChoice].trim());
@@ -352,6 +361,25 @@ export function WizardPage() {
                           />
                         </div>
                       ) : null}
+                      <div
+                        style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 10 }}
+                      >
+                        <label htmlFor="assist-count" style={{ margin: 0, fontSize: 13 }}>
+                          한 번에 만들 초안
+                        </label>
+                        <input
+                          id="assist-count"
+                          type="range"
+                          min={1}
+                          max={assistSliderMax}
+                          step={1}
+                          value={assistEffective}
+                          disabled={assistSliderMax <= 1}
+                          style={{ width: 140, padding: 0 }}
+                          onChange={(e) => setAssistCount(Number(e.target.value))}
+                        />
+                        <span className="badge muted">{assistEffective}개</span>
+                      </div>
                       <div style={{ marginTop: 8 }}>
                         <button type="button" disabled={busy} onClick={onDraftCases}>
                           {assistBusy ? "초안 생성 중…" : "AI로 질답 초안 만들기"}

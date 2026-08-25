@@ -5,9 +5,8 @@
 import { draftCasesPrompt, draftCasesRetryPrompt } from "./prompts";
 import { normalizeQuestion, withCallBudget, withoutCodeFence, type LlmClient } from "./runtime";
 
-/** 클릭 1회의 초안 개수 상한 — 남은 슬롯이 더 커도 이 수를 넘지 않는다 */
-export const MAX_DRAFTS_PER_CLICK = 3;
-/** 클릭 1회 호출 상한 = 본 호출 1 + 형식 재시도 1 (실행 예산 밖의 별도 백스톱) */
+/** 클릭 1회 호출 상한 = 본 호출 1 + 형식 재시도 1 (실행 예산 밖의 별도 백스톱).
+ *  초안 개수는 호출 수와 무관하므로 따로 상한하지 않는다 — 남은 슬롯 계산은 호출자(위저드) 몫. */
 export const ASSIST_CALLS_PER_CLICK = 2;
 /** 초안의 근거가 될 최소 자료 분량 */
 export const ASSIST_MIN_MATERIAL_CHARS = 50;
@@ -57,7 +56,7 @@ export async function draftCases(
       `참고 자료가 너무 짧아 초안을 만들 수 없습니다 — 자료를 ${ASSIST_MIN_MATERIAL_CHARS}자 이상 먼저 채워 주세요.`,
     );
   }
-  const clamped = Math.max(1, Math.min(count, MAX_DRAFTS_PER_CLICK));
+  const clamped = Math.max(1, Math.floor(count));
   const existingQuestions = existing.map((c) => c.question);
   const budgeted = withCallBudget(llm, ASSIST_CALLS_PER_CLICK);
 
