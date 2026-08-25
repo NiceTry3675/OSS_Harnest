@@ -27,7 +27,11 @@ export interface Question {
   role: "material" | "constraints" | "criteria";
   type: QuestionType;
   label: string;
+  /** 입력면 머리에 붙는 짧은 이름 — 생략하면 label을 쓴다 */
+  shortLabel?: string;
   help?: string;
+  /** 다음 단계로 가는 버튼 문구 — 생략하면 "다음" */
+  nextLabel?: string;
   placeholder?: string;
   min?: number;
   max?: number;

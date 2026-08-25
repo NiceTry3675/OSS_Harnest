@@ -6,6 +6,7 @@ import type { ComponentType } from "react";
 import type {
   CalibrationPairSpec,
   EvaluationPack,
+  ExaminerCheckResult,
   InterviewSubmission,
   JudgeProvider,
   Question,
@@ -16,6 +17,8 @@ import * as timetable from "@harnest/template-timetable";
 import * as handover from "@harnest/template-handover";
 import type { CompiledGeneric, ExaminerRunGeneric, HoldoutEvaluation } from "./state";
 import type { LlmClient } from "@harnest/template-handover";
+import { DEV_SAMPLES } from "./lib/devSamples";
+import type { TemplateFlow } from "./lib/flowStep";
 import { TimetableGrid } from "./components/TimetableGrid";
 import { HandoverDocView } from "./components/HandoverDocView";
 import {
@@ -54,6 +57,8 @@ export interface TemplateEntry {
   /** true면 BYO 키 또는 모의 모델 선택이 필요(저지 모델은 승인 전에 확정 — SPEC §8) */
   needsModel: boolean;
   questions: Question[];
+  /** 질문 뒤 승인 전·후, 실행, 결과 단계의 템플릿별 표시 문구. */
+  flow: TemplateFlow;
   compile(
     submission: InterviewSubmission,
     judge: { provider: JudgeProvider; model: string },
@@ -68,6 +73,8 @@ export interface TemplateEntry {
       compiled: CompiledGeneric,
       llm: LlmClient,
       onProgress?: (message: string) => void,
+      /** 검사 하나가 끝날 때마다 — 화면이 결과를 기다리지 않고 바로 표시한다 */
+      onCheck?: (check: ExaminerCheckResult) => void,
     ): Promise<ExaminerRunGeneric>;
     buildPairs(run: ExaminerRunGeneric, pack: EvaluationPack): CalibrationPairSpec[];
   };
@@ -104,6 +111,8 @@ export interface TemplateEntry {
     >;
   };
   ArtifactView: ComponentType<{ problem: unknown; artifact: unknown }>;
+  /** 개발용 예시 답변(선택) — 개발 서버에서만 노출된다. 프로덕션 빌드에서는 제거된다. */
+  devSample?: Record<string, unknown>;
 }
 
 const timetableEntry: TemplateEntry = {
@@ -114,6 +123,11 @@ const timetableEntry: TemplateEntry = {
   badge: "개발용 테스트 템플릿",
   needsModel: false,
   questions: timetable.questions,
+  flow: {
+    approval: { pending: "기준 승인", approved: "동결" },
+    run: "실행",
+    result: "결과",
+  },
   compile: (submission) => timetable.compile(submission),
   createLlm: () => null,
   createRuntime(compiled) {
@@ -128,6 +142,7 @@ const timetableEntry: TemplateEntry = {
       roundDelayMs: 120,
     };
   },
+  devSample: import.meta.env.DEV ? DEV_SAMPLES[timetable.TEMPLATE_ID] : undefined,
   ArtifactView: ({ problem, artifact }) => (
     <TimetableGrid
       problem={problem as timetable.TimetableProblem}
@@ -143,6 +158,11 @@ const handoverEntry: TemplateEntry = {
     "실제로 받았던 질문과 그때의 답을 넣으세요. 문서만 읽은 AI가 그 질문들에 실제로 답해보는 방식으로 채점하며, 당신이 정한 분량 안에서 커버리지를 넓혀 갑니다.",
   needsModel: true,
   questions: handover.questions,
+  flow: {
+    approval: { pending: "검증·승인", approved: "동결" },
+    run: "실행",
+    result: "결과",
+  },
   compile: (submission, judge) =>
     handover.compile(submission, { judgeProvider: judge.provider, judgeModel: judge.model }),
   createLlm(compiled) {
@@ -183,12 +203,13 @@ const handoverEntry: TemplateEntry = {
       handover.draftCases(llm, material, existing, count, difficulty),
   },
   examiner: {
-    runBattery: (compiled, llm, onProgress) =>
+    runBattery: (compiled, llm, onProgress, onCheck) =>
       handover.runExaminerBattery(
         compiled.problem as handover.HandoverProblem,
         compiled.pack,
         llm,
         onProgress,
+        onCheck,
       ),
     buildPairs: (run, pack) =>
       handover.buildCalibrationPairs(run as handover.ExaminerRun, pack),
@@ -223,6 +244,7 @@ const handoverEntry: TemplateEntry = {
       roundDelayMs: 0,
     };
   },
+  devSample: import.meta.env.DEV ? DEV_SAMPLES[handover.TEMPLATE_ID] : undefined,
   ArtifactView: ({ artifact }) => <HandoverDocView doc={String(artifact ?? "")} />,
 };
 

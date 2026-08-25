@@ -9,7 +9,8 @@ import type { Question } from "@harnest/contracts";
 import type { LlmClient } from "@harnest/template-handover";
 import { getTemplate } from "../templates";
 import { WizardBlueprint } from "../components/WizardBlueprint";
-import { WizardCaseList, textareaStyle, type CasePair } from "../components/WizardCaseList";
+import { StreamConsole } from "../components/StreamConsole";
+import { WizardCaseList, type CasePair } from "../components/WizardCaseList";
 import { ProviderCredentialInput } from "../components/ProviderCredentialInput";
 import { appendFileTexts, extractFileText, FILE_ACCEPT } from "../lib/attachText";
 import {
@@ -32,6 +33,7 @@ import {
   validate,
   type DraftValue,
 } from "../lib/wizard-form";
+import { setFlowStep } from "../lib/flowStep";
 import { useProject } from "../state";
 
 const ROLE_LABEL: Record<Question["role"], string> = {
@@ -50,11 +52,57 @@ const JUDGE_MODEL: Record<JudgeChoice, string> = {
 };
 
 const PROVIDER_OPTION_LABEL: Record<JudgeChoice, string> = {
-  mock: "모의 모델 (무료 · 데모용 결정적 채점)",
-  gemini: "Gemini (BYO 키 — 키는 이 브라우저에만 저장됩니다)",
-  vertex: "Vertex AI · Gemini 3.7 Flash (서비스 계정 JSON — 브라우저 직행)",
-  openai: "OpenAI · GPT-5.6 Sol (BYO 키 — 브라우저 직행)",
+  mock: "모의 모델 (외부 호출 없는 결정적 데모)",
+  gemini: "Gemini (API 키 — 브라우저 저장·직접 호출)",
+  vertex: "Vertex AI (서비스 계정 JSON — 브라우저 직접 호출)",
+  openai: "OpenAI (API 키 — 브라우저 저장·직접 호출)",
 };
+
+const PROVIDER_CARD: Record<
+  JudgeChoice,
+  { name: string; model: string; description: string }
+> = {
+  mock: {
+    name: "모의 모델",
+    model: "키 없이 사용",
+    description: "외부 모델 호출 없이 결정적으로 제품 흐름을 확인합니다.",
+  },
+  gemini: {
+    name: "Google Gemini",
+    model: JUDGE_MODEL.gemini,
+    description: "Gemini API 키를 사용하며, 설정된 경우 관리자 공유 키를 선택할 수 있습니다.",
+  },
+  vertex: {
+    name: "Vertex AI",
+    model: JUDGE_MODEL.vertex,
+    description: "Vertex AI 전용 서비스 계정 JSON으로 브라우저에서 직접 연결합니다.",
+  },
+  openai: {
+    name: "OpenAI",
+    model: JUDGE_MODEL.openai,
+    description: "OpenAI API 키를 사용하며, 설정된 경우 관리자 공유 키를 선택할 수 있습니다.",
+  },
+};
+
+/** 남은 분량을 원으로 보여준다 — 숫자만 있으면 얼마나 찼는지 감이 안 온다 */
+function CharRing({ filled, max }: { filled: number; max: number }) {
+  const r = 11;
+  const circumference = 2 * Math.PI * r;
+  const ratio = Math.min(1, max > 0 ? filled / max : 0);
+  return (
+    <svg className="char-ring" viewBox="0 0 26 26" aria-hidden="true">
+      <circle className="bg" cx="13" cy="13" r={r} />
+      <circle
+        className="fg"
+        cx="13"
+        cy="13"
+        r={r}
+        strokeDasharray={circumference}
+        strokeDashoffset={circumference * (1 - ratio)}
+      />
+    </svg>
+  );
+}
 
 export function WizardPage() {
   const { templateId, answers: savedAnswers, setAnswers, setCompiled } = useProject();
@@ -78,8 +126,7 @@ export function WizardPage() {
                 : {}),
             }))
           : [];
-        const min = q.min ?? CASE_MIN_DEFAULT;
-        while (pairs.length < min) pairs.push({ question: "", expectedAnswer: "" });
+        // 빈 카드를 미리 깔지 않는다 — 입력창에서 하나씩 추가한다
         init[q.id] = pairs;
         continue;
       }
@@ -93,6 +140,13 @@ export function WizardPage() {
     return init;
   });
   const [step, setStep] = useState(0);
+
+  // 단계가 바뀌면 맨 위에서 시작한다 — 긴 목록 중간에서 열리면 어디인지 알 수 없다
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "auto" });
+    const questionId = questions[step]?.id;
+    setFlowStep(questionId ? { kind: "question", questionId } : { kind: "outside" });
+  }, [questions, step]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [judgeChoice, setJudgeChoice] = useState<JudgeChoice>("mock");
@@ -105,6 +159,8 @@ export function WizardPage() {
     () => entry?.caseAssist?.difficulty?.defaultValue ?? 1,
   );
   const [attachBusy, setAttachBusy] = useState(false);
+  const [assistText, setAssistText] = useState("");
+  const [attached, setAttached] = useState<Array<{ name: string; size: string }>>([]);
   const [credentialDrafts, setCredentialDrafts] = useState<Record<ByoProvider, string>>(() => ({
     gemini: getByoCredential("gemini") ?? "",
     vertex: "",
@@ -198,6 +254,7 @@ export function WizardPage() {
     e.target.value = ""; // 같은 파일 재첨부 허용
     if (files.length === 0) return;
     setAttachBusy(true);
+    const added: Array<{ name: string; size: string }> = [];
     let current = typeof draft[q.id] === "string" ? (draft[q.id] as string) : "";
     let changed = false;
     let failure: string | null = null;
@@ -216,7 +273,9 @@ export function WizardPage() {
       }
       current = next;
       changed = true;
+      added.push({ name: file.name, size: `${Math.max(1, Math.round(file.size / 1024))}KB` });
     }
+    if (added.length > 0) setAttached((prev) => [...prev, ...added]);
     if (changed) onChange(current); // onChange가 error를 지우므로 실패 메시지는 그 뒤에 싣는다
     if (failure) setError(failure);
     setAttachBusy(false);
@@ -261,6 +320,7 @@ export function WizardPage() {
     }
 
     setAssistBusy(true);
+    setAssistText("");
     setError(null);
     try {
       const existing = pairs
@@ -281,6 +341,11 @@ export function WizardPage() {
         setError("새 초안이 없습니다 — 모두 기존 질문과 중복이었습니다.");
         return;
       }
+      setAssistText(
+        drafted
+          .map((d, n) => `${n + 1}. ${d.question}\n   ${d.expectedAnswer}`)
+          .join("\n\n"),
+      );
       // 빈 행부터 채우고, 모자라면 상한까지 행을 추가한다
       const next = [...pairs];
       for (const d of drafted) {
@@ -349,24 +414,34 @@ export function WizardPage() {
   }
 
   return (
-    <div>
-      <h1>{entry.name}</h1>
-      <p className="sub">몇 가지 질문에 답하면, 오른쪽에 채점 기준이 실시간으로 만들어집니다.</p>
-
-      <div className="row">
-        <div className="card grow">
-          <div style={{ marginBottom: 14 }}>
-            <span className="badge">{step + 1} / {questions.length} 단계</span>
-            <span className="badge muted">{ROLE_LABEL[q.role]}</span>
+    <div className="wizard">
+      <div className={`wizard-grid${isLast ? " is-wide" : ""}`}>
+        <div className="wizard-main route-swap" key={step}>
+          <div className="wizard-tags">
+            <span className="eyebrow">
+              {step + 1}단계 · {ROLE_LABEL[q.role]}
+            </span>
+            {entry.devSample ? (
+              <button
+                type="button"
+                className="dev-fill"
+                title="개발 서버에서만 보입니다"
+                onClick={() => {
+                  setError(null);
+                  setDraft((d) => ({ ...d, ...(entry.devSample as Record<string, DraftValue>) }));
+                  setStep(questions.length - 1);
+                }}
+              >
+                예시 채우기
+              </button>
+            ) : null}
           </div>
 
-          <form onSubmit={onSubmit}>
+          <h2 className="q-big">{q.label}</h2>
+          {q.help ? <p className="q-help">{q.help}</p> : null}
+
+          <form id="wizard-form" onSubmit={onSubmit}>
             <div className="field">
-              {q.type === "caseList" ? (
-                <label>{q.label}</label>
-              ) : (
-                <label htmlFor={`q-${q.id}`}>{q.label}</label>
-              )}
               {q.type === "caseList" ? (
                 <>
                   <WizardCaseList
@@ -376,103 +451,124 @@ export function WizardPage() {
                     onChange={onChange}
                   />
                   {entry.caseAssist ? (
-                    <div style={{ marginTop: 12, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
-                      <label>AI 초안 도우미 (선택)</label>
-                      <div style={{ display: "grid", gap: 6, fontSize: 14 }}>
-                        {(["mock", "gemini", "vertex", "openai"] as const).map((choice) => (
-                          <label
-                            key={choice}
-                            style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}
-                          >
-                            <input
-                              type="radio"
-                              name="assist-model"
-                              style={{ width: "auto" }}
-                              checked={assistChoice === choice}
-                              onChange={() => {
-                                setAssistChoice(choice);
-                                setError(null);
-                              }}
-                            />
-                            {choice === "mock"
-                              ? "모의 모델 (무료 · 데모용 결정적 초안)"
-                              : PROVIDER_OPTION_LABEL[choice]}
-                          </label>
-                        ))}
-                      </div>
-                      {assistChoice !== "mock" ? (
-                        <div style={{ marginTop: 8 }}>
-                          <ProviderCredentialInput
-                            provider={assistChoice}
-                            value={credentialDrafts[assistChoice]}
-                            storedCredential={
-                              assistChoice === "vertex" ? storedVertexCredential : null
-                            }
-                            idPrefix="assist"
-                            disabled={busy}
-                            onChange={(value) => {
-                              setCredentialDrafts((current) => ({
-                                ...current,
-                                [assistChoice]: value,
-                              }));
-                              setError(null);
-                            }}
-                            onDelete={() => deleteCredential(assistChoice)}
-                            onError={setError}
-                          />
-                        </div>
-                      ) : null}
-                      <div
-                        style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 10 }}
-                      >
-                        <label htmlFor="assist-count" style={{ margin: 0, fontSize: 13 }}>
-                          한 번에 만들 초안
-                        </label>
-                        <input
-                          id="assist-count"
-                          type="range"
-                          min={1}
-                          max={assistSliderMax}
-                          step={1}
-                          value={assistEffective}
-                          disabled={assistSliderMax <= 1}
-                          style={{ width: 140, padding: 0 }}
-                          onChange={(e) => setAssistCount(Number(e.target.value))}
-                        />
-                        <span className="badge muted">{assistEffective}개</span>
-                      </div>
-                      {entry.caseAssist.difficulty ? (
-                        <>
-                          <div
-                            style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 10 }}
-                          >
-                            <label htmlFor="assist-difficulty" style={{ margin: 0, fontSize: 13 }}>
-                              {entry.caseAssist.difficulty.label}
-                            </label>
-                            <input
-                              id="assist-difficulty"
-                              type="range"
-                              min={entry.caseAssist.difficulty.min}
-                              max={entry.caseAssist.difficulty.max}
-                              step={1}
-                              value={assistDifficulty}
-                              style={{ width: 140, padding: 0 }}
-                              onChange={(e) => setAssistDifficulty(Number(e.target.value))}
-                            />
-                            <span className="badge muted">
-                              {entry.caseAssist.difficulty.describe(assistDifficulty)}
-                            </span>
-                          </div>
-                          <div className="hint" style={{ marginTop: 4 }}>
-                            {entry.caseAssist.difficulty.hint}
-                          </div>
-                        </>
-                      ) : null}
-                      <div style={{ marginTop: 8 }}>
-                        <button type="button" disabled={busy} onClick={onDraftCases}>
-                          {assistBusy ? "초안 생성 중…" : "AI로 질답 초안 만들기"}
+                    <div className="assist">
+                      <div className="assist-line">
+                        <span>자료에서 초안을 뽑아 드립니다</span>
+                        <button
+                          type="button"
+                          className="primary assist-go"
+                          disabled={busy}
+                          onClick={onDraftCases}
+                        >
+                          {assistBusy ? "초안 만드는 중…" : `AI 초안 ${assistEffective}개 넣기`}
                         </button>
                       </div>
+                      {assistBusy || assistText ? (
+                        <StreamConsole
+                          title={assistBusy ? "AI가 초안을 쓰는 중" : "AI가 쓴 초안"}
+                          model={
+                            assistChoice === "mock" ? "모의 모델" : JUDGE_MODEL[assistChoice]
+                          }
+                          text={assistText}
+                          running={assistBusy}
+                        />
+                      ) : null}
+                      <details className="assist-more">
+                        <summary>초안 설정</summary>
+                        <div style={{ display: "grid", gap: 6, fontSize: 14 }}>
+                          {(["mock", "gemini", "vertex", "openai"] as const).map((choice) => (
+                            <label
+                              key={choice}
+                              style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}
+                            >
+                              <input
+                                type="radio"
+                                name="assist-model"
+                                style={{ width: "auto" }}
+                                checked={assistChoice === choice}
+                                onChange={() => {
+                                  setAssistChoice(choice);
+                                  setError(null);
+                                }}
+                              />
+                              {PROVIDER_OPTION_LABEL[choice]}
+                            </label>
+                          ))}
+                        </div>
+                        {assistChoice !== "mock" ? (
+                          <div style={{ marginTop: 8 }}>
+                            <ProviderCredentialInput
+                              provider={assistChoice}
+                              value={credentialDrafts[assistChoice]}
+                              storedCredential={
+                                assistChoice === "vertex" ? storedVertexCredential : null
+                              }
+                              idPrefix="assist"
+                              disabled={busy}
+                              onChange={(value) => {
+                                setCredentialDrafts((current) => ({
+                                  ...current,
+                                  [assistChoice]: value,
+                                }));
+                                setError(null);
+                              }}
+                              onDelete={() => deleteCredential(assistChoice)}
+                              onError={setError}
+                            />
+                          </div>
+                        ) : null}
+                        <div
+                          style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 10 }}
+                        >
+                          <label htmlFor="assist-count" style={{ margin: 0, fontSize: 13 }}>
+                            한 번에 만들 초안
+                          </label>
+                          <input
+                            id="assist-count"
+                            type="range"
+                            min={1}
+                            max={assistSliderMax}
+                            step={1}
+                            value={assistEffective}
+                            disabled={assistSliderMax <= 1}
+                            style={{ width: 140, padding: 0 }}
+                            onChange={(e) => setAssistCount(Number(e.target.value))}
+                          />
+                          <span className="badge muted">{assistEffective}개</span>
+                        </div>
+                        {entry.caseAssist.difficulty ? (
+                          <>
+                            <div
+                              style={{
+                                marginTop: 8,
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 10,
+                              }}
+                            >
+                              <label htmlFor="assist-difficulty" style={{ margin: 0, fontSize: 13 }}>
+                                {entry.caseAssist.difficulty.label}
+                              </label>
+                              <input
+                                id="assist-difficulty"
+                                type="range"
+                                min={entry.caseAssist.difficulty.min}
+                                max={entry.caseAssist.difficulty.max}
+                                step={1}
+                                value={assistDifficulty}
+                                style={{ width: 140, padding: 0 }}
+                                onChange={(e) => setAssistDifficulty(Number(e.target.value))}
+                              />
+                              <span className="badge muted">
+                                {entry.caseAssist.difficulty.describe(assistDifficulty)}
+                              </span>
+                            </div>
+                            <div className="hint" style={{ marginTop: 4 }}>
+                              {entry.caseAssist.difficulty.hint}
+                            </div>
+                          </>
+                        ) : null}
+                      </details>
                       <div className="hint">
                         {entry.caseAssist.nudge} 이 호출은 클릭당 1회이며 실행 비용 예산과
                         별개입니다. 초안은 각 쌍의 확인 버튼을 눌러야만 제출에 포함됩니다.
@@ -482,35 +578,67 @@ export function WizardPage() {
                 </>
               ) : q.type === "textarea" ? (
                 <>
-                  <textarea
-                    id={`q-${q.id}`}
-                    rows={8}
-                    style={textareaStyle}
-                    value={typeof draft[q.id] === "string" ? (draft[q.id] as string) : ""}
-                    placeholder={q.placeholder}
-                    autoFocus
-                    onChange={(e) => onChange(e.target.value)}
-                  />
-                  {q.attachText ? (
-                    <div style={{ marginTop: 8 }}>
-                      <input
-                        type="file"
-                        multiple
-                        accept={FILE_ACCEPT}
-                        disabled={busy}
-                        style={{ width: "auto" }}
-                        onChange={onAttachFiles}
-                      />
-                      <div className="hint">
-                        {attachBusy
-                          ? "파일에서 텍스트를 추출하는 중…"
-                          : `현재 ${(typeof draft[q.id] === "string" ? (draft[q.id] as string) : "").length.toLocaleString()}자` +
-                            (q.maxChars !== undefined
-                              ? ` / 최대 ${q.maxChars.toLocaleString()}자`
-                              : "") +
-                            " · 파일은 이 브라우저에서만 읽히며 서버로 전송되지 않습니다."}
-                      </div>
+                  {/* 문서를 쓰는 면처럼 보이게 한다 — 빈 칸 하나보다 손이 덜 무겁다 */}
+                  <div className="paper">
+                    <div className="paper-top">
+                      {q.shortLabel ?? q.label}
+                      <span className="right">
+                        <span>
+                          {(typeof draft[q.id] === "string"
+                            ? (draft[q.id] as string)
+                            : ""
+                          ).length.toLocaleString()}
+                          자
+                        </span>
+                        {q.maxChars !== undefined ? (
+                          <CharRing
+                            filled={
+                              (typeof draft[q.id] === "string" ? (draft[q.id] as string) : "").length
+                            }
+                            max={q.maxChars}
+                          />
+                        ) : null}
+                      </span>
                     </div>
+                    <textarea
+                      id={`q-${q.id}`}
+                      rows={10}
+                      value={typeof draft[q.id] === "string" ? (draft[q.id] as string) : ""}
+                      placeholder={q.placeholder}
+                      autoFocus
+                      onChange={(e) => onChange(e.target.value)}
+                    />
+                  </div>
+                  {q.attachText ? (
+                    <>
+                      <label className="dropzone">
+                        <input
+                          type="file"
+                          multiple
+                          accept={FILE_ACCEPT}
+                          disabled={busy}
+                          onChange={onAttachFiles}
+                        />
+                        {attachBusy
+                          ? "파일에서 글을 뽑는 중…"
+                          : "눌러서 파일을 고르세요 · txt md pdf docx"}
+                      </label>
+                      {attached.length > 0 ? (
+                        <div className="chips">
+                          {attached.map((f) => (
+                            <span key={f.name} className="chip">
+                              <span aria-hidden="true">📄</span>
+                              {f.name}
+                              <span className="chip-size">{f.size}</span>
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                      <p className="hint">
+                        파일 내용은 이 브라우저에서 추출되며 Harnest 서버에 업로드되지 않습니다.
+                        AI 초안을 요청하면 선택한 모델 벤더에는 전송될 수 있습니다.
+                      </p>
+                    </>
                   ) : null}
                 </>
               ) : (
@@ -525,34 +653,37 @@ export function WizardPage() {
                   onChange={(e) => onChange(e.target.value)}
                 />
               )}
-              {q.help ? <div className="hint">{q.help}</div> : null}
             </div>
 
             {isLast && entry.needsModel ? (
-              <div
-                className="field"
-                style={{ borderTop: "1px solid var(--border)", paddingTop: 14 }}
-              >
-                <label>채점 모델 선택</label>
-                <div style={{ display: "grid", gap: 6, fontSize: 14 }}>
-                  {(["mock", "gemini", "vertex", "openai"] as const).map((choice) => (
-                    <label
-                      key={choice}
-                      style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}
-                    >
-                      <input
-                        type="radio"
-                        name="judge-model"
-                        style={{ width: "auto" }}
-                        checked={judgeChoice === choice}
-                        onChange={() => {
-                          setJudgeChoice(choice);
+              <div className="field judge-block">
+                <label className="q-big" style={{ fontSize: "var(--t-h2)" }}>
+                  무엇으로 채점할까요?
+                </label>
+                <p className="sub" style={{ marginBottom: 16 }}>
+                  여기서 고른 모델은 판정 절차의 일부로 함께 잠깁니다. 나중에 바꾸려면 처음부터
+                  다시 승인해야 합니다.
+                </p>
+                <div className="models">
+                  {(["mock", "gemini", "vertex", "openai"] as const).map((id) => {
+                    const card = PROVIDER_CARD[id];
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        className={`model${judgeChoice === id ? " is-on" : ""}`}
+                        aria-pressed={judgeChoice === id}
+                        onClick={() => {
+                          setJudgeChoice(id);
                           setError(null);
                         }}
-                      />
-                      {PROVIDER_OPTION_LABEL[choice]}
-                    </label>
-                  ))}
+                      >
+                        <b>{card.name}</b>
+                        <div className="model-id">{card.model}</div>
+                        <p>{card.description}</p>
+                      </button>
+                    );
+                  })}
                 </div>
                 {judgeChoice !== "mock" ? (
                   <div style={{ marginTop: 8 }}>
@@ -602,31 +733,45 @@ export function WizardPage() {
 
             {error ? <div className="error" style={{ marginBottom: 12 }}>{error}</div> : null}
 
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                type="button"
-                disabled={step === 0 || busy}
-                onClick={() => {
-                  setError(null);
-                  setStep(step - 1);
-                }}
-              >
-                이전
-              </button>
-              <button type="submit" className="primary" disabled={busy}>
-                {isLast
-                  ? submitting
+            <div className="wizard-nav">
+              {isLast ? (
+                <button type="submit" className="primary wizard-go-wide" disabled={busy}>
+                  {submitting
                     ? judgeChoice === "mock"
                       ? "확인 중…"
                       : "모델 연결 확인 중…"
-                    : "작성 완료 — 승인 화면으로"
-                  : "다음"}
-              </button>
+                    : (q.nextLabel ?? "작성 완료 — 승인 화면으로")}
+                </button>
+              ) : null}
+              {step > 0 ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    setError(null);
+                    setStep(step - 1);
+                  }}
+                >
+                  이전 단계로
+                </button>
+              ) : null}
             </div>
           </form>
         </div>
 
-        <WizardBlueprint entry={entry} answers={liveAnswers} judge={judge} />
+        {isLast ? null : (
+          <div className="wizard-side">
+            <WizardBlueprint entry={entry} answers={liveAnswers} judge={judge} />
+            <button
+              type="submit"
+              form="wizard-form"
+              className="primary wizard-go"
+              disabled={busy}
+            >
+              {q.nextLabel ?? "다음"}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

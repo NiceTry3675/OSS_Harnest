@@ -22,6 +22,7 @@ import {
   needsRestoredHoldoutRecovery,
   serializeProjectExport,
 } from "../lib/project-export";
+import { setFlowStep } from "../lib/flowStep";
 import { CurveChart } from "../components/CurveChart";
 import { countCaseProvenance } from "../lib/case-provenance";
 
@@ -64,6 +65,10 @@ function caseGrade(score: number | undefined): string {
 }
 
 export function ResultsPage() {
+  useEffect(() => {
+    setFlowStep({ kind: "result" });
+  }, []);
+
   const {
     compiled,
     approvedDigest,
@@ -344,7 +349,7 @@ export function ResultsPage() {
               </table>
               <p className="hint" style={{ marginBottom: 0 }}>
                 반복은 같은 질문이 가시 세트에도 등장했음을, 신규는 질문 문면이 가시 세트에 없었음을
-                뜻합니다. 질문 반복은 이 문서 유형의 측정 대상이므로 제거하지 않고 구분해 보고합니다.
+                뜻합니다. 질문 반복은 이 산출물 유형의 측정 대상이므로 제거하지 않고 구분해 보고합니다.
               </p>
             </>
           ) : null}

@@ -21,6 +21,9 @@ import {
   type ExaminerCheckId,
   type ExaminerVerdict,
 } from "@harnest/contracts";
+import type { ExaminerCheckResult } from "@harnest/contracts";
+import { setFlowStep } from "../lib/flowStep";
+import { SealPanel } from "../components/SealPanel";
 import { useProject } from "../state";
 import { getTemplate, type TemplateEntry } from "../templates";
 import { countCaseProvenance } from "../lib/case-provenance";
@@ -45,6 +48,85 @@ const CHECK_LABEL: Record<ExaminerCheckId, string> = {
   stability: "안정성 (재채점이 흔들리지 않는가)",
   hack_resistance: "꼼수 내성 (알려진 꼼수 4종)",
 };
+
+/** 시험 카드에 쓰는 짧은 이름과 설명. 표의 긴 라벨(CHECK_LABEL)은 그대로 둔다. */
+const CHECK_CARD: Record<ExaminerCheckId, { name: string; desc: string; cue: string }> = {
+  ordering: {
+    name: "순서를 지키는가",
+    desc: "더 좋은 문서에 더 높은 점수를 주는지",
+    cue: "품질 사다리",
+  },
+  discrimination: {
+    name: "차이를 가려내는가",
+    desc: "비슷한 문서 사이를 구분하는지",
+    cue: "품질 사다리",
+  },
+  stability: {
+    name: "같은 답에 같은 점수인가",
+    desc: "같은 문서를 다시 채점해도 흔들리지 않는지",
+    cue: "안정성",
+  },
+  hack_resistance: {
+    name: "꼼수에 속지 않는가",
+    desc: "길게 늘이거나 베껴 쓴 문서를 걸러내는지",
+    cue: "꼼수",
+  },
+};
+
+const CHECK_ORDER: ExaminerCheckId[] = [
+  "ordering",
+  "discrimination",
+  "stability",
+  "hack_resistance",
+];
+
+const VERDICT_CLASS: Record<ExaminerVerdict, string> = {
+  pass: "is-pass",
+  warn: "is-warn",
+  fail: "is-fail",
+};
+
+/** 검증이 도는 동안 보여주는 카드 — 진행 메시지로 지금 어느 시험인지 표시한다 */
+function CheckCards({
+  checks,
+  progress,
+}: {
+  checks: ReadonlyArray<{ id: ExaminerCheckId; verdict: ExaminerVerdict; note: string }> | null;
+  progress: string;
+}) {
+  return (
+    <div className="test-grid">
+      {CHECK_ORDER.map((id) => {
+        const done = checks?.find((c) => c.id === id) ?? null;
+        const running = !done && progress.includes(CHECK_CARD[id].cue);
+        const cls = done ? VERDICT_CLASS[done.verdict] : running ? "is-running" : "";
+        return (
+          <div key={id} className={`test ${cls}`} title={done ? done.note : undefined}>
+            <b>{CHECK_CARD[id].name}</b>
+            <p>{CHECK_CARD[id].desc}</p>
+            {done ? (
+              <div className="hint" style={{ margin: "8px 0 0", fontSize: 12 }}>
+                {done.note}
+              </div>
+            ) : null}
+            <span className="test-state">
+              {done ? (
+                `${done.verdict === "pass" ? "✓ " : ""}${VERDICT_LABEL[done.verdict]}`
+              ) : running ? (
+                <>
+                  <span className="spin" aria-hidden="true" />
+                  시험하는 중
+                </>
+              ) : (
+                "대기"
+              )}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function VerdictBadge({ verdict }: { verdict: ExaminerVerdict }) {
   return (
@@ -135,6 +217,8 @@ export function ApprovalPage() {
 
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState("");
+  // 검증이 도는 동안 하나씩 도착하는 검사 결과 — 카드가 즉시 색을 바꾼다
+  const [liveChecks, setLiveChecks] = useState<ExaminerCheckResult[]>([]);
   const [batteryError, setBatteryError] = useState<string | null>(null);
   const [credentialInput, setCredentialInput] = useState(() => {
     const procedure = compiled?.pack.judgeProcedure;
@@ -198,6 +282,16 @@ export function ApprovalPage() {
     return entry.examiner.buildPairs(examinerRun, compiled.pack);
   }, [validReport, entry, compiled, examinerRun]);
 
+  const approved =
+    pack !== null && approvedAt !== null && approvedDigest === pack.definitionDigest;
+
+  // 현재 다이제스트의 승인 결속 여부는 StepBar가 프로젝트 상태에서 해석한다.
+  // pack 유무와 관계없이 같은 순서로 호출해 조기 반환 시에도 Hooks 규칙을 지킨다.
+  useEffect(() => {
+    setFlowStep({ kind: "approval" });
+  }, []);
+  approvedRef.current = approved;
+
   if (!compiled || !entry || !pack) {
     return (
       <div className="card">
@@ -210,8 +304,6 @@ export function ApprovalPage() {
     );
   }
 
-  const approved = approvedAt !== null && approvedDigest === pack.definitionDigest;
-  approvedRef.current = approved;
   const jp = pack.judgeProcedure;
   const hp = pack.holdoutPolicy;
 
@@ -231,7 +323,10 @@ export function ApprovalPage() {
     noteExaminerAttempt(startedDigest);
     setRunning(true);
     try {
-      const run = await entry.examiner.runBattery(compiled, llm, setProgress);
+      setLiveChecks([]);
+      const run = await entry.examiner.runBattery(compiled, llm, setProgress, (c) =>
+        setLiveChecks((prev) => [...prev.filter((p) => p.id !== c.id), c]),
+      );
       // 실행 중 기준이 재컴파일·승인됐거나 화면을 떠났다면 이 결과는 현재 승인 증거가 아니다.
       if (
         !activeRef.current ||
@@ -348,6 +443,171 @@ export function ApprovalPage() {
     }
   };
 
+  // 승인된 뒤에는 이 화면이 통째로 봉인 장면이 된다. 기준 상세는 접어 두고,
+  // 펼쳐야 볼 수 있게 한다 — 잠갔다는 사실이 먼저 읽혀야 한다.
+  if (approved) {
+    return (
+      <div className="sealed-page">
+        <SealPanel digest={pack.definitionDigest}>
+          <button className="primary seal-go" onClick={() => navigate("/console")}>
+            실행 화면으로
+          </button>
+        </SealPanel>
+
+        <details className="sealed-detail">
+          <summary>동결된 승인 감사 상세 보기</summary>
+
+          <h2>채점 기준</h2>
+          <table className="grid">
+            <thead>
+              <tr>
+                <th style={{ textAlign: "left" }}>기준</th>
+                <th>가중치</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pack.criteria.map((c) => (
+                <tr key={c.id}>
+                  <td style={{ textAlign: "left" }}>{c.label}</td>
+                  <td>{Math.round(c.weight * 100)}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <h2>필수 관문</h2>
+          {pack.gates.length > 0 ? (
+            <ul className="sealed-gates">
+              {pack.gates.map((g) => (
+                <li key={g.id}>
+                  {g.label} <span className="badge muted">미충족 시 탈락</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="hint">이 절차에는 별도의 필수 관문이 없습니다.</p>
+          )}
+
+          {jp.kind === "case_answering" ? (
+            <>
+              <h2>채점 방식</h2>
+              <p style={{ fontSize: 14, margin: "0 0 4px" }}>
+                채점 모델: <strong>{PROVIDER_LABEL[jp.judge.provider]} · {jp.judge.model}</strong>
+              </p>
+              <p className="hint" style={{ margin: "0 0 12px" }}>
+                쌍대 비교: {jp.pairwiseNotice}
+              </p>
+            </>
+          ) : (
+            <>
+              <h2>검증·면제 표기</h2>
+              <ExemptionTable rows={jp.exemptions} />
+            </>
+          )}
+
+          <h2>숨김 검증</h2>
+          {hp.mode === "auto_tail" ? (
+            <>
+              <p style={{ fontSize: 14, margin: "0 0 4px" }}>
+                숨김 검증 케이스 {hp.holdoutCaseIds.length}개 — 실행 시작·종료 시에만 별도
+                채점되며 개선·채택 판단에는 사용되지 않습니다.
+              </p>
+              <p className="hint" style={{ margin: "0 0 12px" }}>{hp.note}</p>
+            </>
+          ) : (
+            <p style={{ fontSize: 14, margin: "0 0 12px" }}>사용 안 함 — {hp.note}</p>
+          )}
+
+          {caseCounts !== null && caseCounts.total > 0 ? (
+            <>
+              <h2>케이스 출처</h2>
+              <p style={{ fontSize: 14, margin: "0 0 12px" }}>
+                {caseCounts.ai + caseCounts.aiEdited > 0
+                  ? `직접 입력 ${caseCounts.user}개 · AI 초안 확인 ${caseCounts.ai}개 · AI 초안 수정 ${caseCounts.aiEdited}개 — 초안도 당신이 확인한 순간부터 채점 정답으로 동결되었습니다.`
+                  : `전체 ${caseCounts.total}개 직접 입력.`}
+              </p>
+            </>
+          ) : null}
+
+          {jp.kind === "case_answering" && entry.examiner ? (
+            <>
+              <h2>시험관 검증</h2>
+              {validReport ? (
+                <>
+                  <div style={{ marginBottom: 8 }}>
+                    종합: <VerdictBadge verdict={examinerRun!.report.overall} />
+                    <span className="hint" style={{ marginLeft: 6 }}>
+                      구동 저지: {PROVIDER_LABEL[examinerRun!.report.judge.provider]} ·{" "}
+                      {examinerRun!.report.judge.model}
+                    </span>
+                  </div>
+                  <CheckCards checks={examinerRun!.report.checks} progress="" />
+                </>
+              ) : (
+                <p className="hint">현재 다이제스트에 결속된 시험관 검증 기록이 없습니다.</p>
+              )}
+
+              <h2>캘리브레이션 — 사용자 판단과 비교</h2>
+              {validCalibration && pairs !== null ? (
+                <>
+                  {pairs.map((pair, i) => {
+                    const result = calibration!.pairs.find((item) => item.id === pair.id);
+                    return (
+                      <div
+                        key={pair.id}
+                        style={{
+                          border: "1px solid var(--border)",
+                          borderRadius: 10,
+                          padding: 12,
+                          marginBottom: 10,
+                        }}
+                      >
+                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+                          {i + 1}번째 쌍 · {pair.kind === "hack_probe" ? "꼼수 내성" : "품질 비교"}
+                        </div>
+                        <div className="row">
+                          <PairPane
+                            label="A"
+                            artifact={pair.a}
+                            problem={compiled.problem}
+                            entry={entry}
+                          />
+                          <PairPane
+                            label="B"
+                            artifact={pair.b}
+                            problem={compiled.problem}
+                            entry={entry}
+                          />
+                        </div>
+                        <div style={{ marginTop: 10, fontSize: 13 }}>
+                          사용자 선택 <strong>{result?.userChoice ?? "기록 없음"}</strong> · 시험관
+                          선택 <strong>{result?.examinerChoice ?? pair.examinerChoice}</strong>
+                          {result ? ` · ${result.agreed ? "일치" : "불일치"}` : ""}
+                        </div>
+                        <p className="hint" style={{ margin: "4px 0 0" }}>
+                          판정 근거: {pair.basis}
+                        </p>
+                      </div>
+                    );
+                  })}
+                  <div style={{ marginBottom: 16 }}>
+                    캘리브레이션: <VerdictBadge verdict={calibration!.verdict} />
+                    <span className="hint" style={{ marginLeft: 6 }}>
+                      {calibration!.pairs.filter((pair) => pair.agreed).length}/
+                      {calibration!.pairs.length} 일치
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <p className="hint">현재 검증 리포트에 결속된 캘리브레이션 기록이 없습니다.</p>
+              )}
+            </>
+          ) : null}
+        </details>
+      </div>
+    );
+  }
+
   return (
     <div>
       <h1>채점 기준 승인</h1>
@@ -407,8 +667,8 @@ export function ApprovalPage() {
           <>
             <h2>숨김 검증</h2>
             <p style={{ fontSize: 14, margin: 0 }}>
-              숨김 검증 케이스 {hp.holdoutCaseIds.length}개 — 실행 시작·종료 시에만 채점되며 AI
-              수정 과정에 노출되지 않습니다.
+              숨김 검증 케이스 {hp.holdoutCaseIds.length}개 — 실행 시작·종료 시에만 별도
+              채점되며 개선·채택 판단에는 사용되지 않습니다.
             </p>
           </>
         ) : null}
@@ -441,14 +701,20 @@ export function ApprovalPage() {
                   안정성, 그리고 알려진 꼼수 4종(장황함·통째 베끼기·날조·아첨)에 대한 내성.
                 </p>
                 {running ? (
-                  <p className="hint" style={{ margin: 0 }}>검증 중… {progress}</p>
+                  <>
+                    <CheckCards checks={liveChecks} progress={progress} />
+                    <p className="hint">{progress}</p>
+                  </>
                 ) : quotaExhausted ? (
                   quotaExhaustedBox
                 ) : (
                   <>
-                    <button className="primary" onClick={() => void runBattery()}>
-                      검증 실행
-                    </button>
+                    <CheckCards checks={null} progress={progress} />
+                    <div style={{ marginTop: 16 }}>
+                      <button className="primary" onClick={() => void runBattery()}>
+                        검증 실행
+                      </button>
+                    </div>
                     {quotaHint}
                   </>
                 )}
@@ -463,21 +729,7 @@ export function ApprovalPage() {
                     {examinerRun!.report.judge.model}
                   </span>
                 </div>
-                <table className="grid">
-                  <tbody>
-                    {examinerRun!.report.checks.map((c) => (
-                      <tr key={c.id}>
-                        <th style={{ textAlign: "left", whiteSpace: "nowrap" }}>
-                          {CHECK_LABEL[c.id]}
-                        </th>
-                        <td style={{ textAlign: "left", width: 64 }}>
-                          <VerdictBadge verdict={c.verdict} />
-                        </td>
-                        <td style={{ textAlign: "left" }}>{c.note}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <CheckCards checks={examinerRun!.report.checks} progress="" />
                 {!approved && !failedCalibration ? (
                   <div style={{ marginTop: 10 }}>
                     {reportFailed ? (
@@ -578,21 +830,7 @@ export function ApprovalPage() {
           </>
         ) : null}
 
-        {approved ? (
-          <div style={{ marginTop: 18 }}>
-            <div className="hint">동결 다이제스트</div>
-            <div className="mono digest">{pack.definitionDigest}</div>
-            <p className="hint" style={{ marginTop: 10 }}>
-              동결된 기준은 여기서 수정할 수 없습니다. 바꾸려면 처음부터 새 기준을 만들어
-              다시 승인해야 합니다.
-            </p>
-            <div style={{ marginTop: 12 }}>
-              <button className="primary" onClick={() => navigate("/console")}>
-                실행 화면으로
-              </button>
-            </div>
-          </div>
-        ) : (
+        {(
           <div style={{ marginTop: 18 }}>
             {blockers.length > 0 ? (
               <ul style={{ margin: "0 0 10px", paddingLeft: 18, fontSize: 13, color: "var(--ink-3)" }}>

@@ -140,6 +140,49 @@ async function compileScenarioB() {
 }
 
 describe("runExaminerBattery — 판정 규칙", () => {
+  it("onCheck는 검사 완료 순서대로 최종 리포트와 같은 결과를 내보내며 판정을 바꾸지 않는다", async () => {
+    const { compiled, oneshotDoc } = await compileScenarioB();
+    const { problem, pack } = compiled;
+    const emitted: ExaminerRun["report"]["checks"] = [];
+    const withCallback = await runExaminerBattery(
+      problem,
+      pack,
+      createBatteryLlm({
+        cases: [...problem.visibleCases, ...problem.holdoutCases],
+        oneshotDoc,
+        strictGrader: true,
+      }),
+      undefined,
+      (result) => emitted.push(result),
+    );
+
+    expect(emitted.map((result) => result.id)).toEqual([
+      "ordering",
+      "discrimination",
+      "stability",
+      "hack_resistance",
+    ]);
+    expect(emitted).toHaveLength(withCallback.report.checks.length);
+    emitted.forEach((result, index) => {
+      expect(result.id).toBe(withCallback.report.checks[index].id);
+      expect(result).toBe(withCallback.report.checks[index]);
+      expect(result).toEqual(withCallback.report.checks[index]);
+    });
+
+    const withoutCallback = await runExaminerBattery(
+      problem,
+      pack,
+      createBatteryLlm({
+        cases: [...problem.visibleCases, ...problem.holdoutCases],
+        oneshotDoc,
+        strictGrader: true,
+      }),
+    );
+    expect(withCallback.report.overall).toBe(withoutCallback.report.overall);
+    expect(withCallback.report.checks).toEqual(withoutCallback.report.checks);
+    expect(withCallback.artifacts).toEqual(withoutCallback.artifacts);
+  });
+
   it("품질 사다리가 유지되고 프로브가 방어되면 전 검사 pass, forDigest·저지가 결속된다", async () => {
     const { compiled, oneshotDoc } = await compileScenarioB();
     const { problem, pack } = compiled;

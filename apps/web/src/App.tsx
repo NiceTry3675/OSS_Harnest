@@ -1,21 +1,61 @@
-import { Link, Route, Routes } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, Route, Routes, useLocation } from "react-router-dom";
 import { HomePage } from "./pages/HomePage";
 import { WizardPage } from "./pages/WizardPage";
 import { ApprovalPage } from "./pages/ApprovalPage";
 import { ConsolePage } from "./pages/ConsolePage";
 import { ResultsPage } from "./pages/ResultsPage";
+import { StepBar } from "./components/StepBar";
 import { useProject } from "./state";
+import {
+  applyTheme, nextTheme, readTheme, saveTheme, THEME_ICON, THEME_LABEL,
+  type ThemeChoice,
+} from "./lib/theme";
+
+/** 밝은 화면 ↔ 어두운 화면 ↔ 시스템 설정을 순환한다 */
+function ThemeToggle() {
+  const [choice, setChoice] = useState<ThemeChoice>("system");
+
+  useEffect(() => {
+    const saved = readTheme();
+    setChoice(saved);
+    applyTheme(saved);
+  }, []);
+
+  const cycle = () => {
+    const next = nextTheme(choice);
+    setChoice(next);
+    saveTheme(next);
+  };
+
+  return (
+    <button
+      type="button"
+      className="theme-toggle"
+      onClick={cycle}
+      title={THEME_LABEL[choice]}
+      aria-label={`화면 밝기 — 현재 ${THEME_LABEL[choice]}`}
+    >
+      {THEME_ICON[choice]}
+    </button>
+  );
+}
 
 export function App() {
   const { hydrated } = useProject();
+  const { pathname } = useLocation();
 
   return (
     <div className="app">
       <header className="topbar">
         <Link to="/" className="brand">Harnest</Link>
-        <span className="tagline">당신이 승인한 평가 절차로, 정해진 범위 안에서 개선을 측정하는 AI</span>
+        <div className="topbar-right">
+          <StepBar />
+          <ThemeToggle />
+        </div>
       </header>
-      <main>
+      {/* key를 경로로 두면 화면이 바뀔 때마다 진입 애니메이션이 다시 돈다 */}
+      <main key={pathname} className="route-swap">
         {hydrated ? (
           <Routes>
             <Route path="/" element={<HomePage />} />

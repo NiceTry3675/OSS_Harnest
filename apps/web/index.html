@@ -4,6 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Harnest</title>
+    <meta
+      name="description"
+      content="당신이 승인한 평가 절차로, 정해진 범위 안에서 개선을 측정하는 AI"
+    />
+    <script>
+      // 저장된 테마를 첫 페인트 전에 적용한다 — 새로고침 시 화면이 번쩍이는 것 방지
+      try {
+        var t = localStorage.getItem("harnest.theme");
+        if (t === "light" || t === "dark") {
+          document.documentElement.setAttribute("data-theme", t);
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>
