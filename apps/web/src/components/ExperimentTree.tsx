@@ -13,11 +13,14 @@ function verdict(r: RoundRecord): string {
 }
 
 export function ExperimentTree({ tree }: { tree: readonly RoundRecord[] }) {
+  // 빈 상태도 목록이 찰 때와 같은 자리를 잡는다 — 실행을 누르는 순간 화면이 튀지 않게
   if (tree.length === 0) {
     return (
-      <p className="hint" style={{ margin: 0 }}>
-        기록된 라운드 판정이 없습니다.
-      </p>
+      <div className="rounds-empty">
+        <p className="hint" style={{ margin: 0 }}>
+          기록된 라운드 판정이 없습니다.
+        </p>
+      </div>
     );
   }
 

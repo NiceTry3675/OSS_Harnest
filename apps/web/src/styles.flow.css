@@ -178,7 +178,7 @@
 }
 
 /* ── 관제실 (흰 배경) ── */
-.deck { display: grid; grid-template-columns: 1.45fr 0.55fr; gap: var(--s-7); align-items: start; }
+.deck { display: grid; grid-template-columns: 1.25fr 0.75fr; gap: var(--s-6); align-items: stretch; }
 @media (max-width: 1040px) { .deck { grid-template-columns: 1fr; } }
 .live-pill {
   display: inline-flex; align-items: center; gap: var(--s-2);
@@ -187,7 +187,20 @@
 }
 
 /* ── 오른쪽 칸 ── */
-.wizard-side { position: sticky; top: var(--s-4); display: flex; flex-direction: column; gap: var(--s-3); }
+/* 옆 기둥: 채점 기준 카드는 흘러가고, 추론 실황이 화면에 남는다.
+ *
+ * 전에는 카드가 sticky여서, 뒤따르는 콘솔이 스크롤하며 카드 위에 겹쳐 그려졌다
+ * (나중에 놓인 위치 지정 요소가 위에 칠해진다). 붙잡는 대상을 콘솔로 바꾸면
+ * 겹칠 일이 없다 — 콘솔이 멈추는 지점은 이미 카드가 지나간 뒤다. */
+.wizard-side { display: flex; flex-direction: column; gap: var(--s-3); min-height: 100%; }
+.wizard-side .blueprint { position: static; }
+.wizard-side .stream { position: sticky; top: var(--s-4); }
+/* 왼쪽 기둥만큼 자리를 잡아야 콘솔이 따라 내려올 수 있다 */
+.wizard-grid { align-items: stretch; }
+@media (max-width: 940px) {
+  .wizard-side { min-height: 0; }
+  .wizard-side .stream { position: relative; }
+}
 .wizard-go { width: 100%; height: 52px; font-size: var(--t-body); }
 
 /* ── AI 초안 도우미: 한 줄로 두고 설정은 접는다 ── */
@@ -261,12 +274,25 @@ label.dropzone input[type="file"] { display: none; }
   width: 8px; height: 8px; border-radius: 50%; background: #4d8cff;
   animation: stream-blink 1.5s ease-in-out infinite;
 }
-.stream-model { margin-left: auto; font-size: 12px; color: #5d6572; font-weight: 500; }
+.stream-name { color: #e5eaf2; letter-spacing: 0.02em; }
+.stream-phase { color: #7d879a; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stream-model { margin-left: auto; flex: none; font-size: 12px; color: #5d6572; font-weight: 500; }
 .stream-body {
   padding: 18px; font-family: var(--mono-font); font-size: var(--t-xs); line-height: 1.75;
-  color: #c9d1dc; min-height: 140px; white-space: pre-wrap; word-break: break-word;
-  max-height: 320px; overflow-y: auto;
+  color: #c9d1dc; white-space: pre-wrap; word-break: break-word;
+  height: var(--stream-h, 320px); max-height: var(--stream-h, 320px);
+  overflow-y: auto; overscroll-behavior: contain; scrollbar-color: #39414f #0f1218;
 }
+/* 아래를 따라가지 않고 위를 읽는 중일 때 나오는 되돌아가기 버튼 */
+.stream { position: relative; }
+.stream-catch {
+  position: absolute; right: 18px; bottom: 16px; z-index: 2;
+  height: auto; padding: 7px 14px; border-radius: 999px;
+  background: #4d8cff; color: #fff; border: 0;
+  font-family: var(--mono-font); font-size: 12px; font-weight: 700;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); cursor: pointer;
+}
+.stream-catch:hover { background: #3d7cf5; }
 .stream-caret {
   display: inline-block; width: 7px; height: 15px; background: #4d8cff;
   vertical-align: -2px; animation: stream-blink 0.9s steps(2) infinite;
@@ -318,6 +344,14 @@ label.dropzone input[type="file"] { display: none; }
 .round.is-adopted .round-score { color: var(--good); }
 .round-no { width: 46px; }
 .deck-side .deck-h { margin-bottom: var(--s-3); }
+/* 곡선과 회차 목록이 같은 높이를 잡는다 — 한쪽만 납작해 보이지 않게 */
+.deck-side { display: flex; flex-direction: column; }
+.deck-side .rounds { flex: 1 1 auto; min-height: 300px; max-height: none; }
+.rounds-empty {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 300px; border-radius: var(--radius-sm);
+  border: 1px dashed var(--border); background: var(--surface-2);
+}
 
 /* ── 마지막 단계(모델)는 화면 전체를 쓴다 ── */
 .wizard-grid.is-wide { grid-template-columns: 1fr; }
@@ -455,3 +489,16 @@ label.dropzone input[type="file"] { display: none; }
 .artifact-head h2 { margin: 0; }
 .artifact-head button { margin-left: auto; height: 46px; padding: 0 22px; font-size: var(--t-sm); }
 
+
+/* ── 승인 화면: 기준은 왼쪽, 시험 기록은 오른쪽 ── */
+.approve-deck { display: grid; grid-template-columns: 1.35fr 0.65fr; gap: var(--s-6); align-items: start; }
+@media (max-width: 1100px) { .approve-deck { grid-template-columns: 1fr; } }
+.approve-deck > .card { margin-bottom: 0; }
+.approve-side { position: sticky; top: 88px; min-width: 0; }
+.approve-side .stream { margin-top: 0; }
+.approve-side .stream-body { height: 420px; max-height: 420px; }
+
+/* ── 활동 기록 줄 ── */
+.stream-empty { color: #6b7482; }
+/* 흐르는 글은 줄바꿈을 그대로 살린다 — 문서가 써지는 모양이 보여야 한다 */
+.stream-body { white-space: pre-wrap; word-break: break-word; }

@@ -15,7 +15,7 @@ interface CurveChartProps {
   live?: boolean;
 }
 
-const H = 220;
+const H = 300;
 const PAD_L = 38;
 const PAD_R = 14;
 const PAD_T = 14;
@@ -53,7 +53,7 @@ export function CurveChart({ curve, adopted, xMax, live }: CurveChartProps) {
         {title}
         <div
           style={{
-            height: 120,
+            height: H,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",

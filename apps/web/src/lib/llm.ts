@@ -229,6 +229,230 @@ async function responseExcerpt(response: Response): Promise<string> {
   }
 }
 
+// ── 실시간 스트리밍 ──────────────────────────────────────────────────────
+// 모델이 글을 다 쓸 때까지 기다렸다가 한 덩어리로 받으면, 화면은 "다 끝난 뒤에
+// 타자를 치는" 흉내밖에 낼 수 없다. 벤더들이 이미 토큰 단위로 흘려보내는 경로를
+// 열어두고 있으므로 그것을 그대로 받는다 — 화면에 뜨는 속도가 곧 모델이 쓰는 속도다.
+//
+// BYO 원칙은 그대로다. 스트리밍도 브라우저에서 벤더로 직행하고, 우리 서버를 거치지 않는다.
+
+/** 흘러오는 조각의 갈래.
+ *  "thought"는 모델이 답을 내기 전에 스스로 정리하는 추론 요약,
+ *  "output"은 최종 산출물, "notice"는 우리 쪽이 화면에 남기는 안내다.
+ *  화면은 셋을 다르게 다룬다. */
+export type StreamKind = "output" | "thought" | "notice";
+
+const LINE_BREAK = String.fromCharCode(10);
+
+/** 이 호출에 추론을 붙일지 — 지금은 모든 호출에 붙인다.
+ *
+ *  추론 토큰은 출력 토큰으로 과금된다. 비용을 줄여야 하면 아래 반환값을
+ *  `(opts?.temperature ?? 0.7) > 0` 으로 바꾸면 된다. 새로 쓰는 호출(생성·변이)만
+ *  temperature를 올려 부르고 채점·검증은 temperature 0으로 부르므로, 그렇게 하면
+ *  실행 1회 기준 40여 회 중 9회 안팎에만 붙는다.
+ *
+ *  추론을 켠 호출에는 temperature를 함께 보낼 수 없는 벤더가 있어 빼고 보낸다 —
+ *  채점의 temperature 0이 그만큼 빠진다는 뜻이다. */
+function wantsThinking(opts: { temperature?: number } | undefined): boolean {
+  void opts;
+  return true;
+}
+export type StreamSink = (chunk: string, kind: StreamKind) => void;
+
+export interface StreamingLlmClient extends LlmClient {
+  completeStream(
+    prompt: string,
+    opts: { temperature?: number; maxOutputTokens?: number } | undefined,
+    onChunk: StreamSink,
+  ): Promise<string>;
+}
+
+export function isStreamingClient(llm: LlmClient): llm is StreamingLlmClient {
+  return typeof (llm as Partial<StreamingLlmClient>).completeStream === "function";
+}
+
+interface StreamPlan {
+  url: string;
+  headers: Record<string, string>;
+  body: unknown;
+  /** SSE는 "data:"로 시작하는 줄이, NDJSON은 줄 자체가 한 조각이다 */
+  mode: "sse" | "ndjson";
+  /** 조각 하나에서 새로 붙는 산출물 글자만 뽑는다. 붙는 글이 없으면 null */
+  delta(payload: unknown): string | null;
+  /** 같은 조각에서 추론 요약을 뽑는다. 이 벤더가 내주지 않으면 생략한다. */
+  thought?(payload: unknown): string | null;
+}
+
+function field(value: unknown, key: string): unknown {
+  return typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)[key]
+    : undefined;
+}
+
+/** 응답 본문을 줄 단위로 읽어 조각을 순서대로 넘긴다. */
+async function readEventStream(
+  res: Response,
+  mode: "sse" | "ndjson",
+  onPiece: (raw: string) => void,
+): Promise<void> {
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error("스트리밍 응답 본문을 읽을 수 없습니다.");
+  const decoder = new TextDecoder();
+  const emit = (line: string): void => {
+    const trimmed = line.trim();
+    if (trimmed === "") return;
+    if (mode === "ndjson") {
+      onPiece(trimmed);
+      return;
+    }
+    if (!trimmed.startsWith("data:")) return;
+    const payload = trimmed.slice(5).trim();
+    if (payload !== "" && payload !== "[DONE]") onPiece(payload);
+  };
+
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    for (;;) {
+      const nl = buffer.indexOf("\n");
+      if (nl < 0) break;
+      emit(buffer.slice(0, nl));
+      buffer = buffer.slice(nl + 1);
+    }
+  }
+  emit(buffer);
+}
+
+/** 비스트리밍 클라이언트에 스트리밍 경로를 덧댄다.
+ *
+ *  스트리밍은 화면 효과다. 효과가 실패했다고 실행이 죽어서는 안 되므로,
+ *  한 글자도 받지 못한 채 실패하면 조용히 기존 경로로 되돌아간다. */
+function withStream(
+  base: LlmClient,
+  label: string,
+  timeoutMs: number,
+  /** relaxed = 추론 요약 요청을 뺀 판. 계정·모델이 요약을 내주지 않을 때 쓴다. */
+  planFor: (
+    prompt: string,
+    opts: { temperature?: number; maxOutputTokens?: number } | undefined,
+    relaxed: boolean,
+  ) => StreamPlan | Promise<StreamPlan>,
+): StreamingLlmClient {
+  return {
+    ...base,
+    async completeStream(prompt, opts, onChunk) {
+      let got = "";
+      // 실제로 조각으로 흘러왔는지 재 둔다 — 한 번에 온 것과 구분이 안 되면
+      // "왜 실시간이 아니냐"를 코드만 보고는 판정할 수 없다.
+      const startedAt = Date.now();
+      let outputPieces = 0;
+      let thoughtPieces = 0;
+      let firstPieceAt = 0;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+      const attempt = async (relaxed: boolean): Promise<void> => {
+        const plan = await planFor(prompt, opts, relaxed);
+        const res = await fetch(plan.url, {
+          method: "POST",
+          headers: { Accept: "text/event-stream", ...plan.headers },
+          body: JSON.stringify(plan.body),
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          const excerpt = await responseExcerpt(res);
+          const failure = new Error(`${label} HTTP ${res.status}${excerpt ? `: ${excerpt}` : ""}`);
+          // 요약을 못 내주는 계정·모델이면 요약만 빼고 한 번 더 — 흐르는 화면까지
+          // 통째로 잃지 않게 한다. 그래도 안 되면 바깥에서 기존 경로로 되돌아간다.
+          if (!relaxed && res.status >= 400 && res.status < 500) {
+            // 조용히 넘어가면 "생각이 왜 안 나오지"로만 보인다 — 이유를 남긴다
+            onChunk(
+              `${label}가 추론 요약을 내주지 않아 요약 없이 다시 요청합니다 (HTTP ${res.status}).`,
+              "notice",
+            );
+            await attempt(true);
+            return;
+          }
+          throw failure;
+        }
+        await readEventStream(res, plan.mode, (raw) => {
+          let payload: unknown;
+          try {
+            payload = JSON.parse(raw);
+          } catch {
+            return;
+          }
+          if (firstPieceAt === 0) firstPieceAt = Date.now();
+          const thinking = plan.thought?.(payload) ?? null;
+          if (thinking !== null && thinking !== "") {
+            thoughtPieces += 1;
+            onChunk(thinking, "thought");
+          }
+          const piece = plan.delta(payload);
+          if (piece !== null && piece !== "") {
+            outputPieces += 1;
+            got += piece;
+            onChunk(piece, "output");
+          }
+        });
+      };
+
+      try {
+        await attempt(false);
+      } catch (error) {
+        clearTimeout(timeout);
+        if (got !== "") throw error;
+        // 조용히 되돌아가면 "왜 실시간이 아니지"로만 보인다 — 이유를 남긴다
+        onChunk(
+          `${label} 스트리밍이 열리지 않아 한 번에 받아옵니다 — ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          "notice",
+        );
+        const whole = await base.complete(prompt, opts);
+        onChunk(whole, "output");
+        return whole;
+      }
+      clearTimeout(timeout);
+      if (import.meta.env.DEV) {
+        const total = ((Date.now() - startedAt) / 1000).toFixed(1);
+        const wait = ((firstPieceAt - startedAt) / 1000).toFixed(1);
+        onChunk(
+          `[측정] ${label} · 산출물 조각 ${outputPieces}개 · 생각 조각 ${thoughtPieces}개 · ` +
+            `첫 조각까지 ${wait}초 · 전체 ${total}초`,
+          "notice",
+        );
+      }
+      if (got === "") {
+        onChunk(`${label} 스트림이 비어 있어 한 번에 받아옵니다.`, "notice");
+        const whole = await base.complete(prompt, opts);
+        onChunk(whole, "output");
+        return whole;
+      }
+      return got;
+    },
+  };
+}
+
+/** Gemini·Vertex 공통 — 조각마다 parts가 새로 온다.
+ *  thought: true가 붙은 part가 모델이 스스로 정리한 추론 요약이다. */
+function googlePart(payload: unknown, wantThought: boolean): string | null {
+  const candidates = field(payload, "candidates");
+  const first = Array.isArray(candidates) ? candidates[0] : undefined;
+  const parts = field(field(first, "content"), "parts");
+  if (!Array.isArray(parts)) return null;
+  const text = parts
+    .filter((p) => (field(p, "thought") === true) === wantThought)
+    .map((p) => (typeof field(p, "text") === "string" ? String(field(p, "text")) : ""))
+    .join("");
+  return text === "" ? null : text;
+}
+
+const googleDelta = (payload: unknown): string | null => googlePart(payload, false);
+const googleThought = (payload: unknown): string | null => googlePart(payload, true);
+
 function wait(ms: number): Promise<void> {
   return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
 }
@@ -294,7 +518,7 @@ export function createGeminiClient(
   const maxAttempts = Math.max(1, Math.floor(options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS));
   const retryBaseMs = Math.max(0, options.retryBaseMs ?? DEFAULT_RETRY_BASE_MS);
 
-  return {
+  const base: LlmClient = {
     providerId: "gemini",
     model,
     async complete(prompt, opts) {
@@ -360,6 +584,28 @@ export function createGeminiClient(
       throw lastError;
     },
   };
+
+  return withStream(base, "Gemini", timeoutMs, (prompt, opts) => ({
+    url: `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`,
+    headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+    body: {
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: {
+        ...geminiGenerationConfig(
+          opts?.temperature ?? 0.7,
+          opts?.maxOutputTokens ?? 8192,
+          options.thinkingLevel,
+        ),
+        thinkingConfig: {
+          ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
+          includeThoughts: true,
+        },
+      },
+    },
+    mode: "sse",
+    delta: googleDelta,
+    thought: googleThought,
+  }));
 }
 
 function base64Url(bytes: Uint8Array): string {
@@ -478,7 +724,7 @@ export function createVertexClient(
     return accessToken.value;
   };
 
-  return {
+  const base: LlmClient = {
     providerId: "vertex",
     model,
     async complete(prompt, opts) {
@@ -556,6 +802,33 @@ export function createVertexClient(
       throw lastError;
     },
   };
+
+  return withStream(base, "Vertex AI", timeoutMs, async (prompt, opts) => {
+    const project = encodeURIComponent(credential.project_id);
+    const modelId = encodeURIComponent(model);
+    const token = await issueAccessToken(new AbortController().signal);
+    return {
+      url: `https://aiplatform.googleapis.com/v1/projects/${project}/locations/${VERTEX_LOCATION}/publishers/google/models/${modelId}:streamGenerateContent?alt=sse`,
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          ...geminiGenerationConfig(
+            opts?.temperature ?? 0.7,
+            opts?.maxOutputTokens ?? 8192,
+            options.thinkingLevel,
+          ),
+          thinkingConfig: {
+            ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
+            includeThoughts: true,
+          },
+        },
+      },
+      mode: "sse" as const,
+      delta: googleDelta,
+      thought: googleThought,
+    };
+  });
 }
 
 type OpenAIResponse = {
@@ -587,7 +860,7 @@ export function createOpenAIClient(
   const maxAttempts = Math.max(1, Math.floor(options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS));
   const retryBaseMs = Math.max(0, options.retryBaseMs ?? DEFAULT_RETRY_BASE_MS);
 
-  return {
+  const base: LlmClient = {
     providerId: "openai",
     model,
     async complete(prompt, opts) {
@@ -666,6 +939,40 @@ export function createOpenAIClient(
       throw lastError;
     },
   };
+
+  return withStream(base, "OpenAI", timeoutMs, (prompt, opts, relaxed) => ({
+    url: "https://api.openai.com/v1/responses",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: {
+      model,
+      input: prompt,
+      // 추론 요약을 받으려면 effort가 none이 아니어야 한다.
+      // 화면에 흐르는 "생각"은 여기서 나온다 — 지어낸 문구가 아니라 모델의 것이다.
+      //
+      // summary는 이미 한 생각을 얼마나 풀어 쓸지만 정한다. detailed로 올려도
+      // 추론 토큰은 늘지 않으므로, 화면에 흐르는 양만 늘리는 쪽을 택한다.
+      ...(wantsThinking(opts) && !relaxed
+        ? { reasoning: { effort: "low", summary: "detailed" } }
+        : { reasoning: { effort: "none" }, temperature: opts?.temperature ?? 0.7 }),
+      max_output_tokens: opts?.maxOutputTokens ?? 8192,
+      store: false,
+      stream: true,
+    },
+    mode: "sse",
+    delta: (payload) =>
+      field(payload, "type") === "response.output_text.delta" &&
+      typeof field(payload, "delta") === "string"
+        ? String(field(payload, "delta"))
+        : null,
+    thought: (payload) => {
+      const kind = field(payload, "type");
+      if (kind === "response.reasoning_summary_part.added") return LINE_BREAK + LINE_BREAK;
+      return kind === "response.reasoning_summary_text.delta" &&
+        typeof field(payload, "delta") === "string"
+        ? String(field(payload, "delta"))
+        : null;
+    },
+  }));
 }
 
 type DirectJsonRequest = {
@@ -684,12 +991,14 @@ function createDirectJsonClient(
     completeOptions?: { temperature?: number; maxOutputTokens?: number },
   ) => DirectJsonRequest,
   outputText: (data: unknown) => string | null,
+  /** 같은 요청을 흘려받는 경로 — 없으면 스트리밍을 지원하지 않는 클라이언트가 된다 */
+  streamOf?: (request: DirectJsonRequest, relaxed: boolean) => Omit<StreamPlan, "url" | "headers">,
 ): LlmClient {
   const timeoutMs = Math.max(1, options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
   const maxAttempts = Math.max(1, Math.floor(options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS));
   const retryBaseMs = Math.max(0, options.retryBaseMs ?? DEFAULT_RETRY_BASE_MS);
 
-  return {
+  const base: LlmClient = {
     providerId,
     model,
     async complete(prompt, completeOptions) {
@@ -748,7 +1057,28 @@ function createDirectJsonClient(
       throw lastError;
     },
   };
+
+  if (!streamOf) return base;
+  return withStream(base, label, timeoutMs, (prompt, completeOptions, relaxed) => {
+    const request = requestFor(prompt, completeOptions);
+    return { url: request.url, headers: request.headers, ...streamOf(request, relaxed) };
+  });
 }
+
+/** Claude 스트리밍 조각 — 본문과 사고가 같은 이벤트 이름으로 오고 delta의 종류만 다르다 */
+const ANTHROPIC_DELTAS = {
+  mode: "sse" as const,
+  delta: (payload: unknown) =>
+    field(payload, "type") === "content_block_delta" &&
+    typeof field(field(payload, "delta"), "text") === "string"
+      ? String(field(field(payload, "delta"), "text"))
+      : null,
+  thought: (payload: unknown) =>
+    field(payload, "type") === "content_block_delta" &&
+    typeof field(field(payload, "delta"), "thinking") === "string"
+      ? String(field(field(payload, "delta"), "thinking"))
+      : null,
+};
 
 /** Claude Messages API 브라우저 직행 어댑터. 키는 Anthropic 이외의 호스트로 전송하지 않는다. */
 export function createAnthropicClient(
@@ -784,6 +1114,26 @@ export function createAnthropicClient(
         .join("");
       return text || null;
     },
+    (request, relaxed) => {
+      const body = request.body as Record<string, unknown>;
+      const budget = 1024;
+      const asked = typeof body.max_tokens === "number" ? body.max_tokens : 8192;
+      const thinking =
+        !relaxed && wantsThinking({ temperature: body.temperature as number | undefined });
+      // 확장 사고를 켜면 temperature를 지정할 수 없고, max_tokens는 사고 예산보다 커야 한다
+      const { temperature: _dropped, ...rest } = body;
+      void _dropped;
+      if (!thinking) return { body: { ...body, stream: true }, ...ANTHROPIC_DELTAS };
+      return {
+        body: {
+          ...rest,
+          max_tokens: Math.max(asked, budget + 2048),
+          thinking: { type: "enabled", budget_tokens: budget },
+          stream: true,
+        },
+        ...ANTHROPIC_DELTAS,
+      };
+    },
   );
 }
 
@@ -813,6 +1163,31 @@ export function createOpenRouterClient(
         ?.message?.content;
       return typeof content === "string" ? content : null;
     },
+    (request, relaxed) => ({
+      body: {
+        ...(request.body as Record<string, unknown>),
+        ...(!relaxed &&
+        wantsThinking({
+          temperature: (request.body as Record<string, unknown>).temperature as number | undefined,
+        })
+          ? { reasoning: { effort: "low" } }
+          : {}),
+        stream: true,
+      },
+      mode: "sse",
+      delta: (payload) => {
+        const choices = field(payload, "choices");
+        const first = Array.isArray(choices) ? choices[0] : undefined;
+        const piece = field(field(first, "delta"), "content");
+        return typeof piece === "string" && piece !== "" ? piece : null;
+      },
+      thought: (payload) => {
+        const choices = field(payload, "choices");
+        const first = Array.isArray(choices) ? choices[0] : undefined;
+        const piece = field(field(first, "delta"), "reasoning");
+        return typeof piece === "string" && piece !== "" ? piece : null;
+      },
+    }),
   );
 }
 
@@ -845,6 +1220,19 @@ export function createOllamaClient(
       const content = (data as { message?: { content?: unknown } }).message?.content;
       return typeof content === "string" ? content : null;
     },
+    (request) => ({
+      // 사고를 지원하지 않는 모델이면 요청이 거절되고, 그때는 기존 경로로 되돌아간다
+      body: { ...(request.body as Record<string, unknown>), think: true, stream: true },
+      mode: "ndjson",
+      delta: (payload) => {
+        const piece = field(field(payload, "message"), "content");
+        return typeof piece === "string" && piece !== "" ? piece : null;
+      },
+      thought: (payload) => {
+        const piece = field(field(payload, "message"), "thinking");
+        return typeof piece === "string" && piece !== "" ? piece : null;
+      },
+    }),
   );
 }
 
@@ -1410,8 +1798,23 @@ export async function testDetectedByoConnection(
 /** 케이스 초안 보조 전용 모의 클라이언트 — 케이스 입력 스텝에는 아직 compiled problem이
  *  없어 createMockClient를 쓸 수 없다. 초안 프롬프트의 마커와 "생성 개수: N"을 읽어
  *  결정적 질답쌍 N개를 돌려준다. 초안 요청이 아닌 프롬프트는 오분기 조기 발견을 위해 거부. */
-export function createAssistMockClient(): LlmClient {
+/** 모의 모델에도 흐르는 느낌을 준다 — 결정적 결과는 그대로 두고 내보내는 방식만 조각낸다 */
+function withFakeStream(base: LlmClient): StreamingLlmClient {
   return {
+    ...base,
+    async completeStream(prompt, opts, onChunk) {
+      const whole = await base.complete(prompt, opts);
+      for (let at = 0; at < whole.length; at += 6) {
+        onChunk(whole.slice(at, at + 6), "output");
+        await wait(16);
+      }
+      return whole;
+    },
+  };
+}
+
+export function createAssistMockClient(): LlmClient {
+  return withFakeStream({
     providerId: "mock",
     model: "모의 모델 (결정적)",
     async complete(prompt) {
@@ -1435,7 +1838,7 @@ export function createAssistMockClient(): LlmClient {
       }));
       return JSON.stringify(pairs);
     },
-  };
+  });
 }
 
 /** 공유 키 fail-fast — BYO와 같은 원칙(SPEC §8)을 공유 키 경로에도 적용한다.
@@ -1487,7 +1890,7 @@ export function createMockClient(problem: HandoverProblem): LlmClient {
     return pure[0] ?? text.replace(/[^\p{L}\p{N}]/gu, "").slice(0, 6);
   };
 
-  return {
+  return withFakeStream({
     providerId: "mock",
     model: "모의 모델 (결정적)",
     async complete(prompt) {
@@ -1554,5 +1957,5 @@ export function createMockClient(problem: HandoverProblem): LlmClient {
         half.map((c) => `${c.question}에 대해: ${c.expectedAnswer}`).join("\n\n");
       return doc.slice(0, Math.floor(problem.lengthCap * 0.8));
     },
-  };
+  });
 }

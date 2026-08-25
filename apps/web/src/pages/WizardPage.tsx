@@ -9,7 +9,8 @@ import type { Question } from "@harnest/contracts";
 import type { LlmClient } from "@harnest/template-handover";
 import { getTemplate } from "../templates";
 import { WizardBlueprint } from "../components/WizardBlueprint";
-import { StreamConsole } from "../components/StreamConsole";
+import { ActivityConsole } from "../components/ActivityConsole";
+import { appendStream, clearStream, endStream, withActivityLog } from "../lib/activityLog";
 import { WizardCaseList, type CasePair } from "../components/WizardCaseList";
 import { ModelPicker } from "../components/ModelPicker";
 import { ProviderCredentialInput } from "../components/ProviderCredentialInput";
@@ -443,6 +444,7 @@ export function WizardPage() {
 
     setAssistBusy(true);
     setAssistText("");
+    clearStream("자료를 읽고 질문을 뽑는 중");
     setError(null);
     try {
       const existing = pairs
@@ -452,7 +454,7 @@ export function WizardPage() {
         material,
         existing,
         Math.min(assistCount, remaining),
-        client,
+        withActivityLog(client, "자료를 읽고 질문을 뽑는 중"),
         assist.difficulty ? assistDifficulty : undefined,
       );
       if (assistChoice !== "mock") {
@@ -468,6 +470,22 @@ export function WizardPage() {
           .map((d, n) => `${n + 1}. ${d.question}\n   ${d.expectedAnswer}`)
           .join("\n\n"),
       );
+      appendStream(
+        drafted
+          .map((d, n) => {
+            const cited = d.evidence ?? [];
+            if (cited.length === 0) {
+              return `${n + 1}. 근거 대목을 표시하지 않았습니다 — 확인할 때 자료와 대조해 보세요.`;
+            }
+            const missing = cited.filter((e) => !e.found).length;
+            return missing === 0
+              ? `${n + 1}. 인용한 ${cited.length}개 대목이 자료에 그대로 있습니다.`
+              : `${n + 1}. 인용한 ${cited.length}개 중 ${missing}개를 자료에서 찾지 못했습니다 — 확인할 때 대조해 보세요.`;
+          })
+          .join(String.fromCharCode(10)),
+        "인용한 대목이 자료에 실제로 있는지",
+      );
+      endStream(`초안 ${drafted.length}개를 만들었습니다`);
       // 빈 행부터 채우고, 모자라면 상한까지 행을 추가한다
       const next = [...pairs];
       for (const d of drafted) {
@@ -588,16 +606,6 @@ export function WizardPage() {
                           {assistBusy ? "초안 만드는 중…" : `AI 초안 ${assistEffective}개 넣기`}
                         </button>
                       </div>
-                      {assistBusy || assistText ? (
-                        <StreamConsole
-                          title={assistBusy ? "AI가 초안을 쓰는 중" : "AI가 쓴 초안"}
-                          model={
-                            assistChoice === "mock" ? "모의 모델" : JUDGE_MODEL[assistChoice]
-                          }
-                          text={assistText}
-                          running={assistBusy}
-                        />
-                      ) : null}
                       <details className="assist-more">
                         <summary>초안 설정</summary>
                         <div style={{ display: "grid", gap: 6, fontSize: 14 }}>
@@ -973,6 +981,13 @@ export function WizardPage() {
             >
               {q.nextLabel ?? "다음"}
             </button>
+            {q.type === "caseList" && entry.caseAssist ? (
+              <ActivityConsole
+                model={assistChoice === "mock" ? "모의 모델" : JUDGE_MODEL[assistChoice]}
+                empty="AI 초안을 요청하면 어떤 사실을 교차해 질문을 만들었는지 여기에 흐릅니다."
+                height={420}
+              />
+            ) : null}
           </div>
         )}
       </div>

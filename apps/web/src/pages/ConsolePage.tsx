@@ -29,6 +29,8 @@ import {
 } from "../lib/llm";
 import { markUnavailableRestoredHoldout } from "../lib/project-snapshot";
 import { isHoldoutPhasePending, isHoldoutSettled } from "../lib/project-export";
+import { ActivityConsole } from "../components/ActivityConsole";
+import { appendStream, clearStream, endStream, setStreamStatus, withActivityLog } from "../lib/activityLog";
 import { setFlowStep } from "../lib/flowStep";
 import { ScoreHero } from "../components/ScoreHero";
 import { CurveChart } from "../components/CurveChart";
@@ -65,6 +67,7 @@ function holdoutLabel(result: HoldoutEvaluation, phase: string): string {
 export function ConsolePage() {
   useEffect(() => {
     setFlowStep({ kind: "run" });
+    clearStream(); // 승인 화면에서 흐르던 글이 이어지지 않게 한다
   }, []);
 
   const {
@@ -102,10 +105,15 @@ export function ConsolePage() {
   const [retryTick, setRetryTick] = useState(0);
   /** 실행 중 오류 — 체크포인트가 남아 있으므로 재시도는 start() 재호출로 이어서 진행 */
   const [runError, setRunError] = useState<string | null>(null);
+  // 라운드 0(원샷)이 끝나야 첫 체크포인트가 나온다. 그때까지 상태가 "대기"로 남아
+  // 버튼이 계속 눌리고 화면도 그대로였다 — 누른 사실을 여기서 즉시 붙잡는다.
+  const [starting, setStarting] = useState(false);
   const [callsPerRound, setCallsPerRound] = useState<number>(0);
   const [maxCallsPerRun, setMaxCallsPerRun] = useState<number>(0);
 
   const handleRef = useRef<LoopHandle | null>(null);
+  // 같은 회차를 두 번 기록하지 않게 한다 — 체크포인트는 여러 번 올 수 있다
+  const lastLoggedRound = useRef<number>(-1);
   const storeRef = useRef<CheckpointStore<unknown> | null>(null);
   if (storeRef.current === null) storeRef.current = new IndexedDbCheckpointStore();
   // 재진입이면 기존 runId로 재개, 최초 진입이면 새로 발급
@@ -183,8 +191,63 @@ export function ConsolePage() {
     let runtime: TemplateRuntime;
     try {
       // 승인·동결된 팩의 저지 선언과 실행 모델이 어긋나면 여기서 throw — 재승인 원칙
-      const llm = entry.createLlm(compiled);
-      runtime = entry.createRuntime(compiled, llm);
+      const raw = entry.createLlm(compiled);
+      const llm = raw ? withActivityLog(raw, "산출물을 만들고 채점하는 중") : raw;
+      // 루프가 무엇을 보고 어떻게 고쳐 쓰는지를 화면으로 흘린다.
+      // 생성기는 "지금 산출물이 못 채운 것"을 받아 그것만 보강한다 — 그게 이 루프의 추론이다.
+      const base = entry.createRuntime(compiled, llm);
+      runtime = {
+        ...base,
+        generate: async (champion, rng, feedback) => {
+          const misses = feedback.championViolations;
+          const body =
+            misses.length > 0
+              ? "지금 산출물이 못 채운 것" + "\n" +
+                misses.map((v) => "  · " + v).join("\n") + "\n" + "\n" +
+                "이 항목들을 보강해 다시 씁니다. 나머지는 건드리지 않습니다."
+              : "지적된 문제가 없습니다. 표현을 더 촘촘히 다듬어 다시 씁니다.";
+          appendStream(
+            body,
+            feedback.round + "회차 — 무엇을 고칠지 정합니다 (현재 " +
+              feedback.championScore.toFixed(1) + "점)",
+          );
+          return base.generate(champion, rng, feedback);
+        },
+        scorer: async (artifact) => {
+          const r = await base.scorer(artifact);
+          // 점수만 있으면 "왜 이 숫자인지"를 알 수 없다. 승인된 기준의 이름과 가중치를
+          // 함께 붙여, 어떤 기준에 비추어 몇 점이고 합계가 어떻게 나왔는지 드러낸다.
+          const scored = Object.entries(r.parts).map(([id, value]) => {
+            const def = compiled.pack.criteria.find((c) => c.id === id);
+            const label = def?.label ?? id;
+            const weight = def?.weight ?? 0;
+            return {
+              line:
+                "기준「" + label + "」" +
+                (def ? " 가중치 " + Math.round(weight * 100) + "%" : "") +
+                " → " + value.toFixed(1) + "점",
+              math: value.toFixed(1) + "×" + weight.toFixed(2),
+            };
+          });
+          const gateNames = compiled.pack.gates.map((g) => "「" + g.label + "」").join(" ");
+          const lines = [
+            ...scored.map((x) => x.line),
+            ...(compiled.pack.gates.length > 0
+              ? [
+                  "필수 관문" + gateNames + " " +
+                    (r.gateRejected ? "위반 — 점수와 무관하게 탈락합니다" : "통과"),
+                ]
+              : []),
+            "합계 " + r.total.toFixed(1) + "점" +
+              (scored.length > 1 ? " = " + scored.map((x) => x.math).join(" + ") : ""),
+            ...(r.violations.length > 0
+              ? ["", "이 기준을 아직 채우지 못한 케이스", ...r.violations.map((v) => "  · " + v)]
+              : ["", "기준에 비추어 지적할 것이 없습니다."]),
+          ];
+          appendStream(lines.join("\n"), "채점 결과");
+          return r;
+        },
+      };
     } catch (e) {
       setSetupError(e instanceof Error ? e.message : String(e));
       return;
@@ -201,6 +264,35 @@ export function ConsolePage() {
     };
     const onEvent = (cp: LoopCheckpoint<unknown>): void => {
       if (!ownsEvent(cp)) return;
+      const last = cp.tree[cp.tree.length - 1];
+      if (last !== undefined && last.round !== lastLoggedRound.current) {
+        lastLoggedRound.current = last.round;
+        const why = last.adopted
+          ? "더 나아서 채택"
+          : last.gateRejected
+            ? "필수 관문에서 실격"
+            : !last.guardSafe
+              ? "검증 가드가 퇴보해 기각"
+              : "기존 산출물이 더 나음";
+        // 왜 그렇게 판단했는지를 남긴다 — 점수만으로는 이유를 알 수 없다.
+        // 채택 조건은 셋을 모두 넘어야 한다: 필수 관문 · 검증 가드 비퇴보 · 엄격한 점수 개선.
+        const gap = last.candidateScore - last.championScore;
+        const guard =
+          last.candidateGuardScore === null
+            ? ""
+            : ` 검증 가드는 ${last.candidateGuardScore.toFixed(1)}점으로 ${
+                last.guardSafe ? "퇴보하지 않았습니다" : "허용 오차를 넘어 떨어졌습니다"
+              }.`;
+        const detail = last.gateRejected
+          ? "필수 관문을 넘지 못해 점수와 무관하게 탈락했습니다."
+          : !last.guardSafe
+            ? `점수는 ${last.candidateScore.toFixed(1)}점이지만 숨긴 케이스로 재어 본 검증 가드가 퇴보해 기각합니다 — 눈에 보이는 케이스에만 맞춰 쓴 것으로 봅니다.${guard}`
+            : last.adopted
+              ? `새 산출물 ${last.candidateScore.toFixed(1)}점이 기존 ${last.championScore.toFixed(1)}점보다 ${gap.toFixed(1)}점 높아 바꿔 답았습니다.${guard}`
+              : `새 산출물 ${last.candidateScore.toFixed(1)}점이 기존 ${last.championScore.toFixed(1)}점을 넘지 못해 기존을 유지합니다 — 동점도 바꾸지 않습니다.${guard}`;
+        appendStream(detail, `${last.round}회차 판단 — ${why}`);
+        setStreamStatus(`${last.round}회차 — ${why}`);
+      }
       setCheckpoint(cp);
       if (!scoreHoldout) return;
       // 홀드아웃은 표시 전용 — 아래 어떤 결과도 루프 제어·Generator로 되돌아가지 않는다
@@ -331,16 +423,31 @@ export function ConsolePage() {
   }
 
   const status = checkpoint?.status ?? "idle";
+  // 아직 첫 채점이 끝나지 않은 구간 — 사용자에게는 이미 돌고 있는 상태로 보여야 한다
+  const preparing = starting && checkpoint === null;
   const baselineHoldoutError = holdout.errors?.baseline ?? null;
   const finalHoldoutError = holdout.errors?.final ?? null;
   const holdoutSettled = isHoldoutSettled(compiled.pack, holdout);
   const start = () => {
+    if (starting) return; // 두 번 눌려 실행이 겹치는 것을 막는다
     setRunError(null);
+    setStarting(true);
+    // 새 실행은 항상 빈 화면에서 시작한다 — 지난 기록이 이어지면 읽을 수 없다
+    clearStream(checkpoint === null ? "처음 산출물을 만드는 중" : "이어서 실행하는 중");
+    lastLoggedRound.current = -1;
     const handle = handleRef.current;
-    if (handle === null) return;
-    void handle.start().catch((e: unknown) => {
-      if (handleRef.current === handle) setRunError(describeRunError(e));
-    });
+    if (handle === null) {
+      setStarting(false);
+      return;
+    }
+    void handle
+      .start()
+      .catch((e: unknown) => {
+        if (handleRef.current === handle) setRunError(describeRunError(e));
+      })
+      .finally(() => {
+        if (handleRef.current === handle) setStarting(false);
+      });
   };
   const retrySetup = async (): Promise<void> => {
     const raw = credentialInput.trim();
@@ -422,8 +529,8 @@ export function ConsolePage() {
         baseline={checkpoint && checkpoint.curve.length > 0 ? checkpoint.curve[0] : null}
         round={checkpoint?.round ?? 0}
         maxRounds={compiled.loopSpec.maxRounds}
-        statusLabel={STATUS_LABEL[status] ?? status}
-        running={status === "running"}
+        statusLabel={preparing ? "처음 산출물을 만드는 중" : (STATUS_LABEL[status] ?? status)}
+        running={preparing || status === "running"}
       />
 
       <div className="card">
@@ -467,14 +574,14 @@ export function ConsolePage() {
           <button
             className="primary"
             onClick={start}
-            disabled={status !== "idle" || setupError !== null}
+            disabled={starting || status !== "idle" || setupError !== null}
           >
-            실행 시작
+            {preparing ? "시작하는 중…" : "실행 시작"}
           </button>
           <button onClick={() => handleRef.current?.pause()} disabled={status !== "running"}>
             일시정지
           </button>
-          <button onClick={start} disabled={status !== "paused" || setupError !== null}>
+          <button onClick={start} disabled={starting || status !== "paused" || setupError !== null}>
             재개
           </button>
           {status === "done" && holdoutSettled && (
@@ -514,6 +621,17 @@ export function ConsolePage() {
           <ExperimentTree tree={checkpoint?.tree ?? []} />
         </div>
       </div>
+
+      {/* 점수·기록을 먼저 읽고, 그 판단의 근거를 아래에서 본다 */}
+      <ActivityConsole
+        model={
+          compiled.pack.judgeProcedure.kind === "case_answering"
+            ? compiled.pack.judgeProcedure.judge.model
+            : undefined
+        }
+        empty="실행을 시작하면 모델이 답을 내기 전에 정리한 생각과 회차별 판정이 여기에 흐릅니다."
+        height={440}
+      />
     </div>
   );
 }

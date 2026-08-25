@@ -12,6 +12,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { ExaminerCheckId, ExaminerCheckResult, ExaminerVerdict } from "@harnest/contracts";
+import { ActivityConsole } from "../components/ActivityConsole";
+import { appendStream, clearStream, endStream, setStreamStatus, withActivityLog } from "../lib/activityLog";
 import { setFlowStep } from "../lib/flowStep";
 import { SealPanel } from "../components/SealPanel";
 import { useProject } from "../state";
@@ -216,6 +218,7 @@ export function ApprovalPage() {
   // pack 유무와 관계없이 같은 순서로 호출해 조기 반환 시에도 Hooks 규칙을 지킨다.
   useEffect(() => {
     setFlowStep({ kind: "approval" });
+    clearStream(); // 앞 화면에서 흐르던 글이 이어지지 않게 한다
   }, []);
   approvedRef.current = approved;
 
@@ -225,6 +228,7 @@ export function ApprovalPage() {
     let llm;
     try {
       llm = entry.createLlm(compiled);
+      if (llm) llm = withActivityLog(llm, "채점 기준을 시험하는 중");
     } catch (e) {
       setBatteryError(e instanceof Error ? e.message : String(e));
       return;
@@ -234,6 +238,7 @@ export function ApprovalPage() {
     setRunning(true);
     try {
       setLiveChecks([]);
+      clearStream("채점 기준을 시험하는 중");
       const report = await entry.examiner.runBattery(compiled, llm, setProgress, (c) =>
         setLiveChecks((prev) => [...prev.filter((p) => p.id !== c.id), c]),
       );
@@ -455,6 +460,7 @@ export function ApprovalPage() {
       <h1>채점 기준 승인</h1>
       <p className="sub">채점 기준은 당신이 승인하고, 실행 중 AI는 이 기준을 변경할 수 없습니다.</p>
 
+      <div className="approve-deck">
       <div className="card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
           <h2 style={{ marginTop: 0 }}>채점 기준</h2>
@@ -596,6 +602,15 @@ export function ApprovalPage() {
             </div>
           </div>
         )}
+      </div>
+
+      <aside className="approve-side">
+        <ActivityConsole
+          model={jp.kind === "case_answering" ? jp.judge.model : undefined}
+          empty="검증을 실행하면 AI가 만든 문서와 판정 사유가 여기에 흐릅니다."
+          height={560}
+        />
+      </aside>
       </div>
     </div>
   );

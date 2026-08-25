@@ -474,7 +474,8 @@ label.q-big {
   font-variant-numeric: tabular-nums; color: var(--ink);
 }
 .score-hero-unit { font-size: 27px; color: var(--ink-3); }
-.score-hero-empty { font-size: var(--t-stat); font-weight: 800; color: var(--ink-3); }
+/* 아직 점수가 없을 때 — 큰 활자로 두면 회색 막대처럼 보인다 */
+.score-hero-empty { font-size: var(--t-h2); font-weight: 700; color: var(--ink-3); }
 .score-delta {
   font-size: 17px; font-weight: 800; color: var(--good); background: var(--good-soft);
   padding: 6px 14px; border-radius: 999px; animation: delta-in var(--dur) var(--ease);
@@ -507,13 +508,13 @@ label.q-big {
 .rounds {
   list-style: none; margin: 0; padding: 0;
   display: flex; flex-direction: column; gap: var(--s-2);
-  max-height: 440px; overflow-y: auto;
+  max-height: 560px; overflow-y: auto;
 }
 .round {
-  display: flex; align-items: center; gap: var(--s-3);
-  padding: var(--s-3) var(--s-4); border-radius: var(--radius-sm);
+  display: flex; align-items: center; gap: var(--s-4);
+  padding: var(--s-4) var(--s-5); border-radius: var(--radius-sm);
   background: var(--surface-2); border: 1px solid transparent;
-  font-size: var(--t-sm); color: var(--ink-2);
+  font-size: var(--t-body); color: var(--ink-2);
   animation: round-in var(--dur) var(--ease) both;
 }
 @keyframes round-in { from { opacity: 0; transform: translateY(14px); } }
