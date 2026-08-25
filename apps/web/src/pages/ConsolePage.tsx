@@ -61,7 +61,7 @@ function describeRunError(e: unknown): string {
 function holdoutLabel(result: HoldoutEvaluation, phase: string): string {
   return result.gateRejected
     ? `숨긴 질문(${phase}): 분량 조건을 못 지켜 탈락 — 점수 없음`
-    : `숨김 케이스(${phase}): ${fmt(result.score)}점`;
+    : `숨긴 질문(${phase}): ${fmt(result.score)}점`;
 }
 
 export function ConsolePage() {
@@ -234,14 +234,14 @@ export function ConsolePage() {
             ...scored.map((x) => x.line),
             ...(compiled.pack.gates.length > 0
               ? [
-                  "필수 관문" + gateNames + " " +
+                  "필수 조건" + gateNames + " " +
                     (r.gateRejected ? "위반 — 점수와 무관하게 탈락합니다" : "통과"),
                 ]
               : []),
             "합계 " + r.total.toFixed(1) + "점" +
               (scored.length > 1 ? " = " + scored.map((x) => x.math).join(" + ") : ""),
             ...(r.violations.length > 0
-              ? ["", "이 기준을 아직 채우지 못한 케이스", ...r.violations.map((v) => "  · " + v)]
+              ? ["", "이 기준을 아직 채우지 못한 질문", ...r.violations.map((v) => "  · " + v)]
               : ["", "기준에 비추어 지적할 것이 없습니다."]),
           ];
           appendStream(lines.join("\n"), "채점 결과");
@@ -270,23 +270,23 @@ export function ConsolePage() {
         const why = last.adopted
           ? "더 나아서 채택"
           : last.gateRejected
-            ? "필수 관문에서 실격"
+            ? "필수 조건을 못 지켜 탈락"
             : !last.guardSafe
-              ? "검증 가드가 퇴보해 기각"
-              : "기존 산출물이 더 나음";
+              ? "중간 점검이 떨어져 기각"
+              : "지금 것이 더 나음";
         // 왜 그렇게 판단했는지를 남긴다 — 점수만으로는 이유를 알 수 없다.
-        // 채택 조건은 셋을 모두 넘어야 한다: 필수 관문 · 검증 가드 비퇴보 · 엄격한 점수 개선.
+        // 채택 조건은 셋을 모두 넘어야 한다: 필수 조건 · 중간 점검 비퇴보 · 엄격한 점수 개선.
         const gap = last.candidateScore - last.championScore;
         const guard =
           last.candidateGuardScore === null
             ? ""
-            : ` 검증 가드는 ${last.candidateGuardScore.toFixed(1)}점으로 ${
-                last.guardSafe ? "퇴보하지 않았습니다" : "허용 오차를 넘어 떨어졌습니다"
+            : ` 중간 점검은 ${last.candidateGuardScore.toFixed(1)}점으로 ${
+                last.guardSafe ? "떨어지지 않았습니다" : "허용 오차를 넘어 떨어졌습니다"
               }.`;
         const detail = last.gateRejected
-          ? "필수 관문을 넘지 못해 점수와 무관하게 탈락했습니다."
+          ? "반드시 지켜야 할 조건을 못 지켜 점수와 무관하게 탈락했습니다."
           : !last.guardSafe
-            ? `점수는 ${last.candidateScore.toFixed(1)}점이지만 숨긴 케이스로 재어 본 검증 가드가 퇴보해 기각합니다 — 눈에 보이는 케이스에만 맞춰 쓴 것으로 봅니다.${guard}`
+            ? `점수는 ${last.candidateScore.toFixed(1)}점이지만 눈에 보이는 질문에만 맞춰 쓴 것으로 보아 기각합니다.${guard}`
             : last.adopted
               ? `새 산출물 ${last.candidateScore.toFixed(1)}점이 기존 ${last.championScore.toFixed(1)}점보다 ${gap.toFixed(1)}점 높아 바꿔 답았습니다.${guard}`
               : `새 산출물 ${last.candidateScore.toFixed(1)}점이 기존 ${last.championScore.toFixed(1)}점을 넘지 못해 기존을 유지합니다 — 동점도 바꾸지 않습니다.${guard}`;
@@ -538,7 +538,7 @@ export function ConsolePage() {
           <div>
             <span className="badge">중간 점검: {fmt(checkpoint.championGuardScore!)}점</span>
             <span className="hint" style={{ marginLeft: 4 }}>
-              비공개 검증 케이스 집계 — 이 점수가 퇴보하는 후보는 채택되지 않습니다
+              중간 점검 질문 점수 — 이 점수가 떨어지는 후보는 채택되지 않습니다
             </span>
           </div>
         )}
