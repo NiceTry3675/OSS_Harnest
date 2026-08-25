@@ -1,0 +1,20 @@
+name: Fly Certificates
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: fly-certs
+  cancel-in-progress: false
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: flyctl certs add api.harnest.p-e.kr --app harnest-api-nicetry3675
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      - run: flyctl certs check api.harnest.p-e.kr --app harnest-api-nicetry3675
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
