@@ -15,6 +15,7 @@ import {
 } from "./index";
 import { mutatePrompt, oneshotPrompt } from "./prompts";
 import {
+  batchOutputTokensFor,
   CallBudgetExceededError,
   CONCISENESS_WEIGHT,
   COVERAGE_WEIGHT,
@@ -22,6 +23,7 @@ import {
   createInitial,
   createScorer,
   gradeResponse,
+  maxOutputTokensFor,
   scoreHoldout,
   withCallBudget,
   type LlmClient,
@@ -643,6 +645,14 @@ describe("createGenerator", () => {
 });
 
 describe("생성 출력 토큰 예산", () => {
+  it("배치 예산은 벤더 최대치(65,536)로 클램프된다 — 초안 30개 × 멀티홉 회귀", () => {
+    // 실측(2026-08-26): batchOutputTokensFor(30×3) = 92,160이 Vertex HTTP 400을 냈다
+    expect(batchOutputTokensFor(90)).toBe(65_536);
+    expect(batchOutputTokensFor(12)).toBe(12_288);
+    expect(batchOutputTokensFor(1)).toBe(8_192);
+    expect(maxOutputTokensFor(20_000)).toBe(40_000);
+    expect(maxOutputTokensFor(50_000)).toBe(65_536);
+  });
 
   it("원샷·변이 호출에 분량 상한 연동 maxOutputTokens가 실린다 — 기본 상한의 조용한 절단 방지", async () => {
     const { problem } = await compile(makeSubmission(6, 8000), mockJudge);

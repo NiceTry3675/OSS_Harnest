@@ -175,11 +175,17 @@ function parseBatch<T>(
   return out;
 }
 
+/** 벤더 공통 안전 출력 토큰 상한 — Vertex/Gemini는 65,537 미만만 받는다
+ *  (실측 2026-08-26: maxOutputTokens 92,160 요청이 HTTP 400 INVALID_ARGUMENT).
+ *  넘치는 예산은 요청 자체를 거부당하므로 여유가 아니라 오류다. */
+export const VENDOR_MAX_OUTPUT_TOKENS = 65_536;
+
 /** 배치 출력 토큰 예산 — 항목 수에 비례한 여유. 명시하지 않으면 클라이언트 기본 상한
  *  (8192 토큰)이 큰 배치의 JSON 배열을 중간에 잘라 형식 오류로 만든다.
- *  상한은 초과분에 과금되지 않는 순수 한도라 넉넉해도 비용 부담이 없다. */
+ *  상한은 초과분에 과금되지 않는 순수 한도라 넉넉해도 비용 부담이 없지만,
+ *  벤더 최대치(VENDOR_MAX_OUTPUT_TOKENS)를 넘으면 요청이 거부되므로 클램프한다. */
 export function batchOutputTokensFor(itemCount: number): number {
-  return Math.max(8192, itemCount * 1024);
+  return Math.min(VENDOR_MAX_OUTPUT_TOKENS, Math.max(8192, itemCount * 1024));
 }
 
 /** 배치 호출 공통 경로 — 본 호출 1회 + 형식 수정 재시도 1회 */
@@ -341,7 +347,9 @@ export function createScorer(problem: HandoverProblem, llm: LlmClient) {
  *  상한(8192 토큰)이 긴 문서를 조용히 잘라, 게이트는 통과하되 내용이 끊긴 문서가 채점된다
  *  (한국어 ≈ 글자당 1토큰 안팎). */
 export function maxOutputTokensFor(lengthCap: number): number {
-  return lengthCap * 2;
+  // 현재 상한(LENGTH_CAP_MAX 20,000 → 40,000토큰)에서는 벤더 최대치에 닿지 않지만,
+  // 상한을 올려도 요청 거부로 번지지 않게 같은 클램프를 적용한다.
+  return Math.min(VENDOR_MAX_OUTPUT_TOKENS, lengthCap * 2);
 }
 
 /** 원샷 생성 — 루프의 라운드 0 기준선. 엔진 슬롯(initial(rng))에 맞춰 rng를 받되 쓰지 않는다 */
