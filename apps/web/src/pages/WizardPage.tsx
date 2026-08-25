@@ -299,9 +299,23 @@ export function WizardPage() {
 
       <div className="row">
         <div className="card grow">
-          <div style={{ marginBottom: 14 }}>
+          <div style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 6 }}>
             <span className="badge">{step + 1} / {questions.length} 단계</span>
             <span className="badge muted">{ROLE_LABEL[q.role]}</span>
+            {entry.devSample ? (
+              <button
+                type="button"
+                className="dev-fill"
+                title="개발 서버에서만 보입니다"
+                onClick={() => {
+                  setError(null);
+                  setDraft((d) => ({ ...d, ...(entry.devSample as Record<string, DraftValue>) }));
+                  setStep(questions.length - 1);
+                }}
+              >
+                예시 채우기
+              </button>
+            ) : null}
           </div>
 
           <form onSubmit={onSubmit}>

@@ -16,6 +16,7 @@ import * as timetable from "@harnest/template-timetable";
 import * as handover from "@harnest/template-handover";
 import type { CompiledGeneric, ExaminerRunGeneric, HoldoutEvaluation } from "./state";
 import type { LlmClient } from "@harnest/template-handover";
+import { DEV_SAMPLES } from "./lib/devSamples";
 import { TimetableGrid } from "./components/TimetableGrid";
 import { HandoverDocView } from "./components/HandoverDocView";
 import {
@@ -85,6 +86,8 @@ export interface TemplateEntry {
     ): Promise<Array<{ question: string; expectedAnswer: string }>>;
   };
   ArtifactView: ComponentType<{ problem: unknown; artifact: unknown }>;
+  /** 개발용 예시 답변(선택) — 개발 서버에서만 노출된다. 프로덕션 빌드에서는 제거된다. */
+  devSample?: Record<string, unknown>;
 }
 
 const timetableEntry: TemplateEntry = {
@@ -109,6 +112,7 @@ const timetableEntry: TemplateEntry = {
       roundDelayMs: 120,
     };
   },
+  devSample: import.meta.env.DEV ? DEV_SAMPLES[timetable.TEMPLATE_ID] : undefined,
   ArtifactView: ({ problem, artifact }) => (
     <TimetableGrid
       problem={problem as timetable.TimetableProblem}
@@ -197,6 +201,7 @@ const handoverEntry: TemplateEntry = {
       roundDelayMs: 0,
     };
   },
+  devSample: import.meta.env.DEV ? DEV_SAMPLES[handover.TEMPLATE_ID] : undefined,
   ArtifactView: ({ artifact }) => <HandoverDocView doc={String(artifact ?? "")} />,
 };
 
