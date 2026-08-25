@@ -74,7 +74,7 @@ function holdoutPhaseRecord(
   if (evaluation !== null) return { status: "scored", evaluation };
   if (error) return { status: "failed", error };
   throw new ProjectExportContractError([
-    { path: `result.holdout.${phase}`, message: "홀드아웃 채점이 아직 끝나지 않았습니다." },
+    { path: `result.holdout.${phase}`, message: "숨긴 질문 채점이 아직 끝나지 않았습니다." },
   ]);
 }
 

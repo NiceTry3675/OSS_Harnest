@@ -9,7 +9,7 @@ function fmt(n: number): string {
 
 function verdict(r: RoundRecord): string {
   if (r.adopted) return "더 나아서 채택";
-  return r.gateRejected ? "필수 관문에서 실격" : "기존 산출물이 더 나음";
+  return r.gateRejected ? "필수 조건을 못 지켜 탈락" : "지금 것이 더 나음";
 }
 
 export function ExperimentTree({ tree }: { tree: readonly RoundRecord[] }) {

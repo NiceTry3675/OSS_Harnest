@@ -127,7 +127,7 @@ const timetableEntry: TemplateEntry = {
   needsModel: false,
   questions: timetable.questions,
   flow: {
-    approval: { pending: "기준 승인", approved: "동결" },
+    approval: { pending: "기준 승인", approved: "잠금" },
     run: "실행",
     result: "결과",
   },
@@ -174,7 +174,7 @@ const handoverEntry: TemplateEntry = {
   needsModel: true,
   questions: handover.questions,
   flow: {
-    approval: { pending: "검증·승인", approved: "동결" },
+    approval: { pending: "점검·승인", approved: "잠금" },
     run: "실행",
     result: "결과",
   },

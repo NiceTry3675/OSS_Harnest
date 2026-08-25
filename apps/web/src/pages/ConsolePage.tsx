@@ -58,7 +58,7 @@ function describeRunError(e: unknown): string {
 
 function holdoutLabel(result: HoldoutEvaluation, phase: string): string {
   return result.gateRejected
-    ? `숨김 검증(${phase}): 분량 게이트 실격 — 점수 미계산`
+    ? `숨긴 질문(${phase}): 분량 조건을 못 지켜 탈락 — 점수 없음`
     : `숨김 케이스(${phase}): ${fmt(result.score)}점`;
 }
 
@@ -371,7 +371,7 @@ export function ConsolePage() {
       <h1>관제실</h1>
       <p className="sub">
         채점 기준은 당신이 승인했고, 실행 중 AI는 이 기준을 변경할 수 없습니다.{" "}
-        <span className="lock-badge">기준 동결</span>{" "}
+        <span className="lock-badge">기준 잠김</span>{" "}
         <span className="mono digest">{compiled.pack.definitionDigest.slice(0, 16)}…</span>
       </p>
 
@@ -429,7 +429,7 @@ export function ConsolePage() {
       <div className="card">
         {checkpoint !== null && (checkpoint.championGuardScore ?? null) !== null && (
           <div>
-            <span className="badge">검증 가드: {fmt(checkpoint.championGuardScore!)}점</span>
+            <span className="badge">중간 점검: {fmt(checkpoint.championGuardScore!)}점</span>
             <span className="hint" style={{ marginLeft: 4 }}>
               비공개 검증 케이스 집계 — 이 점수가 퇴보하는 후보는 채택되지 않습니다
             </span>
@@ -442,19 +442,19 @@ export function ConsolePage() {
             </span>
             {baselineHoldoutError !== null && (
               <span className="hint" style={{ marginLeft: 4 }}>
-                시작 홀드아웃 채점 오류: {baselineHoldoutError}
+                시작할 때 숨긴 질문 채점 오류: {baselineHoldoutError}
               </span>
             )}
           </div>
         )}
         {holdout.baseline === null && baselineHoldoutError !== null && (
           <p className="hint" style={{ marginBottom: 0 }}>
-            시작 홀드아웃 채점 오류: {baselineHoldoutError} (표시용 지표만 누락 — 실행에는 영향 없음)
+            시작할 때 숨긴 질문 채점 오류: {baselineHoldoutError} (보여주는 숫자만 빠졌고 결과에는 영향 없음)
           </p>
         )}
         {finalHoldoutError !== null && (
           <p className="hint" style={{ marginBottom: 0 }}>
-            종료 홀드아웃 채점 오류: {finalHoldoutError} (표시용 지표만 누락 — 실행에는 영향 없음)
+            끝날 때 숨긴 질문 채점 오류: {finalHoldoutError} (보여주는 숫자만 빠졌고 결과에는 영향 없음)
           </p>
         )}
         {callsPerRound > 0 && (
@@ -483,7 +483,7 @@ export function ConsolePage() {
             </button>
           )}
           {status === "done" && !holdoutSettled && (
-            <button disabled>홀드아웃 정리 중…</button>
+            <button disabled>숨긴 질문 채점 중…</button>
           )}
         </div>
       </div>

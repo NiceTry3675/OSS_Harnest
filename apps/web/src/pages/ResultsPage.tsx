@@ -33,7 +33,7 @@ const PROVENANCE_LABEL: Record<ProvenanceType, string> = {
   paused: "일시정지",
   resumed: "재개",
   finished: "완료",
-  plateau_stop: "정체 종료",
+  plateau_stop: "더 나아지지 않아 종료",
   ceiling_stop: "상한 도달 종료",
 };
 
@@ -211,12 +211,12 @@ export function ResultsPage() {
     <div>
       <h1>결과</h1>
       <p className="sub">
-        승인된 기준으로 측정한 결과입니다 — 점수를 먼저 확인한 뒤 산출물을 받으세요.
+        승인한 기준으로 매긴 점수입니다. 점수를 먼저 확인한 뒤 결과물을 받으세요.
       </p>
 
       <div className="card">
         <div style={{ fontSize: 24, fontWeight: 700 }}>
-          원샷 {fmt(baseline)}점 → 루프 {fmt(final)}점{" "}
+          처음 {fmt(baseline)}점 → 고친 뒤 {fmt(final)}점{" "}
           <span
             style={{
               fontSize: 15,
@@ -230,18 +230,18 @@ export function ResultsPage() {
         <div style={{ fontSize: 13, color: "var(--ink-3)", marginTop: 4 }}>
           총 {checkpoint.round}라운드
           {checkpoint.doneReason === "plateau"
-            ? " · 정체로 조기 종료"
+            ? " · 더 나아지지 않아 일찍 끝남"
             : checkpoint.doneReason === "ceiling"
               ? " · 척도 상한(100점) 도달로 조기 종료"
               : ""}
         </div>
         {checkpoint.doneReason === "ceiling" && (
           <p className="hint" style={{ marginTop: 8, marginBottom: 0 }}>
-            척도 상한에 도달해 이 기준으로는 더 측정할 개선이 없습니다. 이른 만점은 대개 개선
-            여력보다 판정 절차의 변별력 부족 신호입니다 — 게이트가 실제로 물리는지, 케이스가
-            산출물 없이도 풀리지 않는지, 채점이 지나치게 관대하지 않은지 점검해 보세요. 홀드아웃을
-            측정했다면 그 점수와의 간극이 좋은 단서입니다. 기준을 조이면 재검증·재승인 후 새
-            실행으로 다시 측정할 수 있습니다.
+            만점에 도달해 이 기준으로는 더 잴 것이 없습니다. 너무 일찍 만점이 나왔다면 대개 잘
+            만들어서가 아니라 기준이 무르다는 뜻입니다 — 반드시 지켜야 할 조건이 실제로 걸리는지,
+            결과물을 안 보고도 답할 수 있는 질문은 아닌지, 채점이 너무 후하지 않은지 살펴보세요.
+            숨긴 질문 점수와 차이가 크다면 좋은 단서입니다. 기준을 조인 뒤 다시 승인하고 새로
+            실행하면 다시 잴 수 있습니다.
           </p>
         )}
         <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -282,12 +282,12 @@ export function ResultsPage() {
             </a>
           )}
           <span style={{ fontSize: 12, color: "var(--ink-3)" }}>
-            입력, 승인된 Pack·검증 근거, 실행 결과·홀드아웃이 같은 JSON 형식으로 로컬 서버
-            ({API_LABEL})에 최대 1 MiB까지 저장됩니다. 벤더 자격 증명과 시험관 내부 산출물은 포함하지
+            입력한 내용, 승인한 기준과 점검 근거, 실행 결과와 숨긴 질문 점수가 하나의 JSON 파일로 서버
+            ({API_LABEL})에 최대 1 MiB까지 저장됩니다. API 키와 점검 과정의 중간 기록은 담기지
             않습니다.
             {saved === "fail" && saveError !== null ? ` — ${saveError}` : ""}
             {exported === "fail" ? " — JSON 기록의 결속을 확인할 수 없습니다." : ""}
-            {!recordReady ? " — 홀드아웃 채점이 끝난 뒤 기록할 수 있습니다." : ""}
+            {!recordReady ? " — 숨긴 질문 채점이 끝난 뒤에 기록할 수 있습니다." : ""}
           </span>
         </div>
       </div>
@@ -295,14 +295,14 @@ export function ResultsPage() {
       {(checkpoint.championGuardScore ?? null) !== null && (
         <div className="card">
           <div style={{ fontSize: 16, fontWeight: 600 }}>
-            검증 가드 — 시작{" "}
+            중간 점검 질문 — 시작{" "}
             {(checkpoint.guardCurve?.[0] ?? null) !== null
               ? `${fmt(checkpoint.guardCurve[0]!)}점`
               : "측정 불가(실격)"}{" "}
             → 종료 {fmt(checkpoint.championGuardScore!)}점
           </div>
           <p className="hint" style={{ marginBottom: 0 }}>
-            매 라운드 집계 점수만 채택의 비퇴보 조건으로 쓴 비공개 검증 케이스입니다 — 개별
+            고칠 때마다 합계 점수만 확인해, 점수가 떨어지지 않았는지 보는 데 쓴 질문입니다 — 개별
             질문·실패 사유는 생성 모델에 전달되지 않았습니다.
           </p>
         </div>
@@ -334,7 +334,7 @@ export function ResultsPage() {
             )}
           </div>
           <p className="hint" style={{ marginBottom: 0 }}>
-            홀드아웃으로 배정된 케이스의 채점 결과는 실행 중 루프에 유입되지 않았습니다 — 시작과
+            숨긴 질문의 채점 결과는 고치는 동안 한 번도 쓰이지 않았습니다 — 시작할 때와
             종료 시에만 측정한 참고 지표입니다.
           </p>
           {(baselineHoldoutError !== null || finalHoldoutError !== null) && (
@@ -350,7 +350,7 @@ export function ResultsPage() {
                 <thead>
                   <tr>
                     <th style={{ textAlign: "left" }}>구분</th>
-                    <th style={{ textAlign: "left" }}>홀드아웃 질문</th>
+                    <th style={{ textAlign: "left" }}>숨긴 질문</th>
                     <th>시작</th>
                     <th>종료</th>
                   </tr>
@@ -377,7 +377,7 @@ export function ResultsPage() {
               </table>
               <p className="hint" style={{ marginBottom: 0 }}>
                 반복은 같은 질문이 가시 세트에도 등장했음을, 신규는 질문 문면이 가시 세트에 없었음을
-                뜻합니다. 질문 반복은 이 산출물 유형의 측정 대상이므로 제거하지 않고 구분해 보고합니다.
+                뜻합니다. 질문이 겹치는 것 자체도 이 결과물에서 재는 대상이라, 지우지 않고 따로 구분해 보여줍니다.
               </p>
             </>
           ) : null}
@@ -385,7 +385,7 @@ export function ResultsPage() {
       )}
 
       <div className="artifact-head">
-        <h2>산출물</h2>
+        <h2>결과물</h2>
         {entry.exportArtifact ? (
           <button className="primary" onClick={downloadArtifact}>
             문서 내려받기
@@ -424,18 +424,18 @@ export function ResultsPage() {
               검증 리포트: 해당 없음(특례)
             </span>
             <span className="badge muted" title={hp.note}>
-              홀드아웃: 해당 없음
+              숨긴 질문: 없음
             </span>
           </>
         ) : (
           <>
             <span className="badge">케이스 실측 채점(저지: {jp.judge.model})</span>
             <span className="badge" title={jp.pairwiseNotice}>
-              채택: 스칼라 엄격 개선 + 가드 비퇴보
+              채택 기준: 점수가 오르고, 중간 점검도 떨어지지 않을 때
             </span>
             {hp.mode === "seeded_split" && (
               <span className="badge" title={hp.note}>
-                가드 {hp.guardCaseIds.length} · 홀드아웃 {hp.holdoutCaseIds.length}케이스(시드 분할)
+                중간 점검 {hp.guardCaseIds.length}개 · 숨긴 질문 {hp.holdoutCaseIds.length}개
               </span>
             )}
             {examinerReport !== null && examinerReport.forDigest === pack.definitionDigest ? (
@@ -454,7 +454,7 @@ export function ResultsPage() {
               caseCounts.ai + caseCounts.aiEdited > 0 ? (
                 <span
                   className="badge"
-                  title={`확인 ${caseCounts.ai} · 수정 ${caseCounts.aiEdited} — 확인된 초안은 승인 시 다이제스트에 결속됨`}
+                  title={`확인 ${caseCounts.ai} · 수정 ${caseCounts.aiEdited} — 확인한 초안은 승인할 때 함께 잠깁니다`}
                 >
                   케이스 출처: AI 초안 {caseCounts.ai + caseCounts.aiEdited}/{caseCounts.total}
                 </span>

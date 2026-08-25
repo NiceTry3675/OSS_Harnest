@@ -72,7 +72,7 @@ export const questions: Question[] = [
     type: "caseList",
     label: "실제로 받았던 질문과, 그때 당신이 한 답을 알려주세요.",
     shortLabel: "질문과 답",
-    help: `한 줄씩 넣으면 됩니다. ${MIN_CASES}~${MAX_CASES}개를 넣을 수 있고, 케이스는 시드로 섞어 피드백(개선 재료) · 검증 가드(과적합 방지) · 홀드아웃(시작·종료 별도 채점)으로 자동 분할됩니다.`,
+    help: `한 줄씩 넣으면 됩니다. ${MIN_CASES}~${MAX_CASES}개를 넣을 수 있고, 질문은 자동으로 세 묶음으로 나뉩니다 — 고치는 데 쓰는 질문, 중간 점검 질문(한쪽으로 치우치지 않게), 숨긴 질문(시작과 끝에만 채점).`,
     nextLabel: "채점 모델 고르기",
     // 케이스 수 상한의 정본은 이 선언 — 위저드는 min/max를 읽어 렌더하고 compile이 재검증한다
     min: MIN_CASES,
@@ -215,7 +215,7 @@ export async function compile(
         scorer: "handover_case_answering",
         params: { visibleCases: visibleCases.length, scale: "0/0.5/1", casesDigest },
         weight: useConciseness ? COVERAGE_WEIGHT : 1.0,
-        label: `문서만 보고 실제 질문에 답할 수 있는가 (피드백 케이스 ${visibleCases.length}개 실측)`,
+        label: `문서만 보고 실제 질문에 답할 수 있는가 (질문 ${visibleCases.length}개로 실제 확인)`,
       },
       // 간결성(선택) — 상한 대비 여유의 결정적 산술. 커버리지와 정면으로 충돌하는 축이라
       // "전부 담으면 만점" 포화를 없앤다. 답변력 0이면 0점(빈 문서 역전 방지, runtime.ts).
@@ -247,14 +247,14 @@ export async function compile(
       judge: { provider: opts.judgeProvider, model: opts.judgeModel },
       // 검증 리포트는 승인 전 요건으로 구현됨(./examiner.ts) — forDigest 결속이라 팩 필드가 아니다
       pairwiseNotice:
-        "미적용 — 검증 가드가 퇴보하지 않고 케이스 집계 스칼라가 엄격히 개선될 때만 채택합니다(SPEC §5.1.1)",
+        "미적용 — 중간 점검 점수가 떨어지지 않고 합계 점수가 이전보다 확실히 오를 때만 채택합니다(SPEC §5.1.1)",
     },
     holdoutPolicy: {
       mode: "seeded_split",
       note:
-        `케이스 ${cases.length}개를 시드로 섞어 피드백 ${visibleCases.length} · 검증 가드 ${guardCases.length} · ` +
-        `홀드아웃 ${holdoutCount}개로 나눕니다. 가드는 집계 점수만 채택의 비퇴보 조건에 쓰이고, ` +
-        `홀드아웃은 실행 시작·종료 시에만 채점됩니다`,
+        `질문 ${cases.length}개를 골고루 섞어 고치는 데 쓰는 질문 ${visibleCases.length} · 중간 점검 ${guardCases.length} · ` +
+        `숨긴 질문 ${holdoutCount}개로 나눕니다. 중간 점검은 합계 점수가 떨어지지 않았는지 볼 때만 쓰이고, ` +
+        `숨긴 질문은 시작할 때와 끝날 때만 채점합니다`,
       guardCaseIds: guardCases.map((c) => c.id),
       holdoutCaseIds: holdoutCases.map((c) => c.id),
       guardTolerance,

@@ -114,7 +114,7 @@ function VerdictBadge({ verdict }: { verdict: ExaminerVerdict }) {
 
 const EXEMPTION_LABEL = {
   examinerReport: "검증 리포트",
-  pairwise: "쌍대 비교",
+  pairwise: "두 개씩 맞대어 비교",
 } as const;
 
 function ExemptionTable({ rows }: { rows: Record<keyof typeof EXEMPTION_LABEL, string> }) {
@@ -350,7 +350,7 @@ export function ApprovalPage() {
         </SealPanel>
 
         <details className="sealed-detail">
-          <summary>동결된 승인 감사 상세 보기</summary>
+          <summary>승인한 기준 자세히 보기</summary>
 
           <h2>채점 기준</h2>
           <table className="grid">
@@ -370,7 +370,7 @@ export function ApprovalPage() {
             </tbody>
           </table>
 
-          <h2>필수 관문</h2>
+          <h2>반드시 지켜야 할 조건</h2>
           {pack.gates.length > 0 ? (
             <ul className="sealed-gates">
               {pack.gates.map((g) => (
@@ -380,7 +380,7 @@ export function ApprovalPage() {
               ))}
             </ul>
           ) : (
-            <p className="hint">이 절차에는 별도의 필수 관문이 없습니다.</p>
+            <p className="hint">이 평가에는 반드시 지켜야 할 조건이 없습니다.</p>
           )}
           <ComplianceNotices notices={compiled.notices} />
 
@@ -391,7 +391,7 @@ export function ApprovalPage() {
                 채점 모델: <strong>{PROVIDER_LABEL[jp.judge.provider]} · {jp.judge.model}</strong>
               </p>
               <p className="hint" style={{ margin: "0 0 12px" }}>
-                쌍대 비교: {jp.pairwiseNotice}
+                두 개씩 맞대어 비교: {jp.pairwiseNotice}
               </p>
             </>
           ) : (
@@ -401,13 +401,13 @@ export function ApprovalPage() {
             </>
           )}
 
-          <h2>케이스 분할</h2>
+          <h2>질문 나누기</h2>
           {hp.mode === "seeded_split" ? (
             <>
               <p style={{ fontSize: 14, margin: "0 0 4px" }}>
-                검증 가드 {hp.guardCaseIds.length}개(비퇴보 허용 오차 ±{hp.guardTolerance}점) ·
-                숨김 검증 {hp.holdoutCaseIds.length}개 — 가드는 집계 점수만 채택 판단에 쓰이고,
-                숨김 검증은 실행 시작·종료 시에만 별도 채점됩니다.
+                중간 점검 질문 {hp.guardCaseIds.length}개(점수가 ±{hp.guardTolerance}점까지
+                떨어지는 것은 허용) · 숨긴 질문 {hp.holdoutCaseIds.length}개 — 중간 점검 질문은
+                합계 점수만 채택 판단에 쓰이고, 숨긴 질문은 시작할 때와 끝날 때만 따로 채점합니다.
               </p>
               <p className="hint" style={{ margin: "0 0 12px" }}>{hp.note}</p>
             </>
@@ -420,7 +420,7 @@ export function ApprovalPage() {
               <h2>케이스 출처</h2>
               <p style={{ fontSize: 14, margin: "0 0 12px" }}>
                 {caseCounts.ai + caseCounts.aiEdited > 0
-                  ? `직접 입력 ${caseCounts.user}개 · AI 초안 확인 ${caseCounts.ai}개 · AI 초안 수정 ${caseCounts.aiEdited}개 — 초안도 당신이 확인한 순간부터 채점 정답으로 동결되었습니다.`
+                  ? `직접 입력 ${caseCounts.user}개 · AI 초안 확인 ${caseCounts.ai}개 · AI 초안 수정 ${caseCounts.aiEdited}개 — 초안도 당신이 확인한 순간부터 채점 기준이 되어 잠겼습니다.`
                   : `전체 ${caseCounts.total}개 직접 입력.`}
               </p>
             </>
@@ -428,20 +428,20 @@ export function ApprovalPage() {
 
           {jp.kind === "case_answering" && entry.examiner ? (
             <>
-              <h2>시험관 검증</h2>
+              <h2>채점 모델 점검</h2>
               {validReport ? (
                 <>
                   <div style={{ marginBottom: 8 }}>
                     종합: <VerdictBadge verdict={examinerReport!.overall} />
                     <span className="hint" style={{ marginLeft: 6 }}>
-                      구동 저지: {PROVIDER_LABEL[examinerReport!.judge.provider]} ·{" "}
+                      점검에 쓴 모델: {PROVIDER_LABEL[examinerReport!.judge.provider]} ·{" "}
                       {examinerReport!.judge.model}
                     </span>
                   </div>
                   <CheckCards checks={examinerReport!.checks} progress="" />
                 </>
               ) : (
-                <p className="hint">현재 다이제스트에 결속된 시험관 검증 기록이 없습니다.</p>
+                <p className="hint">지금 기준에 대한 점검 기록이 없습니다.</p>
               )}
             </>
           ) : null}
@@ -477,7 +477,7 @@ export function ApprovalPage() {
           </tbody>
         </table>
 
-        <h2>필수 관문</h2>
+        <h2>반드시 지켜야 할 조건</h2>
         <ul style={{ margin: 0, paddingLeft: 18, fontSize: 14 }}>
           {pack.gates.map((g) => (
             <li key={g.id}>
@@ -494,9 +494,9 @@ export function ApprovalPage() {
               채점 모델: <strong>{PROVIDER_LABEL[jp.judge.provider]} · {jp.judge.model}</strong>
             </p>
             <p className="hint" style={{ margin: "0 0 6px" }}>
-              이 모델은 판정 절차의 일부로 승인 시 동결됩니다 — 교체하려면 다시 승인해야 합니다.
+              이 모델도 평가 절차의 일부라 승인하면 함께 잠깁니다 — 바꾸려면 다시 승인해야 합니다.
             </p>
-            <p className="hint" style={{ margin: 0 }}>쌍대 비교: {jp.pairwiseNotice}</p>
+            <p className="hint" style={{ margin: 0 }}>두 개씩 맞대어 비교: {jp.pairwiseNotice}</p>
           </>
         ) : (
           <>
@@ -507,11 +507,11 @@ export function ApprovalPage() {
 
         {hp.mode === "seeded_split" ? (
           <>
-            <h2>케이스 분할</h2>
+            <h2>질문 나누기</h2>
             <p style={{ fontSize: 14, margin: "0 0 4px" }}>
-              검증 가드 {hp.guardCaseIds.length}개(비퇴보 허용 오차 ±{hp.guardTolerance}점) ·
-              숨김 검증 {hp.holdoutCaseIds.length}개 — 가드는 집계 점수만 채택 판단에 쓰이고,
-              숨김 검증은 실행 시작·종료 시에만 별도 채점됩니다.
+              중간 점검 질문 {hp.guardCaseIds.length}개(점수가 ±{hp.guardTolerance}점까지
+              떨어지는 것은 허용) · 숨긴 질문 {hp.holdoutCaseIds.length}개 — 중간 점검 질문은
+              합계 점수만 채택 판단에 쓰이고, 숨긴 질문은 시작할 때와 끝날 때만 따로 채점합니다.
             </p>
             <p className="hint" style={{ margin: 0 }}>{hp.note}</p>
           </>
@@ -522,7 +522,7 @@ export function ApprovalPage() {
             <h2>케이스 출처</h2>
             <p style={{ fontSize: 14, margin: 0 }}>
               {caseCounts.ai + caseCounts.aiEdited > 0
-                ? `직접 입력 ${caseCounts.user}개 · AI 초안 확인 ${caseCounts.ai}개 · AI 초안 수정 ${caseCounts.aiEdited}개 — 초안도 당신이 확인한 순간부터 채점 정답으로 동결됩니다.`
+                ? `직접 입력 ${caseCounts.user}개 · AI 초안 확인 ${caseCounts.ai}개 · AI 초안 수정 ${caseCounts.aiEdited}개 — 초안도 당신이 확인한 순간부터 채점 기준이 되어 잠깁니다.`
                 : `전체 ${caseCounts.total}개 직접 입력.`}
             </p>
           </>
@@ -530,10 +530,11 @@ export function ApprovalPage() {
 
         {jp.kind === "case_answering" && entry.examiner ? (
           <>
-            <h2>시험관 검증</h2>
+            <h2>채점 모델 점검</h2>
             <p style={{ fontSize: 14, margin: "0 0 10px" }}>
-              승인 전에 채점 모델 자체를 시험합니다: 같은 문서를 다시 채점했을 때의 안정성,
-              그리고 날조·아첨 오염 응답에 대한 내성. 기준이 바뀌면 자동으로 다시 검증합니다.
+              승인하기 전에 채점 모델이 믿을 만한지 확인합니다. 같은 글을 다시 채점해도 같은
+              점수가 나오는지, 그럴듯하게 꾸며낸 답이나 칭찬만 늘어놓은 답에 속지 않는지
+              봅니다. 기준을 고치면 자동으로 다시 확인합니다.
             </p>
 
             {!validReport ? (
@@ -553,7 +554,7 @@ export function ApprovalPage() {
                 <div style={{ marginBottom: 8 }}>
                   종합: <VerdictBadge verdict={examinerReport!.overall} />
                   <span className="hint" style={{ marginLeft: 6 }}>
-                    구동 저지: {PROVIDER_LABEL[examinerReport!.judge.provider]} ·{" "}
+                    점검에 쓴 모델: {PROVIDER_LABEL[examinerReport!.judge.provider]} ·{" "}
                     {examinerReport!.judge.model}
                   </span>
                 </div>
@@ -561,7 +562,7 @@ export function ApprovalPage() {
                 <div style={{ marginTop: 10 }}>
                   {reportFailed ? (
                     <p className="error" style={{ margin: "0 0 8px" }}>
-                      검증에 실패한 기준은 동결할 수 없습니다 — 기준을 수정하면 자동으로 다시
+                      점검을 통과하지 못한 기준은 잠글 수 없습니다 — 기준을 수정하면 자동으로 다시
                       검증됩니다.
                     </p>
                   ) : null}
@@ -590,7 +591,7 @@ export function ApprovalPage() {
                 onClick={approve}
                 disabled={running || blockers.length > 0}
               >
-                승인하고 동결
+                승인하고 잠그기
               </button>
               <button onClick={() => navigate("/wizard")}>수정하러 가기</button>
             </div>
