@@ -8,6 +8,7 @@ import { Link, useNavigate } from "react-router-dom";
 import type { Question } from "@harnest/contracts";
 import type { LlmClient } from "@harnest/template-handover";
 import { getTemplate } from "../templates";
+import { readVoice, voiceQuestions } from "../lib/templateVoice";
 import { WizardBlueprint } from "../components/WizardBlueprint";
 import { ActivityConsole } from "../components/ActivityConsole";
 import { appendStream, clearStream, endStream, withActivityLog } from "../lib/activityLog";
@@ -180,7 +181,20 @@ export function WizardPage() {
   } = useProject();
   const navigate = useNavigate();
   const entry = getTemplate(templateId);
-  const questions = entry?.questions ?? [];
+  /** 0단계에서 만든 템플릿으로 들어왔다면 그 어휘로 묻는다 — 묻는 칸과 검증은 그대로다 */
+  const voice = readVoice(savedAnswers);
+  const questions = useMemo(
+    () => (entry === null ? [] : voiceQuestions(entry.questions, voice)),
+    [entry, voice],
+  );
+  const builtName = voice?.name ?? null;
+  const builtGoal = voice !== null && voice.goal !== "" ? voice.goal : null;
+  /** 0단계 빌더가 정한 확인 방향 — 초안에만 쓰이고 답변 맵에는 실리지 않는다 */
+  const questionFocus = Array.isArray(savedAnswers.questionFocus)
+    ? (savedAnswers.questionFocus as unknown[]).filter(
+        (item): item is string => typeof item === "string",
+      )
+    : undefined;
   /** 화면 한 장에 함께 묻는 질문 묶음 — sameStep인 질문은 앞 묶음에 붙는다 */
   const stepGroups = useMemo(() => {
     const groups: Question[][] = [];
@@ -529,6 +543,8 @@ export function WizardPage() {
         Math.min(assistCount, remaining),
         withActivityLog(client, "자료를 읽고 질문을 뽑는 중"),
         assist.difficulty ? assistDifficulty : undefined,
+        // 0단계에서 정한 확인 방향이 있으면 그쪽으로 뽑는다
+        questionFocus,
       );
       if (assistChoice !== "mock") {
         // 실패한 자격 증명이 기존의 정상 값을 덮지 않도록 성공한 뒤에만 저장한다.
@@ -655,6 +671,14 @@ export function WizardPage() {
               </button>
             ) : null}
           </div>
+
+          {builtName !== null ? (
+            <div className="built-mark">
+              <span className="badge">내가 만든 템플릿</span>
+              <b>{builtName}</b>
+              {builtGoal !== null ? <span>“{builtGoal}”</span> : null}
+            </div>
+          ) : null}
 
           <h2 className="q-big">{q.label}</h2>
           {q.help ? <p className="q-help">{q.help}</p> : null}

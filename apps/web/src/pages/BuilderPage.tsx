@@ -10,7 +10,7 @@
 
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { TEMPLATES } from "../templates";
+import { BUILDABLE_TEMPLATES, TEMPLATES, planChoices } from "../templates";
 import { useProject } from "../state";
 import { setFlowStep } from "../lib/flowStep";
 import { appendStream, clearStream, endStream, withActivityLog } from "../lib/activityLog";
@@ -24,6 +24,7 @@ import {
   setByoCredential,
 } from "../lib/llm";
 import { planTemplate, type TemplatePlan } from "../lib/templatePlan";
+import { saveTemplate } from "../lib/savedTemplates";
 
 /** 구성을 만드는 동안 지나가는 마디 */
 const PHASES = [
@@ -48,7 +49,6 @@ export function BuilderPage() {
   const [phase, setPhase] = useState(-1);
   const [plan, setPlan] = useState<TemplatePlan | null>(null);
   const [madeFor, setMadeFor] = useState("");
-  const [newStep, setNewStep] = useState("");
   const [credential, setCredential] = useState(() => getByoCredential("openai") ?? "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -81,7 +81,7 @@ export function BuilderPage() {
       const made = await planTemplate(
         llm,
         trimmed,
-        TEMPLATES.map((t) => ({ id: t.id, name: t.name, description: t.description })),
+        planChoices(BUILDABLE_TEMPLATES),
       );
       setByoCredential("openai", credential.trim());
       setPhase(PHASES.length);
@@ -108,10 +108,21 @@ export function BuilderPage() {
 
   const startRun = () => {
     if (!plan) return;
+    // 고친 상태 그대로 보관함에 남긴다 — 홈에서 다시 꺼내 쓸 수 있다
+    saveTemplate(plan, madeFor);
     reset();
     setTemplateId(plan.templateId);
     // 모델이 정한 값을 위저드 기본값으로 넘긴다 — 사용자가 그 화면에서 고칠 수 있다
-    setAnswers({ lengthCap: plan.lengthCap, conciseness: plan.useConciseness });
+    setAnswers({
+      lengthCap: plan.lengthCap,
+      conciseness: plan.useConciseness,
+      // 확인 방향은 초안을 뽑을 때만 쓰인다 — compile은 이 키를 읽지 않는다
+      questionFocus: plan.questionFocus,
+      // 어떤 템플릿으로 들어왔는지 — 위저드가 머리에 달고 있는다. compile은 읽지 않는다.
+      builtName: plan.name,
+      builtGoal: madeFor,
+      builtStages: plan.stages,
+    });
     navigate("/wizard");
   };
 
@@ -254,50 +265,36 @@ export function BuilderPage() {
               <div className="builder-col">
                 <section className="builder-block">
                   <h3>
-                    진행 단계 <span className="builder-count">{plan.steps.length}</span>
+                    진행 단계 <span className="builder-count">{plan.stages.length}</span>
                   </h3>
+                  <p className="builder-note">
+                    이 절차가 밟는 칸입니다. 각 칸이 실제로 하는 일은 절차가 정하고, 부르는
+                    이름은 목표에 맞춰 바꿀 수 있습니다.
+                  </p>
                   <ol className="builder-steps">
-                    {plan.steps.map((step, i) => (
-                      <li key={step}>
+                    {plan.stages.map((stage, i) => (
+                      <li key={stage.id}>
                         <i>{i + 1}</i>
-                        <span>{step}</span>
-                        <button
-                          type="button"
-                          aria-label={`${step} 단계 빼기`}
-                          onClick={() =>
-                            setPlan({ ...plan, steps: plan.steps.filter((s) => s !== step) })
+                        <input
+                          value={stage.label}
+                          aria-label={`${i + 1}번째 단계 이름`}
+                          onChange={(e) =>
+                            setPlan({
+                              ...plan,
+                              stages: plan.stages.map((item) =>
+                                item.id === stage.id ? { ...item, label: e.target.value } : item,
+                              ),
+                            })
                           }
-                        >
-                          빼기
-                        </button>
+                        />
+                        {stage.title !== undefined ? (
+                          <span className="builder-asks" title={stage.title}>
+                            {stage.title}
+                          </span>
+                        ) : null}
                       </li>
                     ))}
                   </ol>
-                  <div className="builder-add">
-                    <input
-                      value={newStep}
-                      placeholder="단계를 더하려면 이름을 적으세요"
-                      onChange={(e) => setNewStep(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key !== "Enter") return;
-                        e.preventDefault();
-                        const name = newStep.trim();
-                        if (name === "" || plan.steps.includes(name)) return;
-                        setPlan({ ...plan, steps: [...plan.steps, name] });
-                        setNewStep("");
-                      }}
-                    />
-                    <button
-                      type="button"
-                      disabled={newStep.trim() === "" || plan.steps.includes(newStep.trim())}
-                      onClick={() => {
-                        setPlan({ ...plan, steps: [...plan.steps, newStep.trim()] });
-                        setNewStep("");
-                      }}
-                    >
-                      더하기
-                    </button>
-                  </div>
                 </section>
               </div>
             </div>
@@ -306,12 +303,10 @@ export function BuilderPage() {
               <button type="button" className="primary builder-go" onClick={startRun}>
                 이 템플릿으로 시작
               </button>
-              {template ? (
-                <span className="hint">
-                  「{template.name}」 절차로 진행합니다. 분량과 채점 설정은 다음 화면에 채워지고,
-                  승인 전에 직접 고칠 수 있습니다.
-                </span>
-              ) : null}
+              <span className="hint">
+                {template?.builderSummary ?? ""} 분량과 채점 설정은 다음 화면에 채워지고, 승인 전에
+                직접 고칠 수 있습니다.
+              </span>
             </footer>
           </div>
         </div>

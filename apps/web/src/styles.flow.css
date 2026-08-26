@@ -682,3 +682,39 @@ label.dropzone input[type="file"] { display: none; }
 }
 .builder-foot .builder-go { margin-top: 0; }
 .builder-foot .hint { flex: 1; min-width: 220px; margin: 0; }
+
+/* ── 내가 만든 템플릿 카드 — 제공된 카드와 같은 외형을 쓴다 ── */
+.template-card.is-saved input { font-size: var(--t-h2); font-weight: 700; }
+.template-acts { display: flex; gap: var(--s-2); flex-wrap: wrap; margin-top: auto; }
+.template-acts button:not(.primary) { height: 44px; padding: 0 16px; font-size: var(--t-sm); }
+
+/* 0단계에서 만든 템플릿으로 들어왔음을 위저드 머리에 남긴다 */
+.built-mark {
+  display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap;
+  margin-bottom: var(--s-4); padding: 10px var(--s-4);
+  border-radius: var(--radius-sm); border: 1px solid var(--accent);
+  background: var(--accent-soft); font-size: var(--t-sm);
+}
+.built-mark b { font-weight: 800; letter-spacing: -0.01em; }
+.built-mark > span:last-child { color: var(--ink-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 만든 템플릿의 단계 — 이름은 고칠 수 있고, 그 칸이 실제로 묻는 말은 아래 붙는다 */
+.builder-note { margin: -4px 0 var(--s-3); color: var(--ink-3); font-size: var(--t-xs); line-height: 1.6; }
+.builder-steps li { gap: var(--s-2); padding: 7px 10px 7px var(--s-3); }
+.builder-steps li input {
+  flex: 0 1 auto; width: 9.5em; min-width: 0; padding: 5px 8px;
+  border: 1px solid transparent; border-radius: 8px;
+  background: transparent; color: inherit; font: inherit; font-weight: 700;
+}
+.builder-steps li input:hover { border-color: var(--line); }
+.builder-steps li input:focus {
+  flex: 1 1 auto; border-color: var(--accent); background: var(--surface); outline: none;
+}
+/* 그 칸이 실제로 묻는 말 — 이름 옆에 붙여 두어야 이름만 보고 착각하지 않는다 */
+.builder-asks {
+  flex: 1 1 0; min-width: 0; text-align: right; color: var(--ink-3);
+  font-size: var(--t-xs); line-height: 1.4;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* 줄 간격은 카드의 flex gap이 잡는다 — 따로 margin을 주면 이 카드만 키가 커진다 */
+.template-stages { margin: 0; color: var(--ink-3); font-size: var(--t-xs); line-height: 1.6; }
