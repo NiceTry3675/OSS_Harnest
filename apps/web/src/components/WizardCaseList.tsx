@@ -27,6 +27,19 @@ function hiddenCount(n: number): number {
   return n === 0 ? 0 : Math.max(1, Math.floor(n / 3));
 }
 
+/** 펼쳐 둘 쌍 — 확인이 필요한 것과 손으로 펼친 것만 편집면을 연다 */
+function useOpenRows() {
+  const [opened, setOpened] = useState<ReadonlySet<number>>(new Set());
+  const toggle = (i: number) =>
+    setOpened((current) => {
+      const next = new Set(current);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  return { opened, toggle };
+}
+
 export function WizardCaseList({
   pairs,
   minPairs,
@@ -38,6 +51,7 @@ export function WizardCaseList({
   maxPairs: number;
   onChange: (next: CasePair[]) => void;
 }) {
+  const { opened, toggle } = useOpenRows();
   const [q, setQ] = useState("");
   const [a, setA] = useState("");
   const qRef = useRef<HTMLTextAreaElement>(null);
@@ -147,7 +161,11 @@ export function WizardCaseList({
                 </div>
               ) : null}
 
-              <div className={`q-item${isHidden ? " is-hidden" : ""}`}>
+              <div
+                className={`q-item${isHidden ? " is-hidden" : ""}${
+                  opened.has(i) || p.needsConfirm ? "" : " is-folded"
+                }`}
+              >
                 <div className="q-top">
                   <span className="q-no">{i + 1}</span>
                   {isHidden ? <span className="badge muted">숨김</span> : null}
@@ -158,12 +176,22 @@ export function WizardCaseList({
                   ) : p.provenance === "ai_edited" ? (
                     <span className="badge muted">AI 초안·수정</span>
                   ) : null}
+                  {/* 접혔을 때는 질문이 제목 노릇을 한다 — 무엇에 관한 쌍인지 한 줄로 안다 */}
+                  {!p.needsConfirm && !opened.has(i) ? (
+                    <button type="button" className="q-peek" onClick={() => toggle(i)}>
+                      {p.question.trim() || "질문이 비어 있습니다"}
+                    </button>
+                  ) : null}
                   <span className="q-acts">
                     {p.needsConfirm ? (
                       <button type="button" className="primary" onClick={() => confirm(i)}>
                         확인
                       </button>
-                    ) : null}
+                    ) : (
+                      <button type="button" onClick={() => toggle(i)}>
+                        {opened.has(i) ? "접기" : "수정"}
+                      </button>
+                    )}
                     <button
                       type="button"
                       aria-label={`${i + 1}번째 질문 지우기`}
@@ -174,6 +202,8 @@ export function WizardCaseList({
                   </span>
                 </div>
 
+                {opened.has(i) || p.needsConfirm ? (
+                  <>
                 <div className="q-fields">
                   <div className="pair-field">
                     <label htmlFor={`edit-q-${i}`}>질문</label>
@@ -227,6 +257,8 @@ export function WizardCaseList({
                       </div>
                     ))}
                   </div>
+                ) : null}
+                  </>
                 ) : null}
               </div>
             </div>

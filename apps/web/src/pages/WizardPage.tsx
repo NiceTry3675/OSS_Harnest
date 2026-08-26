@@ -253,7 +253,8 @@ export function WizardPage() {
   const [assistChoice, setAssistChoice] = useState<JudgeChoice>("openai");
   const [assistBusy, setAssistBusy] = useState(false);
   // 클릭 1회에 요청할 초안 개수 — 남은 슬롯까지 자유롭게 고른다(호출은 개수와 무관하게 클릭당 1회)
-  const [assistCount, setAssistCount] = useState(3);
+  // 숨긴 질문이 생기려면 쌍이 최소 4개는 있어야 한다 — 한 번에 그만큼 만들어 둔다
+  const [assistCount, setAssistCount] = useState(4);
   // 초안 난이도 — 값의 의미는 템플릿의 difficulty 선언이 소유한다
   const [assistDifficulty, setAssistDifficulty] = useState(
     () => entry?.caseAssist?.difficulty?.defaultValue ?? 1,
