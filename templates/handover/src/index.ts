@@ -7,7 +7,12 @@ import type {
   CaseDef, EvaluationPack, InterviewSubmission, JudgeProvider, LoopSpec, Question,
 } from "@harnest/contracts";
 import { digestScope, sha256Canonical } from "@harnest/contracts";
-import { hardLengthCapFor, MAX_LENGTH_OVERFLOW_PENALTY } from "./length";
+import {
+  hardLengthCapFor,
+  LENGTH_POLICY,
+  type LengthPolicy,
+  MAX_LENGTH_OVERFLOW_PENALTY,
+} from "./length";
 import { CONCISENESS_WEIGHT, COVERAGE_WEIGHT } from "./runtime";
 
 export const TEMPLATE_ID = "handover";
@@ -30,9 +35,9 @@ export const LENGTH_CAP_MAX = 20_000;
 export const LENGTH_CAP_DEFAULT = 8_000;
 
 /** 실행 1회(라운드 0 + 루프 + 홀드아웃 2회 채점)의 모델 호출 예산 (SPEC §5.2).
- *  배치 채점 1회는 최악 4콜(responder+grader+형식 재시도 각 1회)이다. 피드백·가드가 별도
- *  배치이므로 라운드 0+8라운드에서 전부 발생해도 (8+1)×(1+4+4) + 2×4 = 89회다.
- *  120은 정상 실행에서 절대 걸리지 않는 백스톱이다. */
+ *  배치 채점 1회는 최악 4콜(responder+grader+형식 재시도 각 1회)이다. 라운드 0은
+ *  생성 1+공개 4+가드 4, 개선 8회는 전략 선택·형식 재시도 2+생성 1+공개 4+가드 4,
+ *  홀드아웃 2회는 각 4콜이므로 최악 105회다. 120은 정상 실행에서 걸리지 않는 백스톱이다. */
 export const MAX_CALLS_PER_RUN = 120;
 
 export interface HandoverProblem {
@@ -46,6 +51,8 @@ export interface HandoverProblem {
   holdoutCases: CaseDef[];
   /** 사용자가 정한 권장 분량 상한(자) — 25% 초과부터 hard gate */
   lengthCap: number;
+  /** 저장 승인본의 채점 의미를 런타임 scorer 구현과 결속한다. */
+  lengthPolicy: LengthPolicy;
   /** 간결성 가점 사용 여부 — 켜면 커버리지 0.8 + 간결성 0.2 가중(./runtime.ts).
    *  criteria 배열을 바꾸므로 다이제스트에 자동 결속된다. */
   useConciseness: boolean;
@@ -211,6 +218,7 @@ export async function compile(
     guardCases,
     holdoutCases,
     lengthCap,
+    lengthPolicy: LENGTH_POLICY,
     useConciseness,
   };
   const hardLengthCap = hardLengthCapFor(lengthCap);
@@ -222,8 +230,13 @@ export async function compile(
       {
         id: "case_answerability",
         kind: "case_answering",
-        scorer: "handover_case_answering",
-        params: { visibleCases: visibleCases.length, scale: "0/0.5/1", casesDigest },
+        scorer: "handover_case_answering_v2",
+        params: {
+          visibleCases: visibleCases.length,
+          scale: "0/0.5/1",
+          casesDigest,
+          lengthPolicy: LENGTH_POLICY,
+        },
         weight: useConciseness ? COVERAGE_WEIGHT : 1.0,
         label: "답변 가능성",
       },
@@ -234,10 +247,11 @@ export async function compile(
             {
               id: "conciseness",
               kind: "deterministic" as const,
-              scorer: "length_headroom",
+              scorer: "length_headroom_v2",
               params: {
                 maxChars: lengthCap,
                 hardMaxChars: hardLengthCap,
+                lengthPolicy: LENGTH_POLICY,
               },
               weight: CONCISENESS_WEIGHT,
               label: `간결성 (권장 ${lengthCap.toLocaleString()}자 이내 가점 — 초과 시 별도 감점)`,
@@ -249,11 +263,12 @@ export async function compile(
       {
         id: "length_cap",
         kind: "deterministic",
-        scorer: "length_within",
+        scorer: "length_soft_target_hard_cap_v1",
         params: {
           maxChars: hardLengthCap,
           softMaxChars: lengthCap,
           maxOverflowPenalty: MAX_LENGTH_OVERFLOW_PENALTY,
+          lengthPolicy: LENGTH_POLICY,
         },
         effect: "reject",
         label: `최대 분량 ${hardLengthCap.toLocaleString()}자 이하 (권장 ${lengthCap.toLocaleString()}자 초과 시 점진 감점)`,
@@ -287,6 +302,7 @@ export async function compile(
     maxRounds: 8,
     plateauRounds: 4,
     adoptionRule: "scalar_strict",
+    feedbackMode: "recent_public_experiments_v1",
     seed: parseInt(definitionDigest.slice(0, 8), 16),
   };
 

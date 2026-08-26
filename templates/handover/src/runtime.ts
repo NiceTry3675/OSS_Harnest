@@ -11,21 +11,25 @@ import {
   CallBudgetExceededError,
   GradeFormatError,
   type CaseDef,
+  type ExperimentStrategy,
   type JudgeProvider,
   type ScoreResult,
 } from "@harnest/contracts";
 import type { GeneratorFeedback } from "@harnest/loop-engine";
 import type { HandoverDoc, HandoverProblem } from "./index";
-import { hardLengthCapFor, lengthOverflowPenalty } from "./length";
+import { assertCurrentLengthPolicy, hardLengthCapFor, lengthOverflowPenalty } from "./length";
 import {
   graderPrompt,
   graderRetryPrompt,
   gradersPrompt,
   gradersRetryPrompt,
+  HANDOVER_STRATEGIES,
   mutatePrompt,
   oneshotPrompt,
   respondersPrompt,
   respondersRetryPrompt,
+  strategyPrompt,
+  strategyRetryPrompt,
   type GraderItem,
 } from "./prompts";
 
@@ -64,6 +68,13 @@ export type HoldoutScoreResult =
 
 export { CallBudgetExceededError, GradeFormatError };
 
+export class StrategyFormatError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StrategyFormatError";
+  }
+}
+
 /** 호출 예산 백스톱 — 예산을 소진하면 이후 호출을 CallBudgetExceededError로 차단한다.
  *  판정 의미에는 관여하지 않는 순수 계수 래퍼이며, 정상 실행에서는 절대 걸리지 않아야 한다. */
 export function withCallBudget(llm: LlmClient, budget: number): LlmClient {
@@ -83,6 +94,37 @@ export function withoutCodeFence(raw: string): string {
   const trimmed = raw.trim();
   const fenced = trimmed.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i);
   return (fenced?.[1] ?? trimmed).trim();
+}
+
+export function parseStrategy(
+  raw: string,
+  blockedStrategyKeys: readonly string[] = [],
+): ExperimentStrategy {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(withoutCodeFence(raw));
+  } catch {
+    throw new StrategyFormatError("수정 전략 출력 형식 오류 — 유효한 JSON 객체가 아닙니다.");
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new StrategyFormatError("수정 전략 출력 형식 오류 — JSON 객체가 필요합니다.");
+  }
+  const value = parsed as Record<string, unknown>;
+  const allowed = new Set(HANDOVER_STRATEGIES.map((strategy) => strategy.key));
+  if (typeof value.key !== "string" || !allowed.has(value.key as typeof HANDOVER_STRATEGIES[number]["key"])) {
+    throw new StrategyFormatError("수정 전략 출력 형식 오류 — 지원하는 전략 key가 아닙니다.");
+  }
+  if (blockedStrategyKeys.includes(value.key)) {
+    throw new StrategyFormatError(`반복 실패한 수정 전략(${value.key})은 다시 선택할 수 없습니다.`);
+  }
+  if (
+    typeof value.summary !== "string" ||
+    value.summary.trim().length === 0 ||
+    value.summary.length > 500
+  ) {
+    throw new StrategyFormatError("수정 전략 출력 형식 오류 — summary는 500자 이하의 설명이어야 합니다.");
+  }
+  return { key: value.key, summary: value.summary.trim() };
 }
 
 function parseGrade(raw: string): { score: number; why: string } {
@@ -298,6 +340,7 @@ const round1 = (x: number): number => Math.round(x * 10) / 10;
  *  + 검증 가드 집계. 가드는 별도 배치로 채점하고 집계 점수만 반환한다 — 개별 트레이스는
  *  violations에 싣지 않으므로 Generator 피드백으로 흘러갈 수 없다. */
 export function createScorer(problem: HandoverProblem, llm: LlmClient) {
+  assertCurrentLengthPolicy(problem);
   return async (doc: HandoverDoc): Promise<ScoreResult> => {
     const gateViolation = lengthGateViolation(problem, doc);
     if (gateViolation !== null) {
@@ -359,8 +402,10 @@ export function createScorer(problem: HandoverProblem, llm: LlmClient) {
 }
 
 export {
+  assertCurrentLengthPolicy,
   HARD_LENGTH_OVERFLOW_RATIO,
   hardLengthCapFor,
+  LENGTH_POLICY,
   lengthOverflowPenalty,
   MAX_LENGTH_OVERFLOW_PENALTY,
 } from "./length";
@@ -376,6 +421,7 @@ export function maxOutputTokensFor(lengthCap: number): number {
 
 /** 원샷 생성 — 루프의 라운드 0 기준선. 엔진 슬롯(initial(rng))에 맞춰 rng를 받되 쓰지 않는다 */
 export function createInitial(problem: HandoverProblem, llm: LlmClient) {
+  assertCurrentLengthPolicy(problem);
   return async (_rng?: () => number): Promise<HandoverDoc> =>
     (
       await llm.complete(oneshotPrompt(problem), {
@@ -385,12 +431,49 @@ export function createInitial(problem: HandoverProblem, llm: LlmClient) {
     ).trim();
 }
 
-/** 변이 Generator — 엔진이 넘겨주는 피드백(가시 트레이스)이 수정의 재료 */
-export function createGenerator(problem: HandoverProblem, llm: LlmClient) {
+/** 전략 선택기 — 공개 실험 기억을 보고 후보를 쓰기 전에 이번 수정 방식을 선언한다. */
+export function createStrategyPlanner(problem: HandoverProblem, llm: LlmClient) {
+  assertCurrentLengthPolicy(problem);
   return async (
     champion: HandoverDoc,
     _rng: () => number,
     feedback: GeneratorFeedback,
+  ): Promise<ExperimentStrategy> => {
+    const blocked = feedback.blockedStrategyKeys ?? [];
+    const first = await llm.complete(strategyPrompt(problem, champion, feedback), {
+      temperature: 0.3,
+      maxOutputTokens: 512,
+    });
+    try {
+      return parseStrategy(first, blocked);
+    } catch (error) {
+      if (!(error instanceof StrategyFormatError)) throw error;
+    }
+    const retried = await llm.complete(
+      strategyRetryPrompt(problem, champion, feedback, first),
+      { temperature: 0, maxOutputTokens: 512 },
+    );
+    try {
+      return parseStrategy(retried, blocked);
+    } catch (error) {
+      if (error instanceof StrategyFormatError) {
+        throw new StrategyFormatError(
+          `수정 전략 출력 형식 오류 — 형식 수정 요청 1회 후에도 사용할 수 없습니다. ${error.message}`,
+        );
+      }
+      throw error;
+    }
+  };
+}
+
+/** 변이 Generator — 엔진이 넘겨주는 피드백(가시 트레이스)과 선언된 전략이 수정의 재료 */
+export function createGenerator(problem: HandoverProblem, llm: LlmClient) {
+  assertCurrentLengthPolicy(problem);
+  return async (
+    champion: HandoverDoc,
+    _rng: () => number,
+    feedback: GeneratorFeedback,
+    strategy?: ExperimentStrategy,
   ): Promise<HandoverDoc> =>
     (
       await llm.complete(
@@ -400,6 +483,9 @@ export function createGenerator(problem: HandoverProblem, llm: LlmClient) {
           feedback.championScore,
           feedback.championViolations,
           feedback.round,
+          feedback.previousPublicAttempt,
+          strategy,
+          feedback.recentPublicExperiments,
         ),
         { temperature: 0.7, maxOutputTokens: maxOutputTokensFor(problem.lengthCap) },
       )
@@ -412,6 +498,7 @@ export async function scoreHoldout(
   doc: HandoverDoc,
   llm: LlmClient,
 ): Promise<HoldoutScoreResult> {
+  assertCurrentLengthPolicy(problem);
   const gateViolation = lengthGateViolation(problem, doc);
   if (gateViolation !== null) {
     return {
@@ -442,5 +529,6 @@ export function normalizeQuestion(question: string): string {
 /** 라운드당 예상 LLM 콜 수 — 관제실 비용 안내용.
  *  배치 채점으로 케이스 수와 무관하다: 생성 1 + 피드백 배치 2 (+ 가드 배치 2). */
 export function estimateCallsPerRound(problem: HandoverProblem): number {
-  return problem.guardCases.length > 0 ? 5 : 3;
+  // 전략 선택 1 + 문서 생성 1 + 공개 채점 2 (+ 가드 채점 2). 전략 형식 재시도는 예외 경로다.
+  return problem.guardCases.length > 0 ? 6 : 4;
 }

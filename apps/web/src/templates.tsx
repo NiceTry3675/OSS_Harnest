@@ -6,6 +6,7 @@ import type { ComponentType } from "react";
 import type {
   ExaminerCheckResult,
   ExaminerReport,
+  ExperimentStrategy,
   InterviewSubmission,
   JudgeProvider,
   Question,
@@ -32,10 +33,16 @@ import {
 
 export interface TemplateRuntime {
   scorer: (artifact: unknown) => ScoreResult | Promise<ScoreResult>;
+  planStrategy?: (
+    champion: unknown,
+    rng: () => number,
+    feedback: GeneratorFeedback,
+  ) => ExperimentStrategy | Promise<ExperimentStrategy>;
   generate: (
     champion: unknown,
     rng: () => number,
     feedback: GeneratorFeedback,
+    strategy?: ExperimentStrategy,
   ) => unknown | Promise<unknown>;
   initial: (rng: () => number) => unknown | Promise<unknown>;
   /** 라운드 0과 종료 시에만 호출할 것 — 결과는 루프 판단에 유입 금지(SPEC §3 원칙 7) */
@@ -244,11 +251,14 @@ const handoverEntry: TemplateEntry = {
     // 실행 1회 예산은 런타임 인스턴스 단위로 계수한다 — 라운드 0·루프·홀드아웃이 모두 포함된다
     const budgeted = handover.withCallBudget(llm, handover.MAX_CALLS_PER_RUN);
     const scorer = handover.createScorer(problem, budgeted);
+    const planStrategy = handover.createStrategyPlanner(problem, budgeted);
     const generate = handover.createGenerator(problem, budgeted);
     return {
       scorer: (a) => scorer(a as handover.HandoverDoc),
-      generate: (champ, rng, feedback) =>
-        generate(champ as handover.HandoverDoc, rng, feedback),
+      planStrategy: (champ, rng, feedback) =>
+        planStrategy(champ as handover.HandoverDoc, rng, feedback),
+      generate: (champ, rng, feedback, strategy) =>
+        generate(champ as handover.HandoverDoc, rng, feedback, strategy),
       initial: handover.createInitial(problem, budgeted),
       scoreHoldout: (artifact) =>
         handover.scoreHoldout(problem, artifact as handover.HandoverDoc, budgeted),

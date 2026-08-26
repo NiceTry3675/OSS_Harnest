@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { CurveChart } from "./CurveChart";
+import { CurveChart, scoreDomainFloor } from "./CurveChart";
 import { ExperimentTree } from "./ExperimentTree";
 import { IntroTour } from "./IntroTour";
 import { ScoreHero } from "./ScoreHero";
@@ -16,6 +16,18 @@ describe("관제실 빈 상태와 단일 기준점", () => {
     expect(ceiling).toContain("<svg");
     expect(ceiling).toContain("시작 100점");
     expect(ceiling).toContain("<circle");
+  });
+
+  it("첫 점수를 5점 단위로 내림한 값을 그래프 바닥으로 쓴다", () => {
+    expect(scoreDomainFloor(67.3)).toBe(65);
+    expect(scoreDomainFloor(65)).toBe(65);
+    expect(scoreDomainFloor(3.2)).toBe(0);
+    expect(scoreDomainFloor(100)).toBe(95);
+
+    const html = renderToStaticMarkup(<CurveChart curve={[67.3, 68.1]} />);
+    expect(html).toContain("표시 범위 65–100점");
+    expect(html).toContain("표시 범위 65점부터 100점");
+    expect(html).toContain("시작 67.3점");
   });
 
   it("라운드 기록이 비어 있어도 실행 상태를 추측하지 않는다", () => {

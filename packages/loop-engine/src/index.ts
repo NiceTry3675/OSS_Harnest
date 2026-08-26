@@ -13,7 +13,24 @@
  *  - RNG는 시드 기반이며 상태를 체크포인트에 보존한다(로컬 변이·재개 동일 수열).
  *    비결정적 외부 모델 출력의 재현까지 보장하지 않는다. */
 
-import type { EvaluationPack, LoopCheckpoint, LoopSpec, ScoreResult } from "@harnest/contracts";
+import type {
+  EvaluationPack,
+  ExperimentStrategy,
+  LoopCheckpoint,
+  LoopSpec,
+  ScoreResult,
+} from "@harnest/contracts";
+
+/** 다음 Generator에 전달하는 공개 실험 기록. 가드 기각 시도는 이 계약에 들어오지 않는다. */
+export interface PublicExperimentFeedback {
+  round: number;
+  strategy?: ExperimentStrategy;
+  candidateScore: number;
+  scoreDelta: number;
+  adopted: boolean;
+  gateRejected: boolean;
+  violations: string[];
+}
 
 export interface CheckpointStore<A> {
   save(cp: LoopCheckpoint<A>): Promise<void>;
@@ -27,6 +44,17 @@ export interface GeneratorFeedback {
   round: number;
   championScore: number;
   championViolations: string[];
+  /** 직전 기각이 공개 기준만으로 설명될 때만 제공한다. 가드·홀드아웃 신호는 절대 포함하지 않는다. */
+  previousPublicAttempt?: {
+    candidateScore: number;
+    scoreDelta: number;
+    gateRejected: boolean;
+    violations: string[];
+  };
+  /** 최근 공개 실험 최대 3개. 가드 기각 시도와 비공개 신호는 포함하지 않는다. */
+  recentPublicExperiments?: PublicExperimentFeedback[];
+  /** 최근 공개 실패에서 같은 전략이 두 번 반복됐을 때 다음 시도에서 선택할 수 없는 키. */
+  blockedStrategyKeys?: string[];
 }
 
 export interface LoopRunOptions<A> {
@@ -34,8 +62,19 @@ export interface LoopRunOptions<A> {
   pack: EvaluationPack;
   spec: LoopSpec;
   scorer: (artifact: A) => ScoreResult | Promise<ScoreResult>;
+  /** 후보 생성 전에 수정 전략을 선언한다. 생략하면 전략 기록 없이 기존 방식으로 생성한다. */
+  planStrategy?: (
+    champion: A,
+    rng: () => number,
+    feedback: GeneratorFeedback,
+  ) => ExperimentStrategy | Promise<ExperimentStrategy>;
   /** 후보 생성 — 결정적 변이기든 LLM Generator든 같은 자리에 꽂힌다 */
-  generate: (champion: A, rng: () => number, feedback: GeneratorFeedback) => A | Promise<A>;
+  generate: (
+    champion: A,
+    rng: () => number,
+    feedback: GeneratorFeedback,
+    strategy?: ExperimentStrategy,
+  ) => A | Promise<A>;
   initial: (rng: () => number) => A | Promise<A>;
   store: CheckpointStore<A>;
   /** 매 라운드(및 상태 전이) 후 최신 체크포인트 통지 — 관제실 라이브 뷰의 소스 */
@@ -53,5 +92,9 @@ export interface LoopHandle {
 
 /** mulberry32 — 상태(uint32) 노출형 시드 RNG. 구현은 engine.ts */
 export { createRng } from "./engine";
-export { createLoopRun } from "./engine";
+export {
+  createLoopRun,
+  PUBLIC_EXPERIMENT_MEMORY_LIMIT,
+  REPEATED_STRATEGY_FAILURE_LIMIT,
+} from "./engine";
 export { MemoryCheckpointStore, IndexedDbCheckpointStore } from "./stores";

@@ -1,8 +1,21 @@
 /** 루프 엔진 구현 — 계약은 ./index.ts 문서 주석 (SPEC §5.1.1).
  *  엔진은 scorer/pack을 수정할 어떤 경로도 갖지 않는다: 옵션으로 받은 함수를 호출만 한다. */
 
-import { SCORE_CEILING, type LoopCheckpoint, type ProvenanceType } from "@harnest/contracts";
-import type { LoopHandle, LoopRunOptions } from "./index";
+import {
+  SCORE_CEILING,
+  type ExperimentStrategy,
+  type LoopCheckpoint,
+  type ProvenanceType,
+} from "@harnest/contracts";
+import type {
+  GeneratorFeedback,
+  LoopHandle,
+  LoopRunOptions,
+  PublicExperimentFeedback,
+} from "./index";
+
+export const PUBLIC_EXPERIMENT_MEMORY_LIMIT = 3;
+export const REPEATED_STRATEGY_FAILURE_LIMIT = 2;
 
 export interface SeededRng {
   (): number;
@@ -28,7 +41,7 @@ export function createRng(seed: number): SeededRng {
 }
 
 export function createLoopRun<A>(opts: LoopRunOptions<A>): LoopHandle {
-  const { runId, pack, spec, scorer, generate, initial, store, onEvent } = opts;
+  const { runId, pack, spec, scorer, planStrategy, generate, initial, store, onEvent } = opts;
   const roundDelayMs = opts.roundDelayMs ?? 0;
 
   let cp: LoopCheckpoint<A> | null = null;
@@ -49,6 +62,40 @@ export function createLoopRun<A>(opts: LoopRunOptions<A>): LoopHandle {
   // 가드 허용 오차는 팩의 분할 정책에 동결돼 있다 — 엔진은 값을 읽기만 한다
   const guardTolerance =
     pack.holdoutPolicy.mode === "seeded_split" ? pack.holdoutPolicy.guardTolerance : 0;
+
+  const publicExperimentMemory = (c: LoopCheckpoint<A>): PublicExperimentFeedback[] => {
+    if (spec.feedbackMode !== "recent_public_experiments_v1") return [];
+    return c.tree
+      .map((record, index): PublicExperimentFeedback | null =>
+        record.guardSafe
+          ? {
+              round: record.round,
+              ...(record.strategy === undefined
+                ? {}
+                : { strategy: { ...record.strategy } }),
+              candidateScore: record.candidateScore,
+              scoreDelta: record.candidateScore - c.curve[index],
+              adopted: record.adopted,
+              gateRejected: record.gateRejected,
+              violations: [...record.violations],
+            }
+          : null,
+      )
+      .filter((record): record is PublicExperimentFeedback => record !== null)
+      .slice(-PUBLIC_EXPERIMENT_MEMORY_LIMIT);
+  };
+
+  const blockedStrategyKeys = (records: PublicExperimentFeedback[]): string[] => {
+    const failures = new Map<string, number>();
+    for (const record of records) {
+      if (record.adopted || record.strategy === undefined) continue;
+      failures.set(record.strategy.key, (failures.get(record.strategy.key) ?? 0) + 1);
+    }
+    return [...failures.entries()]
+      .filter(([, count]) => count >= REPEATED_STRATEGY_FAILURE_LIMIT)
+      .map(([key]) => key)
+      .sort();
+  };
 
   async function start(): Promise<void> {
     if (active) return;
@@ -129,11 +176,44 @@ export function createLoopRun<A>(opts: LoopRunOptions<A>): LoopHandle {
         }
 
         const round = c.round + 1;
-        const candidate = await generate(c.champion, rng, {
+        const previousRecord = c.tree[c.tree.length - 1];
+        // 공개 기준으로 설명할 수 있는 직전 기각만 다음 실험의 재료로 쓴다. 가드 실패 후보는
+        // 점수·트레이스가 공개 기준에서 좋아 보여도 비공개 신호를 추론할 수 있으므로 제외한다.
+        const previousPublicAttempt =
+          spec.feedbackMode === "champion_and_last_public_rejection" &&
+          previousRecord !== undefined &&
+          !previousRecord.adopted &&
+          previousRecord.guardSafe
+            ? {
+                candidateScore: previousRecord.candidateScore,
+                scoreDelta: previousRecord.candidateScore - previousRecord.championScore,
+                gateRejected: previousRecord.gateRejected,
+                violations: [...previousRecord.violations],
+              }
+            : undefined;
+        const recentPublicExperiments = publicExperimentMemory(c);
+        const blockedKeys = blockedStrategyKeys(recentPublicExperiments);
+        const feedback: GeneratorFeedback = {
           round,
           championScore: c.championScore,
           championViolations: c.championViolations,
-        });
+          ...(previousPublicAttempt === undefined ? {} : { previousPublicAttempt }),
+          ...(spec.feedbackMode === "recent_public_experiments_v1"
+            ? {
+                recentPublicExperiments,
+                blockedStrategyKeys: blockedKeys,
+              }
+            : {}),
+        };
+        const strategy = planStrategy === undefined
+          ? undefined
+          : await planStrategy(c.champion, rng, feedback);
+        if (strategy !== undefined && blockedKeys.includes(strategy.key)) {
+          throw new Error(
+            `반복 실패한 수정 전략(${strategy.key})을 다시 선택했습니다 — 다른 전략이 필요합니다.`,
+          );
+        }
+        const candidate = await generate(c.champion, rng, feedback, strategy);
         const result = await scorer(candidate);
         const prevScore = c.championScore;
         const prevGuardScore = c.championGuardScore;
@@ -163,6 +243,9 @@ export function createLoopRun<A>(opts: LoopRunOptions<A>): LoopHandle {
           adopted,
           gateRejected: result.gateRejected,
           violations: result.violations,
+          ...(strategy === undefined
+            ? {}
+            : { strategy: { ...strategy } satisfies ExperimentStrategy }),
           candidateGuardScore,
           guardSafe,
         });

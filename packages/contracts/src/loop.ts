@@ -11,8 +11,21 @@ export interface LoopSpec {
   /** 연속 미채택이 이 수에 달하면 정체 조기 종료 */
   plateauRounds: number;
   adoptionRule: AdoptionRule;
+  /** 후보 생성기가 공개 실험 기록을 학습할지 여부. 생략은 구버전 champion_only. */
+  feedbackMode?:
+    | "champion_only"
+    | "champion_and_last_public_rejection"
+    | "recent_public_experiments_v1";
   /** 시드 고정 = 로컬 RNG 수열 재현. 비결정적 외부 모델 출력까지 보장하지 않는다. */
   seed: number;
+}
+
+/** 후보를 만들 때 Generator가 먼저 선언한 수정 전략. 평가 결과에서 역산하지 않는다. */
+export interface ExperimentStrategy {
+  /** 템플릿이 정의한 안정적인 전략 분류 키 */
+  key: string;
+  /** 이번 후보에서 실제로 하려는 일을 설명하는 짧은 공개 기록 */
+  summary: string;
 }
 
 export interface ScoreResult {
@@ -36,6 +49,8 @@ export interface RoundRecord {
   adopted: boolean;
   gateRejected: boolean;
   violations: string[];
+  /** Generator가 후보 생성 전에 선언한 수정 전략. 구버전·결정적 생성기는 생략 가능. */
+  strategy?: ExperimentStrategy;
   /** 후보의 검증 가드 집계 — 가드 미구성·게이트 기각이면 null */
   candidateGuardScore: number | null;
   /** 가드 비퇴보 조건 통과 여부 — 가드가 없으면 항상 true(공허 참) */

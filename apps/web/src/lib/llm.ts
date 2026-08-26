@@ -4,7 +4,11 @@
  *  있다 — createSharedOpenAIClient/createSharedGeminiClient, 아래쪽 참고. */
 
 import type { CaseDef, JudgeProvider } from "@harnest/contracts";
-import { DRAFT_CASES_MARKER, type HandoverProblem, type LlmClient } from "@harnest/template-handover";
+import {
+  DRAFT_CASES_MARKER,
+  type HandoverProblem,
+  type LlmClient,
+} from "@harnest/template-handover";
 
 /** 기존 UI가 이미 직접 렌더링하는 공급자. 새 자동 판별 UI가 합쳐질 때 제거할 호환 별칭이다. */
 export type ByoProvider = Extract<JudgeProvider, "gemini" | "vertex" | "openai">;
@@ -1898,6 +1902,12 @@ export function createMockClient(problem: HandoverProblem): LlmClient {
     providerId: "mock",
     model: "모의 모델 (결정적)",
     async complete(prompt) {
+      // 전략 선택: 프롬프트에 실제로 나열된 첫 허용 전략을 고른다. 반복 실패로 차단된 키는
+      // 선택 가능한 목록에서 이미 빠져 있으므로 모의 실행도 같은 전환 계약을 따른다.
+      if (prompt.includes("수정 전략 하나만 결정하세요")) {
+        const key = prompt.match(/^- ([a-z0-9][a-z0-9_-]*):/m)?.[1] ?? "targeted_repair";
+        return JSON.stringify({ key, summary: `모의 전략 ${key}로 공개 실패 항목을 보강합니다.` });
+      }
       // responder 배치: 질문 목록의 케이스마다, 문서에 정답의 핵심 토큰이 있으면 그 답을
       if (prompt.includes("아래 문서만을 근거로")) {
         const doc = prompt.split("## 문서")[1]?.split("## 질문 목록")[0] ?? "";

@@ -198,7 +198,19 @@ export function ConsolePage() {
       const base = entry.createRuntime(compiled, llm);
       runtime = {
         ...base,
-        generate: async (champion, rng, feedback) => {
+        ...(base.planStrategy === undefined
+          ? {}
+          : {
+              planStrategy: async (champion, rng, feedback) => {
+                const strategy = await base.planStrategy!(champion, rng, feedback);
+                appendStream(
+                  strategy.summary,
+                  `${feedback.round}회차 — 수정 전략 ${strategy.key}`,
+                );
+                return strategy;
+              },
+            }),
+        generate: async (champion, rng, feedback, strategy) => {
           const misses = feedback.championViolations;
           const body =
             misses.length > 0
@@ -211,7 +223,7 @@ export function ConsolePage() {
             feedback.round + "회차 — 무엇을 고칠지 정합니다 (현재 " +
               feedback.championScore.toFixed(1) + "점)",
           );
-          return base.generate(champion, rng, feedback);
+          return base.generate(champion, rng, feedback, strategy);
         },
         scorer: async (artifact) => {
           const r = await base.scorer(artifact);
@@ -369,6 +381,7 @@ export function ConsolePage() {
       pack: compiled.pack,
       spec: compiled.loopSpec,
       scorer: runtime.scorer,
+      planStrategy: runtime.planStrategy,
       generate: runtime.generate,
       initial: runtime.initial,
       store: storeRef.current!,

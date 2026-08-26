@@ -253,6 +253,14 @@ function checkpointIssues(
   if (spec.adoptionRule !== "scalar_strict") {
     issues.push(issue("project.loopSpec.adoptionRule", "현재 계약은 scalar_strict만 지원합니다."));
   }
+  if (
+    spec.feedbackMode !== undefined &&
+    spec.feedbackMode !== "champion_only" &&
+    spec.feedbackMode !== "champion_and_last_public_rejection" &&
+    spec.feedbackMode !== "recent_public_experiments_v1"
+  ) {
+    issues.push(issue("project.loopSpec.feedbackMode", "지원하지 않는 생성 피드백 방식입니다."));
+  }
   if (!Number.isInteger(spec.seed)) {
     issues.push(issue("project.loopSpec.seed", "유한 정수여야 합니다."));
   }
@@ -280,6 +288,28 @@ function checkpointIssues(
   checkpoint.tree.forEach((record, index) => {
     scoreIssue(record.candidateScore, `${checkpointPath}.tree[${index}].candidateScore`);
     scoreIssue(record.championScore, `${checkpointPath}.tree[${index}].championScore`);
+    const strategy = record.strategy as unknown;
+    if (strategy !== undefined) {
+      const strategyPath = `${checkpointPath}.tree[${index}].strategy`;
+      if (typeof strategy !== "object" || strategy === null || Array.isArray(strategy)) {
+        issues.push(issue(strategyPath, "수정 전략은 key와 summary를 가진 객체여야 합니다."));
+        return;
+      }
+      const value = strategy as Record<string, unknown>;
+      if (
+        typeof value.key !== "string" ||
+        !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(value.key)
+      ) {
+        issues.push(issue(`${strategyPath}.key`, "전략 키는 영문 소문자·숫자·_- 조합의 1~64자여야 합니다."));
+      }
+      if (
+        typeof value.summary !== "string" ||
+        value.summary.trim().length === 0 ||
+        value.summary.length > 500
+      ) {
+        issues.push(issue(`${strategyPath}.summary`, "전략 설명은 비어 있지 않은 500자 이하 문자열이어야 합니다."));
+      }
+    }
   });
 
   // 검증 가드 — 곡선 길이·값 범위·게이트 기각과의 일관성
@@ -756,6 +786,9 @@ function copyCheckpoint<A>(checkpoint: LoopCheckpoint<A>): LoopCheckpoint<A> {
         adopted: record.adopted,
         gateRejected: record.gateRejected,
         violations: [...record.violations],
+        ...(record.strategy === undefined
+          ? {}
+          : { strategy: { ...record.strategy } }),
         candidateGuardScore: storedRecord.candidateGuardScore ?? null,
         guardSafe: storedRecord.guardSafe ?? true,
       };
@@ -912,6 +945,9 @@ export async function createProjectExportEnvelope<A>(
         maxRounds: input.project.loopSpec.maxRounds,
         plateauRounds: input.project.loopSpec.plateauRounds,
         adoptionRule: input.project.loopSpec.adoptionRule,
+        ...(input.project.loopSpec.feedbackMode === undefined
+          ? {}
+          : { feedbackMode: input.project.loopSpec.feedbackMode }),
         seed: input.project.loopSpec.seed,
       },
     },
