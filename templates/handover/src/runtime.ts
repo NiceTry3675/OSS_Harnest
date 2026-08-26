@@ -453,14 +453,19 @@ export function createStrategyPlanner(problem: HandoverProblem, llm: LlmClient) 
     _rng: () => number,
     incoming: GeneratorFeedback,
   ): Promise<ExperimentStrategy> => {
-    const blocked = [
-      ...(incoming.blockedStrategyKeys ?? []),
-      ...(incoming.championViolations.length === 0 ? NO_HEADROOM_BLOCKED : []),
+    const engineBlocked = incoming.blockedStrategyKeys ?? [];
+    const everyKey = HANDOVER_STRATEGIES.map((strategy) => strategy.key as string);
+    const allBlocked = (keys: string[]): boolean => everyKey.every((key) => keys.includes(key));
+    let blocked = [
+      ...new Set([
+        ...engineBlocked,
+        ...(incoming.championViolations.length === 0 ? NO_HEADROOM_BLOCKED : []),
+      ]),
     ];
-    const feedback: GeneratorFeedback = {
-      ...incoming,
-      blockedStrategyKeys: [...new Set(blocked)],
-    };
+    // 전부 막히면 고를 전략이 없어 실행이 멈춘다 — 천장 차단부터 양보한다
+    if (allBlocked(blocked)) blocked = [...new Set(engineBlocked)];
+    if (allBlocked(blocked)) blocked = [];
+    const feedback: GeneratorFeedback = { ...incoming, blockedStrategyKeys: blocked };
     const first = await llm.complete(strategyPrompt(problem, champion, feedback), {
       temperature: 0.3,
       maxOutputTokens: 512,

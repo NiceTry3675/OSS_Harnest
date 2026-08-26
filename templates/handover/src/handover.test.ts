@@ -955,12 +955,21 @@ describe("withCallBudget", () => {
 describe("수정 프롬프트 — 간결성과 분량 지시의 정합", () => {
   // 간결성을 켜면 점수는 "상한 대비 남는 여유"다. 그런데 원샷용 안내는 상한의 80%를
   // 목표로 삼으라고 지시해, 남은 점수 여지를 프롬프트가 스스로 막고 있었다.
-  it("간결성을 켜면 목표 글자 수를 주지 않고 줄였을 때의 점수를 알려준다", () => {
-    const block = reviseLimitBlock(8000, 6400, true);
+  it("고칠 실패가 남아 있으면 목표 분량을 주지 않는다", () => {
+    const block = reviseLimitBlock(8000, 6400, true, false);
     expect(block).not.toContain("목표로 여유 있게");
-    expect(block).toContain("간결성 점수");
     expect(block).toContain("6,400자로 20점");
-    expect(block).toContain("4,480자까지 줄이면 44점");
+    expect(block).not.toContain("이번 회차 목표");
+  });
+
+  // 못 채운 질문이 없으면 짧게 쓰는 것 말고 점수를 올릴 길이 없다.
+  // 과감히 줄여도 안전하다 — 답을 놓치면 기각될 뿐 챔피언은 지켜진다.
+  it("고칠 것이 없으면 이번 회차 목표 분량을 준다", () => {
+    const block = reviseLimitBlock(8000, 6400, true, true);
+    expect(block).toContain("이번 회차 목표: 4,480자 이하");
+    expect(block).toContain("약 30% 짧게");
+    expect(block).toContain("간결성이 44점");
+    expect(block).toContain("채택되지 않습니다");
   });
 
   it("간결성을 끄면 분량 한도만 알린다", () => {
@@ -973,6 +982,7 @@ describe("수정 프롬프트 — 간결성과 분량 지시의 정합", () => {
     const problem = makeProblem({ useConciseness: true });
     const prompt = mutatePrompt(problem, "문서 본문", 88, [], 3);
     expect(prompt).toContain("남은 점수 여지는 간결성뿐");
+    expect(prompt).toContain("이번 회차 목표");
     expect(prompt).not.toContain("목표로 여유 있게");
   });
 });
@@ -1012,5 +1022,33 @@ describe("createStrategyPlanner — 더 올릴 곳이 없을 때", () => {
     }
     // 남는 선택지는 짧게 만드는 쪽뿐이다
     expect(prompts[0]).toContain("tighten");
+  });
+});
+
+describe("전략 차단 — 전부 막히지 않는다", () => {
+  // 천장 차단(4개)에 엔진의 반복 실패 차단(나머지)이 겹치면 고를 전략이 사라져
+  // 실행이 멈춘다. 그때는 천장 차단부터 양보한다.
+  it("엔진이 남은 전략까지 막으면 천장 차단을 풀어 선택지를 남긴다", async () => {
+    const problem = makeProblem();
+    const prompts: string[] = [];
+    const llm = {
+      providerId: "mock" as const,
+      model: "테스트",
+      async complete(prompt: string) {
+        prompts.push(prompt);
+        return JSON.stringify({ key: "targeted_repair", summary: "빠진 절차를 보강한다." });
+      },
+    };
+    const feedback = {
+      round: 6,
+      championScore: 84.6,
+      championViolations: [],
+      blockedStrategyKeys: ["tighten", "compress_and_reallocate"],
+    };
+
+    const result = await createStrategyPlanner(problem, llm)("챔피언 문서", () => 0, feedback);
+
+    // 전부 막히는 대신 천장 차단이 풀려 보강 전략을 다시 고를 수 있다
+    expect(result.key).toBe("targeted_repair");
   });
 });

@@ -22,8 +22,16 @@ export function limitBlock(cap: number): string {
  *  원샷과 달리 목표 글자 수를 주지 않는다. 간결성을 켠 평가에서 "상한의 80%를 목표로"는
  *  간결성 점수와 정면으로 싸운다 — 점수는 상한 대비 남는 여유가 클수록 높은데,
  *  프롬프트가 80% 언저리에 머물라고 지시하면 남은 여지에 손을 못 댄다.
- *  대신 지금 몇 점이고 줄이면 몇 점이 되는지를 숫자로 준다. */
-export function reviseLimitBlock(cap: number, docLength: number, useConciseness: boolean): string {
+ *
+ *  못 채운 질문이 하나도 없을 때(trimOnly)는 짧게 쓰는 것 말고 점수를 올릴 길이 없다.
+ *  그때만 이번 회차 목표 분량을 준다. 과감히 줄여도 안전하다 — 답을 놓치면 점수가
+ *  떨어져 그 개선안이 기각될 뿐, 채택 조건이 챔피언을 지킨다. */
+export function reviseLimitBlock(
+  cap: number,
+  docLength: number,
+  useConciseness: boolean,
+  trimOnly = false,
+): string {
   const hardCap = hardLengthCapFor(cap);
   const limits =
     `분량: ${cap}자를 넘으면 ${hardCap}자까지 점진적으로 최대 ${MAX_LENGTH_OVERFLOW_PENALTY}점 감점되고, ` +
@@ -31,13 +39,21 @@ export function reviseLimitBlock(cap: number, docLength: number, useConciseness:
   if (!useConciseness) return `${limits} 현재 ${docLength.toLocaleString()}자입니다.`;
 
   const score = (length: number): number => Math.round(Math.max(0, 1 - length / cap) * 100);
-  const trimmed = Math.max(Math.floor(cap * 0.3), Math.floor(docLength * 0.7));
-  return (
+  const target = Math.max(Math.floor(cap * 0.3), Math.floor(docLength * 0.7));
+  const head =
     `${limits}\n` +
     `간결성 점수 = (1 − 길이 ÷ ${cap}) × 100 입니다. ` +
-    `현재 ${docLength.toLocaleString()}자로 ${score(docLength)}점이고, ` +
-    `${trimmed.toLocaleString()}자까지 줄이면 ${score(trimmed)}점이 됩니다.\n` +
-    `목표 글자 수를 따로 맞추려 하지 말고, 질문에 답하는 데 필요 없는 중복·군더더기를 덜어내 짧게 만드세요.`
+    `지금 ${docLength.toLocaleString()}자로 ${score(docLength)}점입니다.`;
+  if (!trimOnly) {
+    return `${head}\n짧을수록 점수가 높습니다 — 내용을 더할 때는 그만큼 덜어내세요.`;
+  }
+  const cut = Math.round((1 - target / docLength) * 100);
+  return (
+    `${head}\n` +
+    `이번 회차 목표: ${target.toLocaleString()}자 이하 — 지금보다 약 ${cut}% 짧게. ` +
+    `그러면 간결성이 ${score(target)}점이 됩니다.\n` +
+    `답에 필요한 사실을 놓치면 점수가 오히려 떨어져 이 개선안은 채택되지 않습니다. ` +
+    `사실은 그대로 두고 중복·장황한 설명·반복되는 머리말만 덜어내 목표에 맞추세요.`
   );
 }
 
@@ -62,7 +78,7 @@ export const HANDOVER_STRATEGIES = [
     key: "tighten",
     label: "군더더기 덜어내기",
     description:
-      "새 내용을 넣지 않고 중복·장황한 설명·반복되는 머리말만 걷어내 문서를 더 짧게 만든다. 답에 필요한 사실은 하나도 빼지 않는다.",
+      "새 내용을 넣지 않고 중복·장황한 설명·반복되는 머리말을 과감히 걷어내 이번 회차 목표 분량까지 줄인다. 답에 필요한 사실은 하나도 빼지 않는다.",
   },
   {
     key: "compress_and_reallocate",
@@ -222,7 +238,7 @@ ${publicExperimentsBlock(recentPublicExperiments)}
 실패 목록만 좁게 때우거나 기록의 문답을 그대로 옮겨 적지 말고, 참고 자료의 다른 주제 커버리지도 함께 유지하세요.`
       : ""
   }
-${reviseLimitBlock(problem.lengthCap, championDoc.length, problem.useConciseness)}
+${reviseLimitBlock(problem.lengthCap, championDoc.length, problem.useConciseness, violations.length === 0)}
 
 ## 업무 소개 · 참고 자료
 ${problem.material || "(제공되지 않음)"}
