@@ -33,7 +33,7 @@ export function ScoreHero({
         <div className="score-hero-label">현재 점수</div>
         <div className="score-hero-value">
           {shown === null ? (
-            <span className="score-hero-empty">—</span>
+            <span className="score-hero-empty">아직 채점 전</span>
           ) : (
             <>
               <span className="score-hero-number">{fmt(Math.round(shown * 10) / 10)}</span>

@@ -4,19 +4,7 @@ import { TEMPLATES } from "../templates";
 import { useProject } from "../state";
 import { IntroTour, markTourSeen, tourSeen } from "../components/IntroTour";
 import { setFlowStep } from "../lib/flowStep";
-
-/** 제품의 핵심 흐름을 수치 없이 보여주는 작은 계기 */
-function TrustOrb() {
-  return (
-    <div className="orb" aria-hidden="true">
-      <div className="orb-inner">
-        <div className="orb-score orb-state">기준 잠금</div>
-        <div className="orb-cap">같은 절차로 비교하고 숨김 검증</div>
-        <div className="orb-track"><i /></div>
-      </div>
-    </div>
-  );
-}
+import { HeroLoop } from "../components/HeroLoop";
 
 export function HomePage() {
   const { reset, setTemplateId } = useProject();
@@ -44,16 +32,17 @@ export function HomePage() {
     <div>
       <section className="hero">
         <div>
-          <span className="eyebrow">AI 개선 관제실</span>
+          <span className="eyebrow">목표 맞춤 AI</span>
           <h1 className="hero-title">
-            기준은 당신이 정합니다.
+            목표를 정하세요.
             <br />
-            AI는 그 안에서만
+            기준을 승인하세요.
             <br />
-            좋아집니다.
+            AI가 목표에 도달합니다.
           </h1>
           <p className="hero-lead">
-            채점 기준을 승인하는 순간 잠깁니다. AI는 실행 내내 그 기준을 바꿀 수 없습니다.
+            채점 기준을 결정하면 AI는 실행 내내 그 기준을 바꿀 수 없습니다.
+            <br />
             올라간 점수를 믿을 수 있는 이유입니다.
           </p>
           <div className="hero-cta">
@@ -66,7 +55,7 @@ export function HomePage() {
             <button onClick={() => setTour(true)}>어떻게 진행되나요</button>
           </div>
         </div>
-        <TrustOrb />
+        <HeroLoop />
       </section>
 
       <div ref={picks} className="picks">

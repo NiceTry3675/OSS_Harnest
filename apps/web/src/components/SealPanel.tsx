@@ -50,14 +50,15 @@ export function SealPanel({ digest, children }: { digest: string; children: Reac
         </svg>
       </div>
 
-      <h2 className="seal-title">승인됨 · 동결</h2>
+      <h2 className="seal-title">기준 확정</h2>
       <p className="seal-sub">
-        동결된 기준은 여기서 수정할 수 없습니다. 바꾸려면 처음부터 새 기준을 만들어 다시
-        승인해야 합니다.
+        AI가 결과물을 만들고 평가하는 동안 평가 구성은 바뀌지 않습니다.
+        <br />
+        변경하려면 다시 승인하세요.
       </p>
 
       <div className="seal-fp">
-        <span className="hint">동결 다이제스트</span>
+        <span className="hint">확인 코드</span>
         <code className="mono">{shown}<span className="seal-rest">{rest}</span></code>
       </div>
 

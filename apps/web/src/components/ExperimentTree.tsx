@@ -8,16 +8,20 @@ function fmt(n: number): string {
 }
 
 function verdict(r: RoundRecord): string {
-  if (r.adopted) return "더 나아서 채택";
-  return r.gateRejected ? "필수 관문에서 실격" : "기존 산출물이 더 나음";
+  if (r.adopted) return "개선안 채택";
+  if (r.gateRejected) return "필수 조건 위반";
+  return r.guardSafe ? "점수 개선 없음" : "중간 점검 점수 기준 미달";
 }
 
 export function ExperimentTree({ tree }: { tree: readonly RoundRecord[] }) {
+  // 빈 상태도 목록이 찰 때와 같은 자리를 잡는다 — 실행을 누르는 순간 화면이 튀지 않게
   if (tree.length === 0) {
     return (
-      <p className="hint" style={{ margin: 0 }}>
-        기록된 라운드 판정이 없습니다.
-      </p>
+      <div className="rounds-empty">
+        <p className="hint" style={{ margin: 0 }}>
+          기록된 개선안 비교 결과가 없습니다.
+        </p>
+      </div>
     );
   }
 
@@ -29,7 +33,7 @@ export function ExperimentTree({ tree }: { tree: readonly RoundRecord[] }) {
         <li
           key={r.round}
           className={`round${r.adopted ? " is-adopted" : ""}`}
-          title={`후보 ${fmt(r.candidateScore)}점 vs 챔피언 ${fmt(r.championScore)}점`}
+          title={`개선안 ${fmt(r.candidateScore)}점 · 현재 결과 ${fmt(r.championScore)}점`}
         >
           <span className="round-no">{r.round}회차</span>
           <span className="round-say">{verdict(r)}</span>

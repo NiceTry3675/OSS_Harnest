@@ -75,7 +75,7 @@ export function markUnavailableRestoredHoldout(
   if (!requiresHoldout || checkpoint === null) return normalized;
   const errors = { ...normalized.errors! };
   if (checkpoint.round > 0 && normalized.baseline === null && errors.baseline === null) {
-    errors.baseline = "저장된 기록에 시작 홀드아웃 결과가 없어 복원할 수 없습니다.";
+    errors.baseline = "저장된 기록에 시작할 때의 최종 확인 결과가 없어 복원할 수 없습니다.";
   }
   return { ...normalized, errors };
 }

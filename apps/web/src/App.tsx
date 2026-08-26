@@ -5,6 +5,7 @@ import { WizardPage } from "./pages/WizardPage";
 import { ApprovalPage } from "./pages/ApprovalPage";
 import { ConsolePage } from "./pages/ConsolePage";
 import { ResultsPage } from "./pages/ResultsPage";
+import { TerminologyComparePage } from "./pages/TerminologyComparePage";
 import { StepBar } from "./components/StepBar";
 import { useProject } from "./state";
 import {
@@ -75,6 +76,7 @@ export function App() {
             <Route path="/approve" element={<ApprovalPage />} />
             <Route path="/console" element={<ConsolePage />} />
             <Route path="/results" element={<ResultsPage />} />
+            {import.meta.env.DEV ? <Route path="/terminology-compare" element={<TerminologyComparePage />} /> : null}
           </Routes>
         ) : (
           <div className="card">

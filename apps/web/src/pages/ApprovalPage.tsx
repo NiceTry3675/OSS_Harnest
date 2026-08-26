@@ -12,16 +12,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { ExaminerCheckId, ExaminerCheckResult, ExaminerVerdict } from "@harnest/contracts";
+import { ActivityConsole } from "../components/ActivityConsole";
+import { appendStream, clearStream, endStream, setStreamStatus, withActivityLog } from "../lib/activityLog";
 import { setFlowStep } from "../lib/flowStep";
 import { SealPanel } from "../components/SealPanel";
 import { useProject } from "../state";
 import { getTemplate } from "../templates";
 import { countCaseProvenance } from "../lib/case-provenance";
 import { ProviderCredentialInput } from "../components/ProviderCredentialInput";
+import { InfoTip } from "../components/InfoTip";
 import {
+  formatModelLabel,
   getByoCredential,
   normalizeVertexServiceAccount,
-  PROVIDER_LABEL,
   setByoCredential,
   testByoConnection,
 } from "../lib/llm";
@@ -36,13 +39,13 @@ const VERDICT_COLOR: Record<ExaminerVerdict, string> = {
 /** 시험 카드에 쓰는 짧은 이름과 설명. cue는 진행 메시지에서 현재 검사를 찾는 마커다. */
 const CHECK_CARD: Record<ExaminerCheckId, { name: string; desc: string; cue: string }> = {
   stability: {
-    name: "같은 답에 같은 점수인가",
-    desc: "같은 문서를 다시 채점해도 흔들리지 않는지",
+    name: "재채점 결과가 안정적인가",
+    desc: "같은 문서의 점수 차이가 허용 범위 안인지",
     cue: "안정성",
   },
   hack_resistance: {
-    name: "꼼수에 속지 않는가",
-    desc: "날조·아첨 응답을 정답으로 치지 않는지",
+    name: "꾸며낸 답을 가려내는가",
+    desc: "사실을 꾸미거나 칭찬만 하는 답을 구분하는지",
     cue: "날조",
   },
 };
@@ -84,10 +87,10 @@ function CheckCards({
               ) : running ? (
                 <>
                   <span className="spin" aria-hidden="true" />
-                  시험하는 중
+                  점검 중
                 </>
               ) : (
-                "대기"
+                "점검 시작 전"
               )}
             </span>
           </div>
@@ -113,8 +116,8 @@ function VerdictBadge({ verdict }: { verdict: ExaminerVerdict }) {
 }
 
 const EXEMPTION_LABEL = {
-  examinerReport: "검증 리포트",
-  pairwise: "쌍대 비교",
+  examinerReport: "AI 평가 사전 점검",
+  pairwise: "두 결과 직접 비교",
 } as const;
 
 function ExemptionTable({ rows }: { rows: Record<keyof typeof EXEMPTION_LABEL, string> }) {
@@ -139,7 +142,7 @@ function ComplianceNotices({ notices }: { notices: string[] | undefined }) {
   return (
     <>
       {notices.map((n, i) => (
-        <p key={i} className="hint" style={{ margin: "8px 0 0", color: "var(--warn)" }}>
+        <p key={i} className="hint copy-lines" style={{ margin: "8px 0 0", color: "var(--warn)" }}>
           {n}
         </p>
       ))}
@@ -216,6 +219,7 @@ export function ApprovalPage() {
   // pack 유무와 관계없이 같은 순서로 호출해 조기 반환 시에도 Hooks 규칙을 지킨다.
   useEffect(() => {
     setFlowStep({ kind: "approval" });
+    clearStream(); // 앞 화면에서 흐르던 글이 이어지지 않게 한다
   }, []);
   approvedRef.current = approved;
 
@@ -225,6 +229,7 @@ export function ApprovalPage() {
     let llm;
     try {
       llm = entry.createLlm(compiled);
+      if (llm) llm = withActivityLog(llm, "선택한 AI의 평가를 사전 점검하는 중");
     } catch (e) {
       setBatteryError(e instanceof Error ? e.message : String(e));
       return;
@@ -234,6 +239,7 @@ export function ApprovalPage() {
     setRunning(true);
     try {
       setLiveChecks([]);
+      clearStream("선택한 AI의 평가를 사전 점검하는 중");
       const report = await entry.examiner.runBattery(compiled, llm, setProgress, (c) =>
         setLiveChecks((prev) => [...prev.filter((p) => p.id !== c.id), c]),
       );
@@ -279,6 +285,12 @@ export function ApprovalPage() {
 
   const jp = pack.judgeProcedure;
   const hp = pack.holdoutPolicy;
+  const splitSummary =
+    hp.mode === "seeded_split"
+      ? caseCounts && caseCounts.total > 0
+        ? `개선용 ${Math.max(0, caseCounts.total - hp.guardCaseIds.length - hp.holdoutCaseIds.length)}개 · 중간 점검용 ${hp.guardCaseIds.length}개 · 최종 확인용 ${hp.holdoutCaseIds.length}개`
+        : `중간 점검용 ${hp.guardCaseIds.length}개 · 최종 확인용 ${hp.holdoutCaseIds.length}개`
+      : "";
 
   const saveCredentialAndRetry = async (): Promise<void> => {
     if (jp.kind !== "case_answering" || jp.judge.provider === "mock") return;
@@ -329,11 +341,11 @@ export function ApprovalPage() {
               onError={setBatteryError}
             />
             <button disabled={credentialBusy} onClick={() => void saveCredentialAndRetry()}>
-              {credentialBusy ? "연결 확인 중…" : "연결 확인 후 다시 검증"}
+              {credentialBusy ? "연결 확인 중…" : "연결 확인 후 다시 점검"}
             </button>
           </div>
         ) : (
-          <button onClick={() => void runBattery()}>다시 검증</button>
+          <button onClick={() => void runBattery()}>다시 점검</button>
         )}
       </div>
     ) : null;
@@ -350,7 +362,7 @@ export function ApprovalPage() {
         </SealPanel>
 
         <details className="sealed-detail">
-          <summary>동결된 승인 감사 상세 보기</summary>
+          <summary>승인 내용 보기</summary>
 
           <h2>채점 기준</h2>
           <table className="grid">
@@ -370,17 +382,17 @@ export function ApprovalPage() {
             </tbody>
           </table>
 
-          <h2>필수 관문</h2>
+          <h2>필수 조건</h2>
           {pack.gates.length > 0 ? (
             <ul className="sealed-gates">
               {pack.gates.map((g) => (
                 <li key={g.id}>
-                  {g.label} <span className="badge muted">미충족 시 탈락</span>
+                  {g.label} <span className="badge muted">위반 시 제외</span>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="hint">이 절차에는 별도의 필수 관문이 없습니다.</p>
+            <p className="hint">설정된 필수 조건이 없습니다.</p>
           )}
           <ComplianceNotices notices={compiled.notices} />
 
@@ -388,39 +400,38 @@ export function ApprovalPage() {
             <>
               <h2>채점 방식</h2>
               <p style={{ fontSize: 14, margin: "0 0 4px" }}>
-                채점 모델: <strong>{PROVIDER_LABEL[jp.judge.provider]} · {jp.judge.model}</strong>
+                사용할 AI 모델: <strong>{formatModelLabel(jp.judge.provider, jp.judge.model)}</strong>
               </p>
               <p className="hint" style={{ margin: "0 0 12px" }}>
-                쌍대 비교: {jp.pairwiseNotice}
+                개선안 채택 조건: {jp.pairwiseNotice}
               </p>
             </>
           ) : (
             <>
-              <h2>검증·면제 표기</h2>
+              <h2>적용·제외 항목</h2>
               <ExemptionTable rows={jp.exemptions} />
             </>
           )}
 
-          <h2>케이스 분할</h2>
+          <h2>질문 사용 구분</h2>
           {hp.mode === "seeded_split" ? (
-            <>
-              <p style={{ fontSize: 14, margin: "0 0 4px" }}>
-                검증 가드 {hp.guardCaseIds.length}개(비퇴보 허용 오차 ±{hp.guardTolerance}점) ·
-                숨김 검증 {hp.holdoutCaseIds.length}개 — 가드는 집계 점수만 채택 판단에 쓰이고,
-                숨김 검증은 실행 시작·종료 시에만 별도 채점됩니다.
-              </p>
-              <p className="hint" style={{ margin: "0 0 12px" }}>{hp.note}</p>
-            </>
+            <p style={{ fontSize: 14, margin: "0 0 12px" }}>
+              {splitSummary}
+              <InfoTip
+                label="질문 사용 구분"
+                text={`${hp.note}\n중간 점검 점수가 현재 결과보다 ${hp.guardTolerance}점 넘게 낮으면 새 개선안을 채택하지 않습니다.`}
+              />
+            </p>
           ) : (
             <p style={{ fontSize: 14, margin: "0 0 12px" }}>사용 안 함 — {hp.note}</p>
           )}
 
           {caseCounts !== null && caseCounts.total > 0 ? (
             <>
-              <h2>케이스 출처</h2>
+              <h2>질문 출처</h2>
               <p style={{ fontSize: 14, margin: "0 0 12px" }}>
                 {caseCounts.ai + caseCounts.aiEdited > 0
-                  ? `직접 입력 ${caseCounts.user}개 · AI 초안 확인 ${caseCounts.ai}개 · AI 초안 수정 ${caseCounts.aiEdited}개 — 초안도 당신이 확인한 순간부터 채점 정답으로 동결되었습니다.`
+                  ? `직접 입력 ${caseCounts.user}개 · AI 초안 확인 ${caseCounts.ai}개 · AI 초안 수정 ${caseCounts.aiEdited}개 — 확인한 초안은 평가 구성에 포함됨.`
                   : `전체 ${caseCounts.total}개 직접 입력.`}
               </p>
             </>
@@ -428,20 +439,20 @@ export function ApprovalPage() {
 
           {jp.kind === "case_answering" && entry.examiner ? (
             <>
-              <h2>시험관 검증</h2>
+              <h2>AI 평가 사전 점검</h2>
               {validReport ? (
                 <>
                   <div style={{ marginBottom: 8 }}>
                     종합: <VerdictBadge verdict={examinerReport!.overall} />
                     <span className="hint" style={{ marginLeft: 6 }}>
-                      구동 저지: {PROVIDER_LABEL[examinerReport!.judge.provider]} ·{" "}
-                      {examinerReport!.judge.model}
+                      점검에 사용한 AI 모델:{" "}
+                      {formatModelLabel(examinerReport!.judge.provider, examinerReport!.judge.model)}
                     </span>
                   </div>
                   <CheckCards checks={examinerReport!.checks} progress="" />
                 </>
               ) : (
-                <p className="hint">현재 다이제스트에 결속된 시험관 검증 기록이 없습니다.</p>
+                <p className="hint">현재 평가 구성의 점검 기록이 없습니다.</p>
               )}
             </>
           ) : null}
@@ -452,9 +463,10 @@ export function ApprovalPage() {
 
   return (
     <div>
-      <h1>채점 기준 승인</h1>
-      <p className="sub">채점 기준은 당신이 승인하고, 실행 중 AI는 이 기준을 변경할 수 없습니다.</p>
+      <h1>평가 구성 승인</h1>
+      <p className="sub">AI가 결과물을 만들고 평가하는 동안, 승인한 평가 구성은 바뀌지 않습니다.</p>
 
+      <div className="approve-deck">
       <div className="card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
           <h2 style={{ marginTop: 0 }}>채점 기준</h2>
@@ -477,11 +489,11 @@ export function ApprovalPage() {
           </tbody>
         </table>
 
-        <h2>필수 관문</h2>
+        <h2>필수 조건</h2>
         <ul style={{ margin: 0, paddingLeft: 18, fontSize: 14 }}>
           {pack.gates.map((g) => (
             <li key={g.id}>
-              {g.label} <span className="badge muted">미충족 시 탈락</span>
+              {g.label} <span className="badge muted">위반 시 제외</span>
             </li>
           ))}
         </ul>
@@ -491,38 +503,39 @@ export function ApprovalPage() {
           <>
             <h2>채점 방식</h2>
             <p style={{ fontSize: 14, margin: "0 0 4px" }}>
-              채점 모델: <strong>{PROVIDER_LABEL[jp.judge.provider]} · {jp.judge.model}</strong>
+              사용할 AI 모델: <strong>{formatModelLabel(jp.judge.provider, jp.judge.model)}</strong>
             </p>
             <p className="hint" style={{ margin: "0 0 6px" }}>
-              이 모델은 판정 절차의 일부로 승인 시 동결됩니다 — 교체하려면 다시 승인해야 합니다.
+              이 AI 모델이 결과물을 만들고 평가합니다. 변경하면 다시 승인해야 합니다.
             </p>
-            <p className="hint" style={{ margin: 0 }}>쌍대 비교: {jp.pairwiseNotice}</p>
+            <p className="hint" style={{ margin: 0 }}>개선안 채택 조건: {jp.pairwiseNotice}</p>
           </>
         ) : (
           <>
-            <h2>검증·면제 표기</h2>
+            <h2>적용·제외 항목</h2>
             <ExemptionTable rows={jp.exemptions} />
           </>
         )}
 
         {hp.mode === "seeded_split" ? (
           <>
-            <h2>케이스 분할</h2>
-            <p style={{ fontSize: 14, margin: "0 0 4px" }}>
-              검증 가드 {hp.guardCaseIds.length}개(비퇴보 허용 오차 ±{hp.guardTolerance}점) ·
-              숨김 검증 {hp.holdoutCaseIds.length}개 — 가드는 집계 점수만 채택 판단에 쓰이고,
-              숨김 검증은 실행 시작·종료 시에만 별도 채점됩니다.
+            <h2>질문 사용 구분</h2>
+            <p style={{ fontSize: 14, margin: 0 }}>
+              {splitSummary}
+              <InfoTip
+                label="질문 사용 구분"
+                text={`${hp.note}\n중간 점검 점수가 현재 결과보다 ${hp.guardTolerance}점 넘게 낮으면 새 개선안을 채택하지 않습니다.`}
+              />
             </p>
-            <p className="hint" style={{ margin: 0 }}>{hp.note}</p>
           </>
         ) : null}
 
         {caseCounts !== null && caseCounts.total > 0 ? (
           <>
-            <h2>케이스 출처</h2>
+            <h2>질문 출처</h2>
             <p style={{ fontSize: 14, margin: 0 }}>
               {caseCounts.ai + caseCounts.aiEdited > 0
-                ? `직접 입력 ${caseCounts.user}개 · AI 초안 확인 ${caseCounts.ai}개 · AI 초안 수정 ${caseCounts.aiEdited}개 — 초안도 당신이 확인한 순간부터 채점 정답으로 동결됩니다.`
+                ? `직접 입력 ${caseCounts.user}개 · AI 초안 확인 ${caseCounts.ai}개 · AI 초안 수정 ${caseCounts.aiEdited}개 — 확인한 초안은 평가 구성에 포함됨.`
                 : `전체 ${caseCounts.total}개 직접 입력.`}
             </p>
           </>
@@ -530,10 +543,10 @@ export function ApprovalPage() {
 
         {jp.kind === "case_answering" && entry.examiner ? (
           <>
-            <h2>시험관 검증</h2>
+            <h2>AI 평가 사전 점검</h2>
             <p style={{ fontSize: 14, margin: "0 0 10px" }}>
-              승인 전에 채점 모델 자체를 시험합니다: 같은 문서를 다시 채점했을 때의 안정성,
-              그리고 날조·아첨 오염 응답에 대한 내성. 기준이 바뀌면 자동으로 다시 검증합니다.
+              재채점 결과가 안정적인지, 꾸며낸 답을 가려내는지 확인합니다.
+              기준을 바꾸면 다시 점검합니다.
             </p>
 
             {!validReport ? (
@@ -553,20 +566,19 @@ export function ApprovalPage() {
                 <div style={{ marginBottom: 8 }}>
                   종합: <VerdictBadge verdict={examinerReport!.overall} />
                   <span className="hint" style={{ marginLeft: 6 }}>
-                    구동 저지: {PROVIDER_LABEL[examinerReport!.judge.provider]} ·{" "}
-                    {examinerReport!.judge.model}
+                    점검에 사용한 AI 모델:{" "}
+                    {formatModelLabel(examinerReport!.judge.provider, examinerReport!.judge.model)}
                   </span>
                 </div>
                 <CheckCards checks={examinerReport!.checks} progress="" />
                 <div style={{ marginTop: 10 }}>
                   {reportFailed ? (
                     <p className="error" style={{ margin: "0 0 8px" }}>
-                      검증에 실패한 기준은 동결할 수 없습니다 — 기준을 수정하면 자동으로 다시
-                      검증됩니다.
+                      사전 점검 실패 — 기준을 수정하면 다시 점검합니다.
                     </p>
                   ) : null}
                   <button onClick={() => void runBattery()} disabled={running}>
-                    {running ? `검증 중… ${progress}` : "다시 검증"}
+                    {running ? `점검 중… ${progress}` : "다시 점검"}
                   </button>
                   {batteryErrorBox}
                 </div>
@@ -590,12 +602,21 @@ export function ApprovalPage() {
                 onClick={approve}
                 disabled={running || blockers.length > 0}
               >
-                승인하고 동결
+                평가 구성 승인
               </button>
-              <button onClick={() => navigate("/wizard")}>수정하러 가기</button>
+              <button onClick={() => navigate("/wizard")}>입력 수정</button>
             </div>
           </div>
         )}
+      </div>
+
+      <aside className="approve-side">
+        <ActivityConsole
+          model={jp.kind === "case_answering" ? jp.judge.model : undefined}
+          empty="사전 점검 결과가 여기에 표시됩니다."
+          height={560}
+        />
+      </aside>
       </div>
     </div>
   );

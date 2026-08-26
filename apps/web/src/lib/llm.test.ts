@@ -24,6 +24,7 @@ import {
   createVertexClient,
   detectAndListModels,
   detectByoCredential,
+  formatModelLabel,
   getByoCredential,
   listAvailableModels,
   normalizeVertexServiceAccount,
@@ -33,6 +34,13 @@ import {
   testByoConnection,
   testDetectedByoConnection,
 } from "./llm";
+
+describe("AI 모델 표시 이름", () => {
+  it("모의 모델은 공급자와 모델 이름을 중복해 표시하지 않는다", () => {
+    expect(formatModelLabel("mock", "모의 모델")).toBe("모의 모델");
+    expect(formatModelLabel("openai", "gpt-example")).toBe("OpenAI · gpt-example");
+  });
+});
 
 const c = (id: string, q: string, a: string): CaseDef => ({ id, question: q, expectedAnswer: a });
 
