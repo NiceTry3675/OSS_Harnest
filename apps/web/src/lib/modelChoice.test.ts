@@ -2,9 +2,11 @@
  *  실제 벤더 목록에서 나온 이름으로 검사한다. */
 
 import { describe, expect, it } from "vitest";
+import type { AvailableModel } from "./llm";
 import { pickModel, preferredModels } from "./modelChoice";
 
-const models = (...ids: string[]) => ids.map((id) => ({ id, label: id }));
+const models = (...ids: string[]): AvailableModel[] =>
+  ids.map((id) => ({ id, label: id, source: "api" as const }));
 
 describe("preferredModels", () => {
   it("구형과 잡동사니를 뺀다", () => {

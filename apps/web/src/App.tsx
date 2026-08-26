@@ -61,7 +61,10 @@ export function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <Link to="/" className="brand">Harnest</Link>
+        <Link to="/" className="brand">
+          <span className="brand-mark" aria-hidden="true">H</span>
+          Harnest
+        </Link>
         <div className="topbar-right">
           <StepBar />
           <ThemeToggle />
