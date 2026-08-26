@@ -21,6 +21,8 @@ export interface ScoreResult {
   /** 케이스/항목별 트레이스 — Generator 피드백(§5.1.1 v1 승격)의 재료 */
   violations: string[];
   parts: Record<string, number>;
+  /** 가중 기준 합산 뒤 적용되는 점수 조정. 음수는 감점이며, 화면에서 합계 산식을 설명하는 데 쓴다. */
+  adjustments?: Record<string, number>;
   gateRejected: boolean;
   /** 검증 가드 집계(0~100) — 채택의 비퇴보 조건에만 쓰이고 Generator에는 개별 트레이스가
    *  노출되지 않는다(SPEC §5.1.1). 가드 미구성 템플릿·게이트 기각 시 null 또는 생략. */

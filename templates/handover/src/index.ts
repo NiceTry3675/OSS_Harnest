@@ -7,6 +7,7 @@ import type {
   CaseDef, EvaluationPack, InterviewSubmission, JudgeProvider, LoopSpec, Question,
 } from "@harnest/contracts";
 import { digestScope, sha256Canonical } from "@harnest/contracts";
+import { hardLengthCapFor, MAX_LENGTH_OVERFLOW_PENALTY } from "./length";
 import { CONCISENESS_WEIGHT, COVERAGE_WEIGHT } from "./runtime";
 
 export const TEMPLATE_ID = "handover";
@@ -43,7 +44,7 @@ export interface HandoverProblem {
   guardCases: CaseDef[];
   /** 루프에 절대 노출되지 않는다 — 라운드 0과 종료 시에만 채점(SPEC §3 원칙 7) */
   holdoutCases: CaseDef[];
-  /** 사용자가 정한 절대 분량 상한(자) — hard gate */
+  /** 사용자가 정한 권장 분량 상한(자) — 25% 초과부터 hard gate */
   lengthCap: number;
   /** 간결성 가점 사용 여부 — 켜면 커버리지 0.8 + 간결성 0.2 가중(./runtime.ts).
    *  criteria 배열을 바꾸므로 다이제스트에 자동 결속된다. */
@@ -85,7 +86,7 @@ export const questions: Question[] = [
     label: "문서 길이를 어떻게 다룰까요?",
     shortLabel: "분량·간결성",
     nextLabel: "채점 모델 고르기",
-    help: `이 분량을 넘는 문서는 점수 비교에서 제외됩니다 (${LENGTH_CAP_MIN}~${LENGTH_CAP_MAX.toLocaleString()}자). 기록 전체가 상한 안에 들어갈 만큼 넉넉하면 필수 분량 조건만으로 베끼기를 막기 어려워집니다`,
+    help: `권장 분량을 정합니다 (${LENGTH_CAP_MIN}~${LENGTH_CAP_MAX.toLocaleString()}자). 초과분은 점진적으로 감점하고, 권장 분량의 125%를 넘으면 점수 비교에서 제외합니다.`,
     min: LENGTH_CAP_MIN,
     max: LENGTH_CAP_MAX,
     defaultValue: LENGTH_CAP_DEFAULT,
@@ -99,7 +100,7 @@ export const questions: Question[] = [
     sameStep: true,
     help:
       "사용: 답변 가능성 80% + 간결성 20%. 답변 수준이 같으면 더 짧은 문서가 높은 점수를 받습니다.\n" +
-      "사용 안 함: 문서 길이는 점수에 반영하지 않습니다.",
+      "사용 안 함: 권장 분량 이내의 길이는 점수에 반영하지 않습니다. 권장 분량 초과 감점은 그대로 적용됩니다.",
     defaultValue: true,
   },
   {
@@ -118,7 +119,7 @@ export interface CompiledHandover {
   pack: EvaluationPack;
   loopSpec: LoopSpec;
   /** 설정의 산술적 성질에 대한 정적 안내 — 승인 화면이 그대로 표시한다.
-   *  (예: 기록 전체가 분량 상한 안 = 베끼기 방어(분량 게이트) 약화, 실측 교훈 ①) */
+   *  (예: 기록 전체가 권장 분량 안 = 베끼기 방어 약화, 실측 교훈 ①) */
   notices: string[];
 }
 
@@ -212,6 +213,7 @@ export async function compile(
     lengthCap,
     useConciseness,
   };
+  const hardLengthCap = hardLengthCapFor(lengthCap);
 
   const base: Omit<EvaluationPack, "definitionDigest"> = {
     packVersion: "skeleton-1",
@@ -233,9 +235,12 @@ export async function compile(
               id: "conciseness",
               kind: "deterministic" as const,
               scorer: "length_headroom",
-              params: { maxChars: lengthCap },
+              params: {
+                maxChars: lengthCap,
+                hardMaxChars: hardLengthCap,
+              },
               weight: CONCISENESS_WEIGHT,
-              label: `간결성 (분량 상한 ${lengthCap.toLocaleString()}자 대비 여유 — 답변력이 0이면 0점)`,
+              label: `간결성 (권장 ${lengthCap.toLocaleString()}자 이내 가점 — 초과 시 별도 감점)`,
             },
           ]
         : []),
@@ -245,9 +250,13 @@ export async function compile(
         id: "length_cap",
         kind: "deterministic",
         scorer: "length_within",
-        params: { maxChars: lengthCap },
+        params: {
+          maxChars: hardLengthCap,
+          softMaxChars: lengthCap,
+          maxOverflowPenalty: MAX_LENGTH_OVERFLOW_PENALTY,
+        },
         effect: "reject",
-        label: `분량 ${lengthCap.toLocaleString()}자 이하`,
+        label: `최대 분량 ${hardLengthCap.toLocaleString()}자 이하 (권장 ${lengthCap.toLocaleString()}자 초과 시 점진 감점)`,
       },
     ],
     judgeProcedure: {
@@ -281,8 +290,8 @@ export async function compile(
     seed: parseInt(definitionDigest.slice(0, 8), 16),
   };
 
-  // 베끼기 방어 안내 — 가시 기록 전체가 상한 안에 들어가면 정답을 통째로 옮겨 적는 문서를
-  // 분량 게이트가 걸러내지 못한다(게이트 밴드 교훈 ①). LLM 호출 없는 두 숫자의 산술이므로
+  // 베끼기 방어 안내 — 가시 기록 전체가 권장 분량 안에 들어가면 정답을 통째로 옮겨 적어도
+  // 분량 감점이 생기지 않는다(게이트 밴드 교훈 ①). LLM 호출 없는 두 숫자의 산술이므로
   // 배터리 판정이 아니라 컴파일 시 정적 안내로 알린다.
   const verbatimLength = visibleCases
     .map((c) => `질문: ${c.question}\n답: ${c.expectedAnswer}`)
@@ -290,8 +299,8 @@ export async function compile(
   const notices: string[] = [];
   if (verbatimLength <= lengthCap) {
     notices.push(
-      `질문·답 전체(약 ${verbatimLength.toLocaleString()}자)를 그대로 옮겨도 ${lengthCap.toLocaleString()}자 제한을 넘지 않습니다.\n` +
-        "이를 막으려면 분량 상한을 낮추세요. 그대로 두려면 최종 확인 점수를 확인하세요.",
+      `질문·답 전체(약 ${verbatimLength.toLocaleString()}자)를 그대로 옮겨도 권장 분량 ${lengthCap.toLocaleString()}자를 넘지 않습니다.\n` +
+        "이를 막으려면 권장 분량을 낮추세요. 그대로 두려면 최종 확인 점수를 확인하세요.",
     );
   }
 
@@ -301,5 +310,6 @@ export async function compile(
 export * from "./assist";
 export * from "./prompts";
 export * from "./runtime";
+export * from "./length";
 export * from "./probes";
 export * from "./examiner";

@@ -16,6 +16,7 @@ import {
 } from "@harnest/contracts";
 import type { GeneratorFeedback } from "@harnest/loop-engine";
 import type { HandoverDoc, HandoverProblem } from "./index";
+import { hardLengthCapFor, lengthOverflowPenalty } from "./length";
 import {
   graderPrompt,
   graderRetryPrompt,
@@ -279,8 +280,9 @@ const summarize = (g: CaseGrade): string =>
   `${g.score === 0.5 ? "부분 정답" : "오답"} — ${g.why}`;
 
 function lengthGateViolation(problem: HandoverProblem, doc: HandoverDoc): string | null {
-  return doc.length > problem.lengthCap
-    ? `분량 초과 실격: ${doc.length}자 > ${problem.lengthCap}자`
+  const hardCap = hardLengthCapFor(problem.lengthCap);
+  return doc.length > hardCap
+    ? `최대 분량 초과 실격: ${doc.length}자 > ${hardCap}자 (권장 ${problem.lengthCap}자)`
     : null;
 }
 
@@ -310,6 +312,14 @@ export function createScorer(problem: HandoverProblem, llm: LlmClient) {
     const grades = await gradeCases(llm, doc, problem.visibleCases);
     const coverage = (grades.reduce((a, g) => a + g.score, 0) / grades.length) * 100;
     const violations = grades.filter((g) => g.score < 1).map(summarize);
+    const overflowPenalty = lengthOverflowPenalty(problem.lengthCap, doc.length);
+    const adjustments =
+      overflowPenalty > 0 ? { length_overflow: -overflowPenalty } : undefined;
+    if (overflowPenalty > 0) {
+      violations.push(
+        `분량 권장 상한 초과: ${doc.length}자 > ${problem.lengthCap}자 — 종합 점수 ${overflowPenalty}점 감점`,
+      );
+    }
 
     // 검증 가드 — 피드백과 별도 배치 호출(혼합 금지 불변식), 집계 점수만 남긴다
     let guardScore: number | null = null;
@@ -321,11 +331,12 @@ export function createScorer(problem: HandoverProblem, llm: LlmClient) {
     }
 
     if (!problem.useConciseness) {
-      const total = round1(coverage);
+      const total = Math.max(0, round1(coverage - overflowPenalty));
       return {
         total,
         violations,
-        parts: { case_answerability: total },
+        parts: { case_answerability: round1(coverage) },
+        adjustments,
         gateRejected: false,
         guardScore,
       };
@@ -334,16 +345,27 @@ export function createScorer(problem: HandoverProblem, llm: LlmClient) {
     const headroom =
       coverage > 0 ? Math.max(0, 1 - doc.length / problem.lengthCap) * 100 : 0;
     return {
-      total: round1(COVERAGE_WEIGHT * coverage + CONCISENESS_WEIGHT * headroom),
+      total: Math.max(
+        0,
+        round1(COVERAGE_WEIGHT * coverage + CONCISENESS_WEIGHT * headroom - overflowPenalty),
+      ),
       violations,
       parts: { case_answerability: round1(coverage), conciseness: round1(headroom) },
+      adjustments,
       gateRejected: false,
       guardScore,
     };
   };
 }
 
-/** 문서 생성 출력 토큰 예산 — 분량 상한(자)의 2배 여유. 명시하지 않으면 클라이언트 기본
+export {
+  HARD_LENGTH_OVERFLOW_RATIO,
+  hardLengthCapFor,
+  lengthOverflowPenalty,
+  MAX_LENGTH_OVERFLOW_PENALTY,
+} from "./length";
+
+/** 문서 생성 출력 토큰 예산 — 권장 분량(자)의 2배 여유. 명시하지 않으면 클라이언트 기본
  *  상한(8192 토큰)이 긴 문서를 조용히 잘라, 게이트는 통과하되 내용이 끊긴 문서가 채점된다
  *  (한국어 ≈ 글자당 1토큰 안팎). */
 export function maxOutputTokensFor(lengthCap: number): number {
