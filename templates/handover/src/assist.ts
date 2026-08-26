@@ -89,6 +89,8 @@ export async function draftCases(
   existing: DraftedCase[],
   count: number,
   hops = 1,
+  /** 0단계에서 정한 확인 방향 — 없으면 자료 전반에서 뽑는다 */
+  focus: readonly string[] = [],
 ): Promise<DraftedCase[]> {
   if (material.trim().length < ASSIST_MIN_MATERIAL_CHARS) {
     throw new Error(
@@ -103,7 +105,7 @@ export async function draftCases(
   const maxOutputTokens = batchOutputTokensFor(clamped * (clampedHops >= 2 ? 3 : 2));
 
   const first = await budgeted.complete(
-    draftCasesPrompt(material, existingQuestions, clamped, clampedHops),
+    draftCasesPrompt(material, existingQuestions, clamped, clampedHops, focus),
     { temperature: 0.7, maxOutputTokens },
   );
   let drafted: DraftedCase[];
@@ -112,7 +114,7 @@ export async function draftCases(
   } catch (error) {
     if (!(error instanceof DraftFormatError)) throw error;
     const retried = await budgeted.complete(
-      draftCasesRetryPrompt(material, existingQuestions, clamped, first, clampedHops),
+      draftCasesRetryPrompt(material, existingQuestions, clamped, first, clampedHops, focus),
       { temperature: 0.7, maxOutputTokens },
     );
     try {

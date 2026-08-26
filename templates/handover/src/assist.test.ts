@@ -163,3 +163,41 @@ describe("draftCases", () => {
     expect(llm.prompts).toHaveLength(0);
   });
 });
+
+describe("확인 방향 — 0단계에서 내려온 초점", () => {
+  const material = "가".repeat(400);
+
+  it("방향이 있으면 프롬프트에 싣고 그쪽으로 뽑게 한다", async () => {
+    const seen: string[] = [];
+    const llm = {
+      providerId: "mock" as const,
+      model: "테스트",
+      async complete(prompt: string) {
+        seen.push(prompt);
+        return JSON.stringify([{ question: "질문", expectedAnswer: "답" }]);
+      },
+    };
+
+    await draftCases(llm, material, [], 1, 1, ["학점 상한을 지켰는지", "시간이 겹치지 않는지"]);
+
+    expect(seen[0]).toContain("이 질문들로 확인하려는 것");
+    expect(seen[0]).toContain("학점 상한을 지켰는지");
+    expect(seen[0]).toContain("시간이 겹치지 않는지");
+  });
+
+  it("방향이 없으면 그 블록을 넣지 않는다", async () => {
+    const seen: string[] = [];
+    const llm = {
+      providerId: "mock" as const,
+      model: "테스트",
+      async complete(prompt: string) {
+        seen.push(prompt);
+        return JSON.stringify([{ question: "질문", expectedAnswer: "답" }]);
+      },
+    };
+
+    await draftCases(llm, material, [], 1);
+
+    expect(seen[0]).not.toContain("이 질문들로 확인하려는 것");
+  });
+});
