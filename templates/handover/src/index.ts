@@ -82,25 +82,34 @@ export const questions: Question[] = [
     id: "lengthCap",
     role: "criteria",
     type: "number",
-    label: "문서는 몇 자까지 허용할까요?",
-    shortLabel: "분량",
-    nextLabel: "간결성과 AI 모델 정하기",
+    label: "문서 길이를 어떻게 다룰까요?",
+    shortLabel: "분량·간결성",
+    nextLabel: "채점 모델 고르기",
     help: `이 분량을 넘는 문서는 점수 비교에서 제외됩니다 (${LENGTH_CAP_MIN}~${LENGTH_CAP_MAX.toLocaleString()}자). 기록 전체가 상한 안에 들어갈 만큼 넉넉하면 필수 분량 조건만으로 베끼기를 막기 어려워집니다`,
     min: LENGTH_CAP_MIN,
     max: LENGTH_CAP_MAX,
     defaultValue: LENGTH_CAP_DEFAULT,
   },
   {
+    // 분량 상한과 같은 단계에서 묻는다 — 방금 정한 상한을 두고 판단하는 질문이다
     id: "conciseness",
     role: "criteria",
     type: "toggle",
-    label: "문서 길이를 점수에 반영할까요?",
-    shortLabel: "간결성·모델",
-    nextLabel: "작성 완료 — 승인 화면으로",
+    label: "길이를 점수에도 반영할까요?",
+    sameStep: true,
     help:
       "사용: 답변 가능성 80% + 간결성 20%. 답변 수준이 같으면 더 짧은 문서가 높은 점수를 받습니다.\n" +
       "사용 안 함: 문서 길이는 점수에 반영하지 않습니다.",
     defaultValue: true,
+  },
+  {
+    id: "judgeModel",
+    role: "criteria",
+    type: "judgeModel",
+    label: "어떤 AI가 채점할까요?",
+    shortLabel: "채점 모델",
+    nextLabel: "작성 완료 — 승인 화면으로",
+    help: "이 모델도 평가 절차의 일부라 승인하면 함께 잠깁니다. 바꾸려면 다시 승인해야 합니다.",
   },
 ];
 

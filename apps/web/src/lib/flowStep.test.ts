@@ -27,8 +27,8 @@ describe("buildFlowSteps", () => {
     expect(buildFlowSteps(entry.questions, entry.flow).map((step) => step.label)).toEqual([
       "업무 소개",
       "질문과 답",
-      "분량",
-      "간결성·모델",
+      "분량·간결성",
+      "채점 모델",
       "사전 점검·승인",
       "기준 확정",
       "실행",

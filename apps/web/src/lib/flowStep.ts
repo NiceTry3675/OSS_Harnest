@@ -23,7 +23,7 @@ export interface TemplateFlow {
   result: string;
 }
 
-type FlowQuestion = Pick<Question, "id" | "label" | "shortLabel">;
+type FlowQuestion = Pick<Question, "id" | "label" | "shortLabel" | "sameStep">;
 
 export interface FlowStep {
   id: `question:${string}` | "approval:pending" | "approval:approved" | "run" | "result";
@@ -48,13 +48,19 @@ export interface ResolvedFlow {
   approvedForCurrentDigest: boolean;
 }
 
+/** 자기 칸을 갖는 질문만 — 앞 질문에 붙은 것은 뺀다 */
+function ownSteps(questions: readonly FlowQuestion[]): readonly FlowQuestion[] {
+  return questions.filter((question) => !question.sameStep);
+}
+
 /** 질문은 템플릿 선언에서 자동 생성하고, 승인 전·후는 서로 다른 두 칸으로 유지한다. */
 export function buildFlowSteps(
   questions: readonly FlowQuestion[],
   flow: TemplateFlow,
 ): FlowStep[] {
   return [
-    ...questions.map((question) => ({
+    // 앞 질문에 붙은 질문은 자기 칸을 갖지 않는다 — 같은 화면에서 함께 묻는다
+    ...ownSteps(questions).map((question) => ({
       id: `question:${question.id}` as const,
       label: question.shortLabel ?? question.label,
     })),
@@ -88,13 +94,13 @@ export function resolveFlowIndex(
     case "outside":
       return -1;
     case "question":
-      return questions.findIndex((question) => question.id === cursor.questionId);
+      return ownSteps(questions).findIndex((question) => question.id === cursor.questionId);
     case "approval":
-      return questions.length + (approvedForCurrentDigest ? 1 : 0);
+      return ownSteps(questions).length + (approvedForCurrentDigest ? 1 : 0);
     case "run":
-      return questions.length + 2;
+      return ownSteps(questions).length + 2;
     case "result":
-      return questions.length + 3;
+      return ownSteps(questions).length + 3;
   }
 }
 

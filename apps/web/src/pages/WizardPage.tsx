@@ -142,6 +142,39 @@ function CharRing({ filled, max }: { filled: number; max: number }) {
   );
 }
 
+/** 사용 / 사용 안 함 두 갈래 — 주 질문과 붙은 질문이 같은 모양을 쓴다 */
+function ToggleField({
+  q,
+  value,
+  onPick,
+}: {
+  q: Question;
+  value: string;
+  onPick: (next: string) => void;
+}) {
+  const current = value !== "" ? value : String(q.defaultValue ?? true);
+  return (
+    <div className="models">
+      {(
+        [
+          { value: "true", name: "사용" },
+          { value: "false", name: "사용 안 함" },
+        ] as const
+      ).map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          className={`model${current === opt.value ? " is-on" : ""}`}
+          aria-pressed={current === opt.value}
+          onClick={() => onPick(opt.value)}
+        >
+          <b>{opt.name}</b>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function WizardPage() {
   const {
     templateId,
@@ -153,6 +186,15 @@ export function WizardPage() {
   const navigate = useNavigate();
   const entry = getTemplate(templateId);
   const questions = entry?.questions ?? [];
+  /** 화면 한 장에 함께 묻는 질문 묶음 — sameStep인 질문은 앞 묶음에 붙는다 */
+  const stepGroups = useMemo(() => {
+    const groups: Question[][] = [];
+    for (const question of questions) {
+      if (question.sameStep && groups.length > 0) groups[groups.length - 1].push(question);
+      else groups.push([question]);
+    }
+    return groups;
+  }, [questions]);
 
   const [draft, setDraft] = useState<Record<string, DraftValue>>(() => {
     const init: Record<string, DraftValue> = {};
@@ -185,9 +227,11 @@ export function WizardPage() {
   });
   const [step, setStep] = useState(0);
   const [furthestStep, setFurthestStep] = useState(() =>
-    questions.reduce(
-      (furthest, question, index) =>
-        savedAnswers[question.id] !== undefined ? Math.max(furthest, index) : furthest,
+    stepGroups.reduce(
+      (furthest, group, index) =>
+        group.some((question) => savedAnswers[question.id] !== undefined)
+          ? Math.max(furthest, index)
+          : furthest,
       0,
     ),
   );
@@ -196,9 +240,9 @@ export function WizardPage() {
   // 단계가 바뀌면 맨 위에서 시작한다 — 긴 목록 중간에서 열리면 어디인지 알 수 없다
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "auto" });
-    const questionId = questions[step]?.id;
+    const questionId = stepGroups[step]?.[0]?.id;
     setFlowStep(questionId ? { kind: "question", questionId } : { kind: "outside" });
-  }, [questions, step]);
+  }, [stepGroups, step]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   // 기본값을 공급자로 둔다 — 키 칸이 처음부터 보여야 한다는 요청
@@ -271,9 +315,12 @@ export function WizardPage() {
     );
   }
 
-  const q = questions[step];
-  const isLast = step === questions.length - 1;
-  const reachedQuestions = questions.slice(0, Math.max(step, furthestStep) + 1);
+  const group = stepGroups[step] ?? [];
+  const q = group[0];
+  /** 같은 화면에서 함께 묻는 나머지 질문들 */
+  const extras = group.slice(1);
+  const isLast = step === stepGroups.length - 1;
+  const reachedQuestions = stepGroups.slice(0, Math.max(step, furthestStep) + 1).flat();
   const criteriaQuestions = questions.filter((question) => question.role === "criteria");
   const allCriteriaReached = criteriaQuestions.every((question) =>
     reachedQuestions.some((reached) => reached.id === question.id),
@@ -539,10 +586,12 @@ export function WizardPage() {
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const err = validate(q, draft[q.id] ?? "");
-    if (err) {
-      setError(err);
-      return;
+    for (const asked of group) {
+      const err = validate(asked, draft[asked.id] ?? "");
+      if (err) {
+        setError(err);
+        return;
+      }
     }
     if (!isLast) {
       setFurthestStep((furthest) => Math.max(furthest, step + 1));
@@ -805,31 +854,12 @@ export function WizardPage() {
                   ) : null}
                 </>
               ) : q.type === "toggle" ? (
-                <div className="models">
-                  {(
-                    [
-                      { value: "true", name: "사용" },
-                      { value: "false", name: "사용 안 함" },
-                    ] as const
-                  ).map((opt) => {
-                    const current =
-                      typeof draft[q.id] === "string" && draft[q.id] !== ""
-                        ? (draft[q.id] as string)
-                        : String(q.defaultValue ?? true);
-                    return (
-                      <button
-                        key={opt.value}
-                        type="button"
-                        className={`model${current === opt.value ? " is-on" : ""}`}
-                        aria-pressed={current === opt.value}
-                        onClick={() => onChange(opt.value)}
-                      >
-                        <b>{opt.name}</b>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : (
+                <ToggleField
+                  q={q}
+                  value={typeof draft[q.id] === "string" ? (draft[q.id] as string) : ""}
+                  onPick={onChange}
+                />
+              ) : q.type === "judgeModel" ? null : (
                 <input
                   id={`q-${q.id}`}
                   type={q.type === "number" ? "number" : "text"}
@@ -843,7 +873,37 @@ export function WizardPage() {
               )}
             </div>
 
-            {isLast && entry.needsModel ? (
+            {extras.map((extra) => (
+              <div className="field field-extra" key={extra.id}>
+                <h3 className="q-mid">{extra.label}</h3>
+                {extra.help ? <p className="q-help">{extra.help}</p> : null}
+                {extra.type === "toggle" ? (
+                  <ToggleField
+                    q={extra}
+                    value={typeof draft[extra.id] === "string" ? (draft[extra.id] as string) : ""}
+                    onPick={(next) => {
+                      setDraft((d) => ({ ...d, [extra.id]: next }));
+                      setError(null);
+                    }}
+                  />
+                ) : (
+                  <input
+                    id={`q-${extra.id}`}
+                    type={extra.type === "number" ? "number" : "text"}
+                    value={typeof draft[extra.id] === "string" ? (draft[extra.id] as string) : ""}
+                    placeholder={extra.placeholder}
+                    min={extra.min}
+                    max={extra.max}
+                    onChange={(e) => {
+                      setDraft((d) => ({ ...d, [extra.id]: e.target.value }));
+                      setError(null);
+                    }}
+                  />
+                )}
+              </div>
+            ))}
+
+            {q.type === "judgeModel" ? (
               <div className="field judge-block">
                 <label className="q-big" style={{ fontSize: "var(--t-h2)" }}>
                   사용할 AI 모델 선택

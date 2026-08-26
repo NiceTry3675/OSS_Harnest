@@ -63,7 +63,6 @@ export function App() {
       <header className="topbar">
         <Link to="/" className="brand">Harnest</Link>
         <div className="topbar-right">
-          {import.meta.env.DEV ? <Link to="/terminology-compare" className="compare-link">용어 비교</Link> : null}
           <StepBar />
           <ThemeToggle />
         </div>

@@ -7,7 +7,9 @@ export interface InterviewSubmission {
   answers: Record<string, unknown>;
 }
 
-export type QuestionType = "text" | "number" | "staffList" | "textarea" | "caseList" | "toggle";
+/** judgeModel — 채점 모델을 고르는 단계. 입력 UI는 위저드가 소유한다(공급자·키·모델 목록). */
+export type QuestionType =
+  | "text" | "number" | "staffList" | "textarea" | "caseList" | "toggle" | "judgeModel";
 
 /** 평가 케이스 — 케이스 기반 템플릿의 원료이자 정답(ground truth). */
 export interface CaseDef {
@@ -32,6 +34,9 @@ export interface Question {
   help?: string;
   /** 다음 단계로 가는 버튼 문구 — 생략하면 "다음" */
   nextLabel?: string;
+  /** 앞 질문과 같은 단계에서 함께 묻는다. 같은 대상을 정하는 질문끼리 붙일 때 쓴다.
+   *  붙은 질문은 단계 표시줄에 따로 나오지 않는다. */
+  sameStep?: boolean;
   placeholder?: string;
   min?: number;
   max?: number;
