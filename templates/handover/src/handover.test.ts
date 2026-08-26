@@ -13,7 +13,13 @@ import {
   type CompileOptions,
   type HandoverProblem,
 } from "./index";
-import { mutatePrompt, oneshotPrompt, reviseLimitBlock } from "./prompts";
+import {
+  graderPrompt,
+  gradersPrompt,
+  mutatePrompt,
+  oneshotPrompt,
+  reviseLimitBlock,
+} from "./prompts";
 import {
   batchOutputTokensFor,
   CallBudgetExceededError,
@@ -1050,5 +1056,29 @@ describe("전략 차단 — 전부 막히지 않는다", () => {
 
     // 전부 막히는 대신 천장 차단이 풀려 보강 전략을 다시 고를 수 있다
     expect(result.key).toBe("targeted_repair");
+  });
+});
+
+describe("채점 규칙 — 무엇을 재는가", () => {
+  // 실측(harnest-0a7770ba): "참조 답에 없는 절차를 추가했다"는 이유로 0.5가 반복됐다.
+  // 기준은 "문서만 보고 답할 수 있는가"인데, 맞는 내용이 더 있다고 답할 수 있는 정도가
+  // 줄지는 않는다. 축자 일치를 재던 것을 답의 해결력으로 되돌린다.
+  it("참조 답에 없는 내용을 더했다는 이유만으로는 깎지 않는다고 명시한다", () => {
+    const prompt = gradersPrompt([
+      { caseId: "case-1", question: "질문", expected: "참조 답", response: "응답" },
+    ]);
+    expect(prompt).toContain("참조 답에 없는 내용이 더 있다는 것만으로는");
+    expect(prompt).toContain("답을 틀리게 만들거나 질문과 무관할 때만");
+    expect(prompt).toContain("표현이 참조 답과 다른 것도 감점 사유가 아닙니다");
+  });
+
+  it("단건 채점에도 같은 규칙을 쓴다", () => {
+    const prompt = graderPrompt("질문", "참조 답", "응답");
+    expect(prompt).toContain("참조 답에 없는 내용이 더 있다는 것만으로는");
+  });
+
+  it("사실과 다른 내용을 덧붙이면 여전히 부분 정답이다", () => {
+    const prompt = graderPrompt("질문", "참조 답", "응답");
+    expect(prompt).toContain("사실과 다른 내용을 덧붙임");
   });
 });
