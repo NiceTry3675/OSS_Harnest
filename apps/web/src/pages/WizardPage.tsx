@@ -18,6 +18,7 @@ import { ProviderCredentialInput } from "../components/ProviderCredentialInput";
 import { appendFileTexts, extractFileText, FILE_ACCEPT } from "../lib/attachText";
 import {
   createByoClient,
+  DEFAULT_JUDGE_MODEL,
   createAssistMockClient,
   getByoCredential,
   loadSharedProviders,
@@ -52,15 +53,8 @@ const ROLE_LABEL: Record<Question["role"], string> = {
 type JudgeChoice = "mock" | CredentialProvider;
 
 /** 목록을 불러오기 전에 쓰는 기본 모델 — 고르면 그 값이 이긴다 */
-const JUDGE_MODEL: Record<JudgeChoice, string> = {
-  mock: "모의 모델",
-  gemini: "gemini-3.7-flash",
-  vertex: "gemini-3.7-flash",
-  openai: "gpt-5.6-sol",
-  anthropic: "claude-sonnet-4-5",
-  openrouter: "openai/gpt-5.6-sol",
-  ollama: "llama3.1",
-};
+/** 공급자별 기본 모델은 llm.ts가 소유한다 — 빌더 화면도 같은 값을 쓴다 */
+const JUDGE_MODEL = DEFAULT_JUDGE_MODEL;
 
 /** 카드로 고르는 공급자 — 모의 모델은 고르는 것이 아니라 빠져나가는 것이라 따로 둔다 */
 const PROVIDER_CHOICES: CredentialProvider[] = [

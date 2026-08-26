@@ -581,7 +581,9 @@ label.dropzone input[type="file"] { display: none; }
   max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .builder-chips button:hover { border-color: var(--accent); color: var(--accent); }
+.builder-key { margin-top: var(--s-4); }
 .builder-go { height: 54px; padding: 0 28px; font-size: 16.5px; border-radius: 16px; margin-top: var(--s-4); }
+.builder .stream { max-width: 780px; }
 
 /* 만드는 동안 지나가는 마디 */
 .builder-phases {

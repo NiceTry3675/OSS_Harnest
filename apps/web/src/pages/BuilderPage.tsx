@@ -1,116 +1,37 @@
 /** 0단계 — 목표를 받아 맞춤 템플릿을 만드는 화면.
  *
  *  Harnest가 최종적으로 하려는 일은 정해진 템플릿 두 개를 고르게 하는 것이 아니라,
- *  사용자가 목표를 말하면 그 목표에 맞는 템플릿을 통째로 만들어 주는 것이다.
- *  이 화면은 그 모습을 먼저 보여준다.
+ *  사용자가 목표를 말하면 그 목표에 맞는 템플릿을 만들어 주는 것이다.
  *
- *  아직 모델이 템플릿을 만들지는 않는다. 대신 목표 문장에서 실제로 단서를 읽어
- *  구성을 고른다 — 아무 목표나 쳐도 결과가 달라지고, 하지 않은 일을 했다고
- *  말하지 않는다.
- *
- *  구성을 확정하면 지금 실제로 도는 템플릿으로 들어간다. */
+ *  모델이 실제로 구성을 짠다. 다만 정하는 것은 "무엇을 만들지"와 설정값까지고,
+ *  재는 방식(채점기·관문·분할 비율)은 템플릿이 소유한다. 받아온 구성은 그대로
+ *  실행되지 않는다 — 위저드의 기본값으로 들어가 사용자가 고치고, 승인 화면에서
+ *  사람이 확인한 뒤에야 잠긴다. */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { TEMPLATES } from "../templates";
 import { useProject } from "../state";
 import { setFlowStep } from "../lib/flowStep";
+import { appendStream, clearStream, endStream, withActivityLog } from "../lib/activityLog";
+import { ActivityConsole } from "../components/ActivityConsole";
+import { ProviderCredentialInput } from "../components/ProviderCredentialInput";
+import {
+  createByoClient,
+  getByoCredential,
+  DEFAULT_JUDGE_MODEL,
+  PROVIDER_LABEL,
+  setByoCredential,
+} from "../lib/llm";
+import { planTemplate, type TemplatePlan } from "../lib/templatePlan";
 
-interface Criterion {
-  id: string;
-  label: string;
-  weight: number;
-}
-
-interface Blueprint {
-  /** 어느 템플릿으로 들어갈지 */
-  templateId: string;
-  /** 만들어진 템플릿의 이름 — 결과 머리에 붙는다 */
-  name: string;
-  artifact: string;
-  criteria: Criterion[];
-  gates: string[];
-  steps: string[];
-}
-
-/** 목표 문장에서 읽는 단서 — 앞에 있는 갈래가 먼저 걸린다 */
-const SHAPES: Array<{ hit: RegExp; make: (goal: string) => Blueprint }> = [
-  {
-    hit: /(근무|교대|당직|시프트|일정표|스케줄|배정)/,
-    make: () => ({
-      templateId: "timetable",
-      name: "근무표 템플릿",
-      artifact: "근무표",
-      criteria: [
-        { id: "fair", label: "야간·주말이 한 사람에게 몰리지 않는가", weight: 50 },
-        { id: "cover", label: "모든 시간대에 사람이 배치되었는가", weight: 50 },
-      ],
-      gates: ["연속 근무 한도를 넘지 않을 것", "주당 근무 상한을 넘지 않을 것"],
-      steps: ["근무자 명단", "지켜야 할 규칙", "사전 점검·승인", "기준 확정", "실행", "결과"],
-    }),
-  },
-  {
-    hit: /(공고|모집|채용|안내문|공지)/,
-    make: () => ({
-      templateId: "handover",
-      name: "안내문 템플릿",
-      artifact: "안내문",
-      criteria: [
-        { id: "answerable", label: "읽는 사람이 되물을 것 없이 이해하는가", weight: 70 },
-        { id: "brevity", label: "간결성", weight: 30 },
-      ],
-      gates: ["분량 상한을 넘지 않을 것"],
-      steps: [
-        "무엇을 알리는 글인가",
-        "실제로 받았던 질문과 답",
-        "분량·간결성",
-        "채점 모델",
-        "사전 점검·승인",
-        "기준 확정",
-        "실행",
-        "결과",
-      ],
-    }),
-  },
-];
-
-/** 어느 갈래에도 걸리지 않는 목표 — 문서 만들기로 본다 */
-function fallback(): Blueprint {
-  return {
-    templateId: "handover",
-    name: "인수인계·온보딩 문서 템플릿",
-    artifact: "문서",
-    criteria: [
-      { id: "answerable", label: "문서만 보고 실제 질문에 답할 수 있는가", weight: 80 },
-      { id: "brevity", label: "간결성", weight: 20 },
-    ],
-    gates: ["분량 상한을 넘지 않을 것"],
-    steps: [
-      "업무 소개",
-      "실제로 받았던 질문과 답",
-      "분량·간결성",
-      "채점 모델",
-      "사전 점검·승인",
-      "기준 확정",
-      "실행",
-      "결과",
-    ],
-  };
-}
-
-function shapeFor(goal: string): Blueprint {
-  const found = SHAPES.find((shape) => shape.hit.test(goal));
-  return found ? found.make(goal) : fallback();
-}
-
-/** 템플릿을 만드는 동안 지나가는 마디 */
+/** 구성을 만드는 동안 지나가는 마디 */
 const PHASES = [
   "목표에서 무엇을 만들지 읽는 중",
-  "무엇을 잘한 걸로 볼지 정하는 중",
-  "반드시 지켜야 할 조건 세우는 중",
+  "어떤 평가 절차가 맞는지 고르는 중",
+  "분량과 채점 설정을 정하는 중",
   "진행 단계 짜는 중",
 ];
-const PHASE_MS = 700;
 
 const EXAMPLES = [
   "신입이 물어보지 않고도 일할 수 있는 인수인계 문서를 만들고 싶습니다",
@@ -118,56 +39,82 @@ const EXAMPLES = [
   "지원자가 자격 요건을 헷갈리지 않는 채용 공고를 쓰고 싶습니다",
 ];
 
+const NEWLINE = String.fromCharCode(10);
+
 export function BuilderPage() {
-  const { reset, setTemplateId } = useProject();
+  const { reset, setTemplateId, setAnswers } = useProject();
   const navigate = useNavigate();
   const [goal, setGoal] = useState("");
   const [phase, setPhase] = useState(-1);
-  const [plan, setPlan] = useState<Blueprint | null>(null);
+  const [plan, setPlan] = useState<TemplatePlan | null>(null);
+  const [madeFor, setMadeFor] = useState("");
   const [newStep, setNewStep] = useState("");
-  const timers = useRef<number[]>([]);
+  const [credential, setCredential] = useState(() => getByoCredential("openai") ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     setFlowStep({ kind: "outside" });
-    return () => timers.current.forEach((t) => window.clearTimeout(t));
+    clearStream();
   }, []);
 
-  const [madeFor, setMadeFor] = useState("");
-
-  const build = () => {
+  const build = async () => {
     const trimmed = goal.trim();
-    if (trimmed === "") return;
+    if (trimmed === "" || busy) return;
+    if (credential.trim() === "") {
+      setError(`${PROVIDER_LABEL.openai} 키를 넣어 주세요 — 구성은 모델이 짭니다.`);
+      return;
+    }
+    setError(null);
     setPlan(null);
     setMadeFor(trimmed);
+    setBusy(true);
     setPhase(0);
-    timers.current.forEach((t) => window.clearTimeout(t));
-    timers.current = PHASES.map((_, i) =>
-      window.setTimeout(() => setPhase(i + 1), PHASE_MS * (i + 1)),
-    );
-    timers.current.push(
-      window.setTimeout(() => setPlan(shapeFor(trimmed)), PHASE_MS * PHASES.length + 250),
-    );
-  };
-
-  const drop = (id: string) => {
-    if (!plan || plan.criteria.length <= 1) return;
-    const left = plan.criteria.filter((c) => c.id !== id);
-    // 하나를 빼면 남은 것들이 100을 채우도록 몫을 다시 나눈다
-    const total = left.reduce((sum, c) => sum + c.weight, 0);
-    setPlan({
-      ...plan,
-      criteria: left.map((c) => ({ ...c, weight: Math.round((c.weight / total) * 100) })),
-    });
+    clearStream("목표를 읽고 구성을 짜는 중");
+    // 마디는 진행을 보여주는 표시일 뿐 — 실제 판단은 아래 한 번의 호출에서 일어난다
+    const ticks = PHASES.map((_, i) => window.setTimeout(() => setPhase(i + 1), 900 * (i + 1)));
+    try {
+      const llm = withActivityLog(
+        createByoClient("openai", credential.trim(), DEFAULT_JUDGE_MODEL.openai),
+        "목표를 읽고 구성을 짜는 중",
+      );
+      const made = await planTemplate(
+        llm,
+        trimmed,
+        TEMPLATES.map((t) => ({ id: t.id, name: t.name, description: t.description })),
+      );
+      setByoCredential("openai", credential.trim());
+      setPhase(PHASES.length);
+      setPlan(made);
+      appendStream(
+        [
+          `만들 것: ${made.artifact}`,
+          `평가 절차: ${TEMPLATES.find((t) => t.id === made.templateId)?.name ?? made.templateId}`,
+          `분량 상한: ${made.lengthCap.toLocaleString()}자`,
+          `길이를 점수에 반영: ${made.useConciseness ? "예" : "아니오"}`,
+        ].join(NEWLINE),
+        made.name,
+      );
+      endStream("구성을 짰습니다");
+    } catch (err) {
+      setPhase(-1);
+      setError(err instanceof Error ? err.message : "구성을 만들지 못했습니다.");
+      endStream("실패");
+    } finally {
+      ticks.forEach((t) => window.clearTimeout(t));
+      setBusy(false);
+    }
   };
 
   const startRun = () => {
     if (!plan) return;
     reset();
     setTemplateId(plan.templateId);
+    // 모델이 정한 값을 위저드 기본값으로 넘긴다 — 사용자가 그 화면에서 고칠 수 있다
+    setAnswers({ lengthCap: plan.lengthCap, conciseness: plan.useConciseness });
     navigate("/wizard");
   };
 
-  const building = phase >= 0 && plan === null;
   const template = plan ? TEMPLATES.find((t) => t.id === plan.templateId) : null;
 
   return (
@@ -175,8 +122,8 @@ export function BuilderPage() {
       <span className="eyebrow">0단계 · 템플릿 만들기</span>
       <h1 className="q-big">무엇을 잘하게 만들고 싶으세요?</h1>
       <p className="q-help">
-        목표를 한 문장으로 적어 주세요. 그 목표에 맞는 템플릿 — 채점 기준, 반드시 지켜야 할 조건,
-        진행 단계 — 을 만들어 보여드립니다.
+        목표를 한 문장으로 적어 주세요. 그 목표에 맞는 템플릿 — 평가 절차, 분량, 확인할 질문의
+        방향 — 을 만들어 보여드립니다.
       </p>
 
       <div className="builder-ask">
@@ -193,14 +140,37 @@ export function BuilderPage() {
             </button>
           ))}
         </div>
+        <div className="builder-key">
+          <ProviderCredentialInput
+            provider="openai"
+            value={credential}
+            storedCredential={null}
+            idPrefix="builder"
+            disabled={busy}
+            onChange={(next) => {
+              setCredential(next);
+              setError(null);
+            }}
+            onDelete={() => {
+              setByoCredential("openai", null);
+              setCredential("");
+            }}
+            onError={setError}
+          />
+        </div>
         <button
           type="button"
           className="primary builder-go"
-          disabled={goal.trim() === "" || building}
+          disabled={goal.trim() === "" || busy}
           onClick={build}
         >
-          {building ? "템플릿 만드는 중…" : "이 목표에 맞는 템플릿 만들기"}
+          {busy ? "템플릿 만드는 중…" : "이 목표에 맞는 템플릿 만들기"}
         </button>
+        {error ? (
+          <p className="error" style={{ marginTop: 12 }}>
+            {error}
+          </p>
+        ) : null}
       </div>
 
       {phase >= 0 ? (
@@ -212,6 +182,14 @@ export function BuilderPage() {
             </li>
           ))}
         </ol>
+      ) : null}
+
+      {busy || plan ? (
+        <ActivityConsole
+          model={DEFAULT_JUDGE_MODEL.openai}
+          empty="목표를 읽고 구성을 짜는 과정이 여기에 흐릅니다."
+          height={260}
+        />
       ) : null}
 
       {plan ? (
@@ -226,40 +204,42 @@ export function BuilderPage() {
             <div className="builder-cols">
               <div className="builder-col">
                 <section className="builder-block">
-                  <h3>무엇을 잘한 걸로 볼지</h3>
+                  <h3>만들 것</h3>
+                  <p className="builder-artifact">{plan.artifact}</p>
+                </section>
+
+                <section className="builder-block">
+                  <h3>채점 설정</h3>
                   <ul className="builder-rules">
-                    {plan.criteria.map((c) => (
-                      <li key={c.id}>
-                        <div className="builder-rule-head">
-                          <span>{c.label}</span>
-                          <b>{c.weight}%</b>
-                          <button
-                            type="button"
-                            disabled={plan.criteria.length <= 1}
-                            onClick={() => drop(c.id)}
-                          >
-                            빼기
-                          </button>
-                        </div>
-                        <div className="builder-bar" aria-hidden="true">
-                          <i style={{ width: `${c.weight}%` }} />
-                        </div>
-                      </li>
-                    ))}
+                    <li>
+                      <div className="builder-rule-head">
+                        <span>분량 상한</span>
+                        <b>{plan.lengthCap.toLocaleString()}자</b>
+                      </div>
+                    </li>
+                    <li>
+                      <div className="builder-rule-head">
+                        <span>길이를 점수에 반영</span>
+                        <b>{plan.useConciseness ? "사용" : "사용 안 함"}</b>
+                      </div>
+                    </li>
                   </ul>
                 </section>
 
                 <section className="builder-block">
-                  <h3>반드시 지켜야 할 조건</h3>
+                  <h3>무엇을 물어 확인할지</h3>
                   <ul className="builder-rules">
-                    {plan.gates.map((gate) => (
-                      <li key={gate} className="is-gate">
+                    {plan.questionFocus.map((focus) => (
+                      <li key={focus}>
                         <div className="builder-rule-head">
-                          <span>{gate}</span>
+                          <span>{focus}</span>
                           <button
                             type="button"
                             onClick={() =>
-                              setPlan({ ...plan, gates: plan.gates.filter((g) => g !== gate) })
+                              setPlan({
+                                ...plan,
+                                questionFocus: plan.questionFocus.filter((f) => f !== focus),
+                              })
                             }
                           >
                             빼기
@@ -267,9 +247,6 @@ export function BuilderPage() {
                         </div>
                       </li>
                     ))}
-                    {plan.gates.length === 0 ? (
-                      <li className="is-empty">조건이 없습니다</li>
-                    ) : null}
                   </ul>
                 </section>
               </div>
@@ -331,7 +308,8 @@ export function BuilderPage() {
               </button>
               {template ? (
                 <span className="hint">
-                  지금은 「{template.name}」 절차로 진행합니다 — 이 템플릿에 가장 가까운 절차입니다.
+                  「{template.name}」 절차로 진행합니다. 분량과 채점 설정은 다음 화면에 채워지고,
+                  승인 전에 직접 고칠 수 있습니다.
                 </span>
               ) : null}
             </footer>
