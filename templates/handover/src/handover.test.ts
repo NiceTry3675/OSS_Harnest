@@ -183,8 +183,28 @@ describe("compile", () => {
     expect(problem.holdoutCases).toHaveLength(6);
     const hp = pack.holdoutPolicy;
     if (hp.mode !== "seeded_split") throw new Error("unreachable");
-    // 100 / (2 × 12) = 4.166… → 소수 첫째 자리 반올림
+    // 100 / (2 × 12) = 4.166… → 소수 첫째 자리 올림
     expect(hp.guardTolerance).toBe(4.2);
+  });
+
+  // 실측(bb88db60): 내림(8.3)이면 가드 6문항에서 91.7 → 83.3(반 단계 하나)이 8.4로
+  // 벌어져 기각된다. 챔피언 가드가 91.7·66.7에 앉는 순간 스칼라가 훨씬 높은 후보도
+  // 전부 막혀 실행이 얼어붙는다. 올림이라야 "반 단계 하나는 봐준다"가 성립한다.
+  it("가드 허용 오차는 올림이라 반 단계 하나를 실제로 덮는다", async () => {
+    const { problem, pack } = await compile(makeSubmission(15), mockJudge);
+    expect(problem.guardCases).toHaveLength(6);
+    const hp = pack.holdoutPolicy;
+    if (hp.mode !== "seeded_split") throw new Error("unreachable");
+    expect(hp.guardTolerance).toBe(8.4);
+
+    // 반 단계 하나는 통과, 두 단계는 기각 — 모든 등급에서
+    const rungs = Array.from({ length: 13 }, (_, i) => Math.round(((12 - i) / 12) * 1000) / 10);
+    for (let i = 0; i + 1 < rungs.length; i += 1) {
+      expect(rungs[i + 1]).toBeGreaterThanOrEqual(rungs[i] - hp.guardTolerance - 1e-9);
+    }
+    for (let i = 0; i + 2 < rungs.length; i += 1) {
+      expect(rungs[i + 2]).toBeLessThan(rungs[i] - hp.guardTolerance);
+    }
   });
 
   it("판정 절차 다이제스트가 계산되어 동결된다 (SHA-256 hex)", async () => {

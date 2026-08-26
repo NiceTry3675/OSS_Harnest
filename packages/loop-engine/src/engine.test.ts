@@ -177,6 +177,70 @@ describe("createLoopRun", () => {
     expect(last.tree[0].adopted).toBe(true);
   });
 
+  // 실측(bb88db60·019e41b9): 가드 6문항에서 챔피언이 91.7에 앉으면 반 단계 하나 내려간
+  // 후보(83.3)가 `91.7 - 8.4 = 58.3...004` 식의 이진 오차로 기각되어 실행이 얼어붙었다.
+  it("경계에 정확히 걸친 후보는 이진 오차로 기각되지 않는다", async () => {
+    const guardedPack: EvaluationPack = {
+      ...pack,
+      holdoutPolicy: {
+        mode: "seeded_split",
+        note: "-",
+        guardCaseIds: ["g1"],
+        holdoutCaseIds: ["h1"],
+        guardTolerance: 8.4,
+      },
+    };
+    const events: LoopCheckpoint<number>[] = [];
+    const handle = createLoopRun<number>({
+      runId: "guard-boundary",
+      pack: guardedPack,
+      spec: makeSpec({ maxRounds: 1 }),
+      // 66.7 - 8.4 는 이진에서 58.300000000000004 — 후보 58.3이 경계에 정확히 걸린다
+      scorer: (a) => (a === 0 ? { ...ok(10), guardScore: 66.7 } : { ...ok(90), guardScore: 58.3 }),
+      generate: (champion) => champion + 1,
+      initial: () => 0,
+      store: new MemoryCheckpointStore<number>(),
+      onEvent: (cp) => events.push(cp),
+    });
+    await handle.start();
+
+    const last = events[events.length - 1];
+    expect(last.tree[0].guardSafe).toBe(true);
+    expect(last.tree[0].adopted).toBe(true);
+    expect(last.championScore).toBe(90);
+  });
+
+  it("여유는 반 단계까지다 — 두 단계 내려간 후보는 그대로 기각한다", async () => {
+    const guardedPack: EvaluationPack = {
+      ...pack,
+      holdoutPolicy: {
+        mode: "seeded_split",
+        note: "-",
+        guardCaseIds: ["g1"],
+        holdoutCaseIds: ["h1"],
+        guardTolerance: 8.4,
+      },
+    };
+    const events: LoopCheckpoint<number>[] = [];
+    const handle = createLoopRun<number>({
+      runId: "guard-two-steps",
+      pack: guardedPack,
+      spec: makeSpec({ maxRounds: 1 }),
+      // 91.7 → 75 는 두 단계(16.7) — 스칼라가 훨씬 높아도 기각되어야 한다
+      scorer: (a) => (a === 0 ? { ...ok(10), guardScore: 91.7 } : { ...ok(95), guardScore: 75 }),
+      generate: (champion) => champion + 1,
+      initial: () => 0,
+      store: new MemoryCheckpointStore<number>(),
+      onEvent: (cp) => events.push(cp),
+    });
+    await handle.start();
+
+    const last = events[events.length - 1];
+    expect(last.tree[0].guardSafe).toBe(false);
+    expect(last.tree[0].adopted).toBe(false);
+    expect(last.championScore).toBe(10);
+  });
+
   it("가드 미구성(scorer가 guardScore를 주지 않음)이면 채택 판정이 기존과 같다", async () => {
     const events: LoopCheckpoint<number>[] = [];
     const handle = createLoopRun<number>({
