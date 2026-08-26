@@ -17,6 +17,46 @@ export function limitBlock(cap: number): string {
   );
 }
 
+/** 수정용 분량 안내.
+ *
+ *  원샷과 달리 목표 글자 수를 주지 않는다. 간결성을 켠 평가에서 "상한의 80%를 목표로"는
+ *  간결성 점수와 정면으로 싸운다 — 점수는 상한 대비 남는 여유가 클수록 높은데,
+ *  프롬프트가 80% 언저리에 머물라고 지시하면 남은 여지에 손을 못 댄다.
+ *
+ *  못 채운 질문이 하나도 없을 때(trimOnly)는 짧게 쓰는 것 말고 점수를 올릴 길이 없다.
+ *  그때만 이번 회차 목표 분량을 준다. 과감히 줄여도 안전하다 — 답을 놓치면 점수가
+ *  떨어져 그 개선안이 기각될 뿐, 채택 조건이 챔피언을 지킨다. */
+export function reviseLimitBlock(
+  cap: number,
+  docLength: number,
+  useConciseness: boolean,
+  trimOnly = false,
+): string {
+  const hardCap = hardLengthCapFor(cap);
+  const limits =
+    `분량: ${cap}자를 넘으면 ${hardCap}자까지 점진적으로 최대 ${MAX_LENGTH_OVERFLOW_PENALTY}점 감점되고, ` +
+    `${hardCap}자를 넘으면 실격입니다.`;
+  if (!useConciseness) return `${limits} 현재 ${docLength.toLocaleString()}자입니다.`;
+
+  const score = (length: number): number => Math.round(Math.max(0, 1 - length / cap) * 100);
+  const target = Math.max(Math.floor(cap * 0.3), Math.floor(docLength * 0.7));
+  const head =
+    `${limits}\n` +
+    `간결성 점수 = (1 − 길이 ÷ ${cap}) × 100 입니다. ` +
+    `지금 ${docLength.toLocaleString()}자로 ${score(docLength)}점입니다.`;
+  if (!trimOnly) {
+    return `${head}\n짧을수록 점수가 높습니다 — 내용을 더할 때는 그만큼 덜어내세요.`;
+  }
+  const cut = Math.round((1 - target / docLength) * 100);
+  return (
+    `${head}\n` +
+    `이번 회차 목표: ${target.toLocaleString()}자 이하 — 지금보다 약 ${cut}% 짧게. ` +
+    `그러면 간결성이 ${score(target)}점이 됩니다.\n` +
+    `답에 필요한 사실을 놓치면 점수가 오히려 떨어져 이 개선안은 채택되지 않습니다. ` +
+    `사실은 그대로 두고 중복·장황한 설명·반복되는 머리말만 덜어내 목표에 맞추세요.`
+  );
+}
+
 function casesBlock(cases: CaseDef[]): string {
   return cases
     .map((c) => `### 질문 (${c.id})\n${c.question}\n\n### 그때의 답\n${c.expectedAnswer}`)
@@ -33,6 +73,12 @@ export const HANDOVER_STRATEGIES = [
     key: "restructure_for_retrieval",
     label: "검색 가능한 구조로 재편",
     description: "제목·순서·표·체크리스트를 재구성해 필요한 답을 더 쉽게 찾게 한다.",
+  },
+  {
+    key: "tighten",
+    label: "군더더기 덜어내기",
+    description:
+      "새 내용을 넣지 않고 중복·장황한 설명·반복되는 머리말을 과감히 걷어내 이번 회차 목표 분량까지 줄인다. 답에 필요한 사실은 하나도 빼지 않는다.",
   },
   {
     key: "compress_and_reallocate",
@@ -192,11 +238,7 @@ ${publicExperimentsBlock(recentPublicExperiments)}
 실패 목록만 좁게 때우거나 기록의 문답을 그대로 옮겨 적지 말고, 참고 자료의 다른 주제 커버리지도 함께 유지하세요.`
       : ""
   }
-${limitBlock(problem.lengthCap)}${
-    problem.useConciseness
-      ? `\n간결성 가점: 같은 커버리지면 짧은 문서가 더 높은 점수를 받습니다 (현재 ${championDoc.length.toLocaleString()}자).`
-      : ""
-  }
+${reviseLimitBlock(problem.lengthCap, championDoc.length, problem.useConciseness, violations.length === 0)}
 
 ## 업무 소개 · 참고 자료
 ${problem.material || "(제공되지 않음)"}
@@ -208,7 +250,9 @@ ${casesBlock(problem.visibleCases)}
 ${championDoc}
 
 ## 실패 목록
-${violations.length > 0 ? violations.join("\n") : "(없음 — 표현을 다듬되 내용 커버리지를 유지하세요)"}
+${violations.length > 0 ? violations.join("\n") : problem.useConciseness
+      ? "(없음 — 공개 질문은 모두 답할 수 있습니다. 남은 점수 여지는 간결성뿐이니, 커버리지를 지키면서 분량을 줄이세요.)"
+      : "(없음 — 표현을 다듬되 내용 커버리지를 유지하세요)"}
 ${previousAttemptBlock}
 ${experimentBlock}
 ${strategyBlock}
@@ -277,8 +321,12 @@ ${blocks}
 
 엄격하게:
 - 1 — 참조 답의 핵심 사실·해법을 담음
-- 0.5 — 방향은 맞지만 핵심 요소가 빠졌거나 잘못된 주장 추가
+- 0.5 — 참조 답의 핵심 요소가 빠졌거나, 사실과 다른 내용을 덧붙임
 - 0 — 틀림, 무관, 또는 "문서에 없음"
+
+재는 것은 "이 답으로 질문이 해결되는가"입니다. 참조 답에 없는 내용이 더 있다는 것만으로는
+감점하지 마세요 — 그 내용이 답을 틀리게 만들거나 질문과 무관할 때만 깎습니다.
+표현이 참조 답과 다른 것도 감점 사유가 아닙니다.
 
 why는 점수를 되풀이하지 말고 판정의 근거를 밝히세요. 응답이 참조 답의 어느 핵심을
 담았는지(또는 무엇이 빠지고 무엇이 틀렸는지)를 먼저 짚고, 그래서 이 점수라는 것을
@@ -316,8 +364,12 @@ ${response}
 
 엄격하게:
 - 1 — 참조 답의 핵심 사실·해법을 담음
-- 0.5 — 방향은 맞지만 핵심 요소가 빠졌거나 잘못된 주장 추가
+- 0.5 — 참조 답의 핵심 요소가 빠졌거나, 사실과 다른 내용을 덧붙임
 - 0 — 틀림, 무관, 또는 "문서에 없음"
+
+재는 것은 "이 답으로 질문이 해결되는가"입니다. 참조 답에 없는 내용이 더 있다는 것만으로는
+감점하지 마세요 — 그 내용이 답을 틀리게 만들거나 질문과 무관할 때만 깎습니다.
+표현이 참조 답과 다른 것도 감점 사유가 아닙니다.
 
 why는 점수를 되풀이하지 말고 판정의 근거를 밝히세요 — 참조 답의 어느 핵심을 담았는지
 (또는 무엇이 빠졌는지)를 짚고 그래서 이 점수라는 것을 한 문장으로 이으세요.

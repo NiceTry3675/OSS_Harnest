@@ -252,18 +252,17 @@ export type StreamKind = "output" | "thought" | "notice";
 
 const LINE_BREAK = String.fromCharCode(10);
 
-/** 이 호출에 추론을 붙일지 — 지금은 모든 호출에 붙인다.
+/** 이 호출에 추론을 붙일지 — 새로 쓰는 호출에만 붙인다.
  *
- *  추론 토큰은 출력 토큰으로 과금된다. 비용을 줄여야 하면 아래 반환값을
- *  `(opts?.temperature ?? 0.7) > 0` 으로 바꾸면 된다. 새로 쓰는 호출(생성·변이)만
- *  temperature를 올려 부르고 채점·검증은 temperature 0으로 부르므로, 그렇게 하면
- *  실행 1회 기준 40여 회 중 9회 안팎에만 붙는다.
+ *  추론을 켠 호출에는 temperature를 함께 보낼 수 없다(벤더가 거부한다). 그래서 전
+ *  호출에 붙이면 채점의 temperature 0까지 사라지고, 같은 산출물을 두 번 재도 점수가
+ *  달라진다 — 곡선이 실행마다 달라지고 채택·기각이 운에 좌우된다.
  *
- *  추론을 켠 호출에는 temperature를 함께 보낼 수 없는 벤더가 있어 빼고 보낸다 —
- *  채점의 temperature 0이 그만큼 빠진다는 뜻이다. */
+ *  새로 쓰는 호출(생성·변이)만 temperature를 올려 부르고 채점·검증은 0으로 부르므로,
+ *  temperature가 0이 아닌 호출에만 추론을 붙이면 채점의 결정성이 지켜진다.
+ *  덤으로 추론 토큰(출력 토큰으로 과금)이 실행 1회 40여 회 중 9회 안팎으로 줄어든다. */
 function wantsThinking(opts: { temperature?: number } | undefined): boolean {
-  void opts;
-  return true;
+  return (opts?.temperature ?? 0.7) > 0;
 }
 export type StreamSink = (chunk: string, kind: StreamKind) => void;
 

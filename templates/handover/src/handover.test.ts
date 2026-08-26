@@ -13,7 +13,13 @@ import {
   type CompileOptions,
   type HandoverProblem,
 } from "./index";
-import { mutatePrompt, oneshotPrompt } from "./prompts";
+import {
+  graderPrompt,
+  gradersPrompt,
+  mutatePrompt,
+  oneshotPrompt,
+  reviseLimitBlock,
+} from "./prompts";
 import {
   batchOutputTokensFor,
   CallBudgetExceededError,
@@ -693,7 +699,7 @@ describe("createGenerator", () => {
     expect(prompt).toContain("현재 챔피언 문서 본문");
     expect(prompt).toContain("라운드 3");
     // 간결성이 켜진 절차의 변이 프롬프트에는 가점 힌트가 실린다 (강제는 scorer, 프롬프트는 힌트)
-    expect(prompt).toContain("간결성 가점");
+    expect(prompt).toContain("간결성 점수");
     // 가드가 있는 절차에는 비공개 검증 안내가 실린다 — 질문·정답이 아니라 존재만
     expect(prompt).toContain("공개되지 않는 검증 질문");
     // 변이 프롬프트도 피드백 케이스만 본다 — 가드·홀드아웃 유입 금지
@@ -840,6 +846,8 @@ describe("createStrategyPlanner", () => {
     expect(result).toEqual({
       key: "restructure_for_retrieval",
       summary: "절차를 작업 순서별 제목과 체크리스트로 재구성한다.",
+      // 화면이 key 대신 보여줄 이름표가 함께 실린다
+      label: "검색 가능한 구조로 재편",
     });
     expect(prompts).toHaveLength(2);
     expect(prompts[0]).toContain("최근 공개 실험 기록");
@@ -947,5 +955,130 @@ describe("withCallBudget", () => {
     const perRoundWorst = 2 + 1 + 2 * perScoringWorst;
     const worst = initialWorst + loopSpec.maxRounds * perRoundWorst + 2 * perScoringWorst;
     expect(MAX_CALLS_PER_RUN).toBeGreaterThan(worst);
+  });
+});
+
+describe("수정 프롬프트 — 간결성과 분량 지시의 정합", () => {
+  // 간결성을 켜면 점수는 "상한 대비 남는 여유"다. 그런데 원샷용 안내는 상한의 80%를
+  // 목표로 삼으라고 지시해, 남은 점수 여지를 프롬프트가 스스로 막고 있었다.
+  it("고칠 실패가 남아 있으면 목표 분량을 주지 않는다", () => {
+    const block = reviseLimitBlock(8000, 6400, true, false);
+    expect(block).not.toContain("목표로 여유 있게");
+    expect(block).toContain("6,400자로 20점");
+    expect(block).not.toContain("이번 회차 목표");
+  });
+
+  // 못 채운 질문이 없으면 짧게 쓰는 것 말고 점수를 올릴 길이 없다.
+  // 과감히 줄여도 안전하다 — 답을 놓치면 기각될 뿐 챔피언은 지켜진다.
+  it("고칠 것이 없으면 이번 회차 목표 분량을 준다", () => {
+    const block = reviseLimitBlock(8000, 6400, true, true);
+    expect(block).toContain("이번 회차 목표: 4,480자 이하");
+    expect(block).toContain("약 30% 짧게");
+    expect(block).toContain("간결성이 44점");
+    expect(block).toContain("채택되지 않습니다");
+  });
+
+  it("간결성을 끄면 분량 한도만 알린다", () => {
+    const block = reviseLimitBlock(8000, 6400, false);
+    expect(block).not.toContain("간결성 점수");
+    expect(block).toContain("6,400자입니다");
+  });
+
+  it("지적할 것이 없을 때 간결성 쪽으로 방향을 준다", () => {
+    const problem = makeProblem({ useConciseness: true });
+    const prompt = mutatePrompt(problem, "문서 본문", 88, [], 3);
+    expect(prompt).toContain("남은 점수 여지는 간결성뿐");
+    expect(prompt).toContain("이번 회차 목표");
+    expect(prompt).not.toContain("목표로 여유 있게");
+  });
+});
+
+describe("createStrategyPlanner — 더 올릴 곳이 없을 때", () => {
+  // 케이스를 다 맞히면 커버리지가 천장에 닿아 80%가 얼어붙는다.
+  // 그 상태에서 내용을 더하는 전략은 문서만 길게 만들어 간결성을 깎는다.
+  it("공개 실패가 없으면 내용을 더하는 전략을 후보에서 뺀다", async () => {
+    const problem = makeProblem();
+    const prompts: string[] = [];
+    const llm = {
+      providerId: "mock" as const,
+      model: "테스트",
+      async complete(prompt: string) {
+        prompts.push(prompt);
+        return JSON.stringify({ key: "tighten", summary: "중복된 결재선 설명을 한 번만 남긴다." });
+      },
+    };
+    const feedback = {
+      round: 4,
+      championScore: 83.2,
+      championViolations: [],
+      blockedStrategyKeys: [],
+    };
+
+    const result = await createStrategyPlanner(problem, llm)("챔피언 문서", () => 0, feedback);
+
+    expect(result.key).toBe("tighten");
+    expect(result.label).toBe("군더더기 덜어내기");
+    for (const blocked of [
+      "targeted_repair",
+      "source_regrounding",
+      "restructure_for_retrieval",
+      "consistency_pass",
+    ]) {
+      expect(prompts[0]).toContain(blocked);
+    }
+    // 남는 선택지는 짧게 만드는 쪽뿐이다
+    expect(prompts[0]).toContain("tighten");
+  });
+});
+
+describe("전략 차단 — 전부 막히지 않는다", () => {
+  // 천장 차단(4개)에 엔진의 반복 실패 차단(나머지)이 겹치면 고를 전략이 사라져
+  // 실행이 멈춘다. 그때는 천장 차단부터 양보한다.
+  it("엔진이 남은 전략까지 막으면 천장 차단을 풀어 선택지를 남긴다", async () => {
+    const problem = makeProblem();
+    const prompts: string[] = [];
+    const llm = {
+      providerId: "mock" as const,
+      model: "테스트",
+      async complete(prompt: string) {
+        prompts.push(prompt);
+        return JSON.stringify({ key: "targeted_repair", summary: "빠진 절차를 보강한다." });
+      },
+    };
+    const feedback = {
+      round: 6,
+      championScore: 84.6,
+      championViolations: [],
+      blockedStrategyKeys: ["tighten", "compress_and_reallocate"],
+    };
+
+    const result = await createStrategyPlanner(problem, llm)("챔피언 문서", () => 0, feedback);
+
+    // 전부 막히는 대신 천장 차단이 풀려 보강 전략을 다시 고를 수 있다
+    expect(result.key).toBe("targeted_repair");
+  });
+});
+
+describe("채점 규칙 — 무엇을 재는가", () => {
+  // 실측(harnest-0a7770ba): "참조 답에 없는 절차를 추가했다"는 이유로 0.5가 반복됐다.
+  // 기준은 "문서만 보고 답할 수 있는가"인데, 맞는 내용이 더 있다고 답할 수 있는 정도가
+  // 줄지는 않는다. 축자 일치를 재던 것을 답의 해결력으로 되돌린다.
+  it("참조 답에 없는 내용을 더했다는 이유만으로는 깎지 않는다고 명시한다", () => {
+    const prompt = gradersPrompt([
+      { caseId: "case-1", question: "질문", expected: "참조 답", response: "응답" },
+    ]);
+    expect(prompt).toContain("참조 답에 없는 내용이 더 있다는 것만으로는");
+    expect(prompt).toContain("답을 틀리게 만들거나 질문과 무관할 때만");
+    expect(prompt).toContain("표현이 참조 답과 다른 것도 감점 사유가 아닙니다");
+  });
+
+  it("단건 채점에도 같은 규칙을 쓴다", () => {
+    const prompt = graderPrompt("질문", "참조 답", "응답");
+    expect(prompt).toContain("참조 답에 없는 내용이 더 있다는 것만으로는");
+  });
+
+  it("사실과 다른 내용을 덧붙이면 여전히 부분 정답이다", () => {
+    const prompt = graderPrompt("질문", "참조 답", "응답");
+    expect(prompt).toContain("사실과 다른 내용을 덧붙임");
   });
 });

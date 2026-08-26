@@ -203,9 +203,14 @@ export function ConsolePage() {
           : {
               planStrategy: async (champion, rng, feedback) => {
                 const strategy = await base.planStrategy!(champion, rng, feedback);
+                // 케이스를 다 맞히면 남는 여지는 짧게 쓰는 쪽뿐이다 — 그 사정을 먼저 밝힌다
+                const why =
+                  feedback.championViolations.length === 0
+                    ? "공개 질문은 모두 답할 수 있습니다. 내용을 더해도 점수가 오르지 않으니, 짧게 만드는 쪽만 남았습니다."
+                    : `아직 못 채운 질문이 ${feedback.championViolations.length}개 있습니다.`;
                 appendStream(
-                  strategy.summary,
-                  `${feedback.round}회차 — 수정 전략 ${strategy.key}`,
+                  why + "\n\n" + strategy.summary,
+                  `${feedback.round}회차 — 이번엔 ${strategy.label ?? strategy.key}`,
                 );
                 return strategy;
               },
@@ -217,7 +222,7 @@ export function ConsolePage() {
               ? "지금 산출물이 못 채운 것" + "\n" +
                 misses.map((v) => "  · " + v).join("\n") + "\n" + "\n" +
                 "이 항목들을 보강해 다시 씁니다. 나머지는 건드리지 않습니다."
-              : "지적된 문제가 없습니다. 표현을 더 촘촘히 다듬어 다시 씁니다.";
+              : "못 채운 질문이 없습니다. 답에 필요한 사실은 그대로 두고, 군더더기를 덜어 더 짧게 씁니다.";
           appendStream(
             body,
             feedback.round + "회차 — 무엇을 고칠지 정합니다 (현재 " +

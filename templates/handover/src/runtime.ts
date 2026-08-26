@@ -124,7 +124,9 @@ export function parseStrategy(
   ) {
     throw new StrategyFormatError("수정 전략 출력 형식 오류 — summary는 500자 이하의 설명이어야 합니다.");
   }
-  return { key: value.key, summary: value.summary.trim() };
+  // 화면이 key 대신 쓸 이름표를 함께 싣는다 — 페이지가 템플릿의 전략 목록을 알 필요가 없다
+  const label = HANDOVER_STRATEGIES.find((strategy) => strategy.key === value.key)?.label;
+  return { key: value.key, summary: value.summary.trim(), ...(label ? { label } : {}) };
 }
 
 function parseGrade(raw: string): { score: number; why: string } {
@@ -432,14 +434,38 @@ export function createInitial(problem: HandoverProblem, llm: LlmClient) {
 }
 
 /** 전략 선택기 — 공개 실험 기억을 보고 후보를 쓰기 전에 이번 수정 방식을 선언한다. */
+/** 공개 실패가 하나도 없을 때는 쓸 수 없는 전략들.
+ *
+ *  케이스를 모두 맞히면 커버리지가 천장에 닿아 80%가 얼어붙는다. 그 상태에서
+ *  내용을 더하거나 재배치하는 전략은 점수를 올릴 수 없고, 문서만 길어져 간결성을
+ *  깎는다 — 실측(8회차 중 6회)에서 전부 기각됐다. 남은 여지는 짧게 만드는 쪽뿐이다. */
+const NO_HEADROOM_BLOCKED = [
+  "targeted_repair",
+  "source_regrounding",
+  "restructure_for_retrieval",
+  "consistency_pass",
+];
+
 export function createStrategyPlanner(problem: HandoverProblem, llm: LlmClient) {
   assertCurrentLengthPolicy(problem);
   return async (
     champion: HandoverDoc,
     _rng: () => number,
-    feedback: GeneratorFeedback,
+    incoming: GeneratorFeedback,
   ): Promise<ExperimentStrategy> => {
-    const blocked = feedback.blockedStrategyKeys ?? [];
+    const engineBlocked = incoming.blockedStrategyKeys ?? [];
+    const everyKey = HANDOVER_STRATEGIES.map((strategy) => strategy.key as string);
+    const allBlocked = (keys: string[]): boolean => everyKey.every((key) => keys.includes(key));
+    let blocked = [
+      ...new Set([
+        ...engineBlocked,
+        ...(incoming.championViolations.length === 0 ? NO_HEADROOM_BLOCKED : []),
+      ]),
+    ];
+    // 전부 막히면 고를 전략이 없어 실행이 멈춘다 — 천장 차단부터 양보한다
+    if (allBlocked(blocked)) blocked = [...new Set(engineBlocked)];
+    if (allBlocked(blocked)) blocked = [];
+    const feedback: GeneratorFeedback = { ...incoming, blockedStrategyKeys: blocked };
     const first = await llm.complete(strategyPrompt(problem, champion, feedback), {
       temperature: 0.3,
       maxOutputTokens: 512,

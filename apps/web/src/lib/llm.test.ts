@@ -36,6 +36,7 @@ import {
   testByoConnection,
   testDetectedByoConnection,
 } from "./llm";
+import type { StreamingLlmClient } from "./llm";
 
 describe("AI 모델 표시 이름", () => {
   it("모의 모델은 공급자와 모델 이름을 중복해 표시하지 않는다", () => {
@@ -875,5 +876,32 @@ describe("승인 전 BYO 1콜 연결 테스트", () => {
     await vi.advanceTimersByTimeAsync(15_000);
     await assertion;
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("추론과 temperature", () => {
+  // 추론을 켠 호출에는 temperature를 보낼 수 없다. 전 호출에 붙이면 채점의
+  // temperature 0까지 사라져 같은 산출물이 매번 다른 점수를 받는다.
+  it("채점 호출(temperature 0)은 temperature를 지키고 추론을 붙이지 않는다", async () => {
+    const sent: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      sent.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return new Response(
+        'data: {"type":"response.output_text.delta","delta":"{\\"score\\":1}"}\n\ndata: [DONE]\n\n',
+        { status: 200, headers: { "Content-Type": "text/event-stream" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const llm = createOpenAIClient("sk-test", "gpt-5.6-sol") as StreamingLlmClient;
+    await llm.completeStream("채점", { temperature: 0 }, () => {});
+    await llm.completeStream("생성", { temperature: 0.7 }, () => {});
+
+    expect(sent[0].temperature).toBe(0);
+    expect(sent[0].reasoning).toEqual({ effort: "none" });
+    expect(sent[1].temperature).toBeUndefined();
+    expect(sent[1].reasoning).toEqual({ effort: "low", summary: "detailed" });
+
+    vi.unstubAllGlobals();
   });
 });
