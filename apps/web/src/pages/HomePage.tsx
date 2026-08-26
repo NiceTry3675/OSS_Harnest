@@ -46,10 +46,7 @@ export function HomePage() {
             올라간 점수를 믿을 수 있는 이유입니다.
           </p>
           <div className="hero-cta">
-            <button
-              className="primary"
-              onClick={() => picks.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-            >
+            <button className="primary" onClick={() => navigate("/build")}>
               시작하기
             </button>
             <button onClick={() => setTour(true)}>어떻게 진행되나요</button>
@@ -59,7 +56,7 @@ export function HomePage() {
       </section>
 
       <div ref={picks} className="picks">
-        <h2 className="picks-title">무엇을 맡기시겠어요?</h2>
+        <h2 className="picks-title">이미 만들어 둔 템플릿으로 바로 시작하기</h2>
         <div className="template-grid">
           {TEMPLATES.map((t) => (
             <div key={t.id} className="card template-card">
