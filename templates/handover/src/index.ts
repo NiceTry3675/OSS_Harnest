@@ -210,7 +210,13 @@ export async function compile(
   const visibleCases = shuffled.slice(holdoutCount + guardCount);
   // 비퇴보 허용 오차 = 채점 반 단계(0.5점짜리 뒤집힘 하나) — 저지 노이즈로 좋은 후보가
   // 기각되지 않게 하되, 실제 퇴보는 걸러낸다. 사용자 노브가 아니라 개수에서 유도되는 산식.
-  const guardTolerance = Math.round((100 / (2 * guardCases.length)) * 10) / 10;
+  //
+  // 올림이어야 한다. 가드 점수는 소수 첫째 자리로 반올림되어 저장되므로(round1),
+  // 6문항이면 반 단계가 91.7 → 83.3처럼 8.4로 벌어지는 등급이 생긴다. 오차를 8.3으로
+  // 내림하면 봐주기로 한 바로 그 한 칸이 기각되어, 챔피언 가드가 91.7·66.7에 앉는 순간
+  // 스칼라가 훨씬 높은 후보도 전부 막히고 실행이 얼어붙는다(실측: bb88db60).
+  // 올려도 두 칸(16.7)은 여전히 막히므로 "반 단계 하나"라는 뜻은 그대로다.
+  const guardTolerance = Math.ceil((100 / (2 * guardCases.length)) * 10) / 10;
 
   const problem: HandoverProblem = {
     material,

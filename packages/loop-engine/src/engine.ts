@@ -17,6 +17,13 @@ import type {
 export const PUBLIC_EXPERIMENT_MEMORY_LIMIT = 3;
 export const REPEATED_STRATEGY_FAILURE_LIMIT = 2;
 
+/** 가드 비퇴보 비교의 이진 표현 여유.
+ *
+ *  가드 점수와 허용 오차는 모두 소수 첫째 자리의 십진값인데, 이진 부동소수점에서는
+ *  `66.7 - 8.4`가 58.300000000000004가 되어 정확히 경계에 놓인 후보가 기각된다.
+ *  허용 오차를 넓히는 값이 아니라, 십진 비교를 십진처럼 하기 위한 여유다. */
+const GUARD_EPSILON = 1e-9;
+
 export interface SeededRng {
   (): number;
   /** mulberry32 내부 상태(uint32) — 체크포인트 보존·복원용 */
@@ -222,7 +229,7 @@ export function createLoopRun<A>(opts: LoopRunOptions<A>): LoopHandle {
         const guardSafe =
           candidateGuardScore === null || prevGuardScore === null
             ? true
-            : candidateGuardScore >= prevGuardScore - guardTolerance;
+            : candidateGuardScore + GUARD_EPSILON >= prevGuardScore - guardTolerance;
         // 게이트 기각 후보는 채택 판정에 진입하지 않는다; 가드 퇴보 후보도 기각;
         // 동점은 챔피언 유지(scalar_strict)
         const adopted = !result.gateRejected && guardSafe && result.total > prevScore;
