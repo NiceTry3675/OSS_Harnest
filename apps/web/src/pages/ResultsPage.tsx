@@ -24,15 +24,16 @@ import {
 } from "../lib/project-export";
 import { setFlowStep } from "../lib/flowStep";
 import { CurveChart } from "../components/CurveChart";
+import { InfoTip } from "../components/InfoTip";
 import { countCaseProvenance } from "../lib/case-provenance";
 
 const PROVENANCE_LABEL: Record<ProvenanceType, string> = {
-  run_started: "실행 시작",
-  round: "라운드",
+  run_started: "개선 시작",
+  round: "개선 회차",
   adopted: "채택",
-  paused: "일시정지",
-  resumed: "재개",
-  finished: "완료",
+  paused: "개선 일시정지",
+  resumed: "개선 재개",
+  finished: "개선 완료",
   plateau_stop: "더 나아지지 않아 종료",
   ceiling_stop: "상한 도달 종료",
 };
@@ -55,7 +56,7 @@ const VERDICT_LABEL = { pass: "통과", warn: "주의", fail: "실패" } as cons
 function holdoutPhase(result: HoldoutEvaluation | null, error: string | null): string {
   if (result === null) return error === null ? "측정 중" : "채점 실패";
   return result.gateRejected
-    ? "분량 게이트 실격 — 점수 미계산"
+    ? "필수 조건 위반 — 점수 없음"
     : `${fmt(result.score)}점`;
 }
 
@@ -160,9 +161,9 @@ export function ResultsPage() {
       <div>
         <h1>결과</h1>
         <div className="card">
-          <p className="sub">아직 완료된 실행이 없습니다. 관제실에서 실행을 끝까지 지켜봐 주세요.</p>
+          <p className="sub">아직 완료된 실행이 없습니다. 실행 화면에서 결과물이 완성될 때까지 확인해 주세요.</p>
           <button className="primary" onClick={() => navigate("/console")}>
-            관제실로 이동
+            실행 화면으로
           </button>
         </div>
       </div>
@@ -210,9 +211,6 @@ export function ResultsPage() {
   return (
     <div>
       <h1>결과</h1>
-      <p className="sub">
-        승인한 기준으로 매긴 점수입니다. 점수를 먼저 확인한 뒤 결과물을 받으세요.
-      </p>
 
       <div className="card">
         <div style={{ fontSize: 24, fontWeight: 700 }}>
@@ -227,8 +225,8 @@ export function ResultsPage() {
             {delta > 0 ? `+${fmt(delta)}점 개선` : delta < 0 ? `${fmt(delta)}점` : "변화 없음"}
           </span>
         </div>
-        <div style={{ fontSize: 13, color: "var(--ink-3)", marginTop: 4 }}>
-          총 {checkpoint.round}라운드
+        <div className="result-meta">
+          총 {checkpoint.round}회 개선
           {checkpoint.doneReason === "plateau"
             ? " · 더 나아지지 않아 일찍 끝남"
             : checkpoint.doneReason === "ceiling"
@@ -236,11 +234,11 @@ export function ResultsPage() {
               : ""}
         </div>
         {checkpoint.doneReason === "ceiling" && (
-          <p className="hint" style={{ marginTop: 8, marginBottom: 0 }}>
+          <p className="result-warning">
             만점에 도달해 이 기준으로는 더 잴 것이 없습니다. 너무 일찍 만점이 나왔다면 대개 잘
-            만들어서가 아니라 기준이 무르다는 뜻입니다 — 반드시 지켜야 할 조건이 실제로 걸리는지,
+            만들어서가 아니라 기준이 무르다는 뜻입니다 — 필수 조건이 실제로 걸리는지,
             결과물을 안 보고도 답할 수 있는 질문은 아닌지, 채점이 너무 후하지 않은지 살펴보세요.
-            숨긴 질문 점수와 차이가 크다면 좋은 단서입니다. 기준을 조인 뒤 다시 승인하고 새로
+            최종 확인 점수와 차이가 크다면 좋은 단서입니다. 기준을 조인 뒤 다시 승인하고 새로
             실행하면 다시 잴 수 있습니다.
           </p>
         )}
@@ -281,30 +279,39 @@ export function ResultsPage() {
               응답 기록 직접 확인
             </a>
           )}
-          <span style={{ fontSize: 12, color: "var(--ink-3)" }}>
-            입력한 내용, 승인한 기준과 점검 근거, 실행 결과와 숨긴 질문 점수가 하나의 JSON 파일로 서버
-            ({API_LABEL})에 최대 1 MiB까지 저장됩니다. API 키와 점검 과정의 중간 기록은 담기지
-            않습니다.
-            {saved === "fail" && saveError !== null ? ` — ${saveError}` : ""}
-            {exported === "fail" ? " — JSON 기록의 결속을 확인할 수 없습니다." : ""}
-            {!recordReady ? " — 숨긴 질문 채점이 끝난 뒤에 기록할 수 있습니다." : ""}
-          </span>
+          {saved === "fail" && saveError !== null ? (
+            <span className="error result-action-message">서버 기록 실패: {saveError}</span>
+          ) : null}
+          {exported === "fail" ? (
+            <span className="error result-action-message">JSON 기록의 결속을 확인할 수 없습니다.</span>
+          ) : null}
+          {!recordReady ? (
+            <span className="result-action-message">최종 확인 채점이 끝난 뒤에 기록할 수 있습니다.</span>
+          ) : null}
+          <details className="result-save-detail">
+            <summary>저장되는 내용</summary>
+            <p>
+              입력한 내용, 승인한 평가 구성과 점검 근거, 실행 결과와 최종 확인 점수를 하나의
+              JSON 파일로 서버({API_LABEL})에 최대 1 MiB까지 저장합니다. API 키와 점검 과정의
+              중간 기록은 저장하지 않습니다.
+            </p>
+          </details>
         </div>
       </div>
 
       {(checkpoint.championGuardScore ?? null) !== null && (
         <div className="card">
           <div style={{ fontSize: 16, fontWeight: 600 }}>
-            중간 점검 질문 — 시작{" "}
+            중간 점검 — 시작{" "}
             {(checkpoint.guardCurve?.[0] ?? null) !== null
               ? `${fmt(checkpoint.guardCurve[0]!)}점`
               : "측정 불가(실격)"}{" "}
             → 종료 {fmt(checkpoint.championGuardScore!)}점
+            <InfoTip
+              label="중간 점검"
+              text="개선안이 현재 결과보다 크게 나빠지지 않았는지 매 회차 확인합니다. 합계 점수만 채택 판단에 사용하며, 개별 질문과 실패 사유는 개선에 전달하지 않습니다."
+            />
           </div>
-          <p className="hint" style={{ marginBottom: 0 }}>
-            고칠 때마다 합계 점수만 확인해, 점수가 떨어지지 않았는지 보는 데 쓴 질문입니다 — 개별
-            질문·실패 사유는 생성 모델에 전달되지 않았습니다.
-          </p>
         </div>
       )}
 
@@ -314,7 +321,7 @@ export function ResultsPage() {
         finalHoldoutError !== null) && (
         <div className="card">
           <div style={{ fontSize: 16, fontWeight: 600 }}>
-            루프에 숨긴 검증 케이스에서 — 시작 {holdoutPhase(holdout.baseline, baselineHoldoutError)} → 종료{" "}
+            최종 확인 — 시작 {holdoutPhase(holdout.baseline, baselineHoldoutError)} → 종료{" "}
             {holdoutPhase(holdout.final, finalHoldoutError)}
             {holdoutDelta !== null && (
               <span
@@ -332,11 +339,11 @@ export function ResultsPage() {
                     : "변화 없음"}
               </span>
             )}
+            <InfoTip
+              label="최종 확인"
+              text={"최종 확인용 질문은 개선에 사용하지 않고 시작과 종료 시에만 채점합니다.\n반복: 개선용 질문과 같은 질문\n신규: 개선용 질문에 없던 질문"}
+            />
           </div>
-          <p className="hint" style={{ marginBottom: 0 }}>
-            숨긴 질문의 채점 결과는 고치는 동안 한 번도 쓰이지 않았습니다 — 시작할 때와
-            종료 시에만 측정한 참고 지표입니다.
-          </p>
           {(baselineHoldoutError !== null || finalHoldoutError !== null) && (
             <p className="error" style={{ marginBottom: 0 }}>
               {baselineHoldoutError !== null ? `시작 채점 실패: ${baselineHoldoutError}` : ""}
@@ -350,7 +357,7 @@ export function ResultsPage() {
                 <thead>
                   <tr>
                     <th style={{ textAlign: "left" }}>구분</th>
-                    <th style={{ textAlign: "left" }}>숨긴 질문</th>
+                    <th style={{ textAlign: "left" }}>최종 확인용 질문</th>
                     <th>시작</th>
                     <th>종료</th>
                   </tr>
@@ -375,10 +382,6 @@ export function ResultsPage() {
                   })}
                 </tbody>
               </table>
-              <p className="hint" style={{ marginBottom: 0 }}>
-                반복은 같은 질문이 가시 세트에도 등장했음을, 신규는 질문 문면이 가시 세트에 없었음을
-                뜻합니다. 질문이 겹치는 것 자체도 이 결과물에서 재는 대상이라, 지우지 않고 따로 구분해 보여줍니다.
-              </p>
             </>
           ) : null}
         </div>
@@ -413,70 +416,67 @@ export function ResultsPage() {
         <CurveChart curve={checkpoint.curve} adopted={adopted} />
       </div>
 
-      <h2>활성 방어 세트</h2>
-      <div className="card">
-        {jp.kind === "deterministic_only" ? (
-          <>
-            <span className="badge" title={jp.exemptions.pairwise}>
-              결정적 채점 전용
-            </span>
-            <span className="badge muted" title={jp.exemptions.examinerReport}>
-              검증 리포트: 해당 없음(특례)
-            </span>
-            <span className="badge muted" title={hp.note}>
-              숨긴 질문: 없음
-            </span>
-          </>
-        ) : (
-          <>
-            <span className="badge">케이스 실측 채점(저지: {jp.judge.model})</span>
-            <span className="badge" title={jp.pairwiseNotice}>
-              채택 기준: 점수가 오르고, 중간 점검도 떨어지지 않을 때
-            </span>
-            {hp.mode === "seeded_split" && (
-              <span className="badge" title={hp.note}>
-                중간 점검 {hp.guardCaseIds.length}개 · 숨긴 질문 {hp.holdoutCaseIds.length}개
-              </span>
-            )}
-            {examinerReport !== null && examinerReport.forDigest === pack.definitionDigest ? (
-              <span
-                className="badge"
-                title={examinerReport.checks
-                  .map((c) => `${c.id}: ${VERDICT_LABEL[c.verdict]} — ${c.note}`)
-                  .join("\n")}
-              >
-                검증 리포트: {VERDICT_LABEL[examinerReport.overall]}
-              </span>
+      <details className="card result-detail">
+        <summary>평가 및 기록 상세</summary>
+        <div className="result-detail-body">
+          <h3>적용된 보호 규칙</h3>
+          <div className="result-badges">
+            {jp.kind === "deterministic_only" ? (
+              <>
+                <span className="badge" title={jp.exemptions.pairwise}>규칙 기반 채점</span>
+                <span className="badge muted" title={jp.exemptions.examinerReport}>사전 점검: 해당 없음</span>
+                <span className="badge muted" title={hp.note}>최종 확인: 사용 안 함</span>
+              </>
             ) : (
-              <span className="badge muted">검증 리포트: 기록 없음</span>
+              <>
+                <span className="badge">평가 사례 채점 · {jp.judge.model}</span>
+                <span className="badge" title={jp.pairwiseNotice}>채택: 점수 상승 + 중간 점검 통과</span>
+                {hp.mode === "seeded_split" && (
+                  <span className="badge" title={hp.note}>
+                    중간 점검 {hp.guardCaseIds.length}개 · 최종 확인 {hp.holdoutCaseIds.length}개
+                  </span>
+                )}
+                {examinerReport !== null && examinerReport.forDigest === pack.definitionDigest ? (
+                  <span
+                    className="badge"
+                    title={examinerReport.checks
+                      .map((c) => `${c.id}: ${VERDICT_LABEL[c.verdict]} — ${c.note}`)
+                      .join("\n")}
+                  >
+                    사전 점검: {VERDICT_LABEL[examinerReport.overall]}
+                  </span>
+                ) : (
+                  <span className="badge muted">사전 점검: 기록 없음</span>
+                )}
+                {caseCounts !== null && caseCounts.total > 0 ? (
+                  caseCounts.ai + caseCounts.aiEdited > 0 ? (
+                    <span
+                      className="badge"
+                      title={`확인 ${caseCounts.ai} · 수정 ${caseCounts.aiEdited} — 확인한 초안은 승인한 평가 구성에 포함됩니다`}
+                    >
+                      평가 사례: AI 초안 {caseCounts.ai + caseCounts.aiEdited}/{caseCounts.total}
+                    </span>
+                  ) : (
+                    <span className="badge muted">평가 사례 전부 직접 입력</span>
+                  )
+                ) : null}
+              </>
             )}
-            {caseCounts !== null && caseCounts.total > 0 ? (
-              caseCounts.ai + caseCounts.aiEdited > 0 ? (
-                <span
-                  className="badge"
-                  title={`확인 ${caseCounts.ai} · 수정 ${caseCounts.aiEdited} — 확인한 초안은 승인할 때 함께 잠깁니다`}
-                >
-                  케이스 출처: AI 초안 {caseCounts.ai + caseCounts.aiEdited}/{caseCounts.total}
-                </span>
-              ) : (
-                <span className="badge muted">케이스 전부 직접 입력</span>
-              )
-            ) : null}
-          </>
-        )}
-      </div>
+          </div>
 
-      <h2>기록</h2>
-      <div className="card" style={{ maxHeight: 260, overflowY: "auto" }}>
-        <ul className="mono" style={{ listStyle: "none", margin: 0, padding: 0 }}>
-          {checkpoint.provenance.map((p, i) => (
-            <li key={i} style={{ padding: "2px 0", color: "var(--ink-2)" }}>
-              <span style={{ color: "var(--ink-3)" }}>{timeOf(p.at)}</span>{" "}
-              {PROVENANCE_LABEL[p.type] ?? p.type} — {p.detail}
-            </li>
-          ))}
-        </ul>
-      </div>
+          <h3>기록</h3>
+          <div className="result-log">
+            <ul className="mono">
+              {checkpoint.provenance.map((p, i) => (
+                <li key={i}>
+                  <span>{timeOf(p.at)}</span>{" "}
+                  {PROVENANCE_LABEL[p.type] ?? p.type} — {p.detail}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </details>
     </div>
   );
 }

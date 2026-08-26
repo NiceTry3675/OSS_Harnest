@@ -29,8 +29,8 @@ describe("buildFlowSteps", () => {
       "질문과 답",
       "분량",
       "간결성·모델",
-      "점검·승인",
-      "잠금",
+      "사전 점검·승인",
+      "기준 확정",
       "실행",
       "결과",
     ]);
@@ -42,8 +42,8 @@ describe("buildFlowSteps", () => {
       "근무자",
       "기간",
       "근무 규칙",
-      "기준 승인",
-      "잠금",
+      "평가 구성 승인",
+      "기준 확정",
       "실행",
       "결과",
     ]);
@@ -89,14 +89,14 @@ describe("digest-bound approval step", () => {
   const entry = template("handover");
 
   it("승인이 없거나 다이제스트가 다르면 승인 전 칸에 머문다", () => {
-    expect(resolveFlow(entry, { kind: "approval" }, unapproved)?.current.label).toBe("점검·승인");
+    expect(resolveFlow(entry, { kind: "approval" }, unapproved)?.current.label).toBe("사전 점검·승인");
     expect(
       resolveFlow(entry, { kind: "approval" }, {
         definitionDigest: "current",
         approvedDigest: "stale",
         approvedAt: "2026-08-25T00:00:00.000Z",
       })?.current.label,
-    ).toBe("점검·승인");
+    ).toBe("사전 점검·승인");
     expect(
       isApprovedForDigest({
         definitionDigest: "current",
@@ -115,7 +115,7 @@ describe("digest-bound approval step", () => {
     const resolved = resolveFlow(entry, { kind: "approval" }, approval);
     expect(resolved?.approvedForCurrentDigest).toBe(true);
     expect(resolved?.index).toBe(5);
-    expect(resolved?.current.label).toBe("잠금");
+    expect(resolved?.current.label).toBe("기준 확정");
   });
 
   it("실행과 결과는 승인 전·후 두 칸 다음의 고정 의미 위치를 가리킨다", () => {

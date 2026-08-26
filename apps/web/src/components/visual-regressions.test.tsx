@@ -20,7 +20,7 @@ describe("관제실 빈 상태와 단일 기준점", () => {
 
   it("라운드 기록이 비어 있어도 실행 상태를 추측하지 않는다", () => {
     const html = renderToStaticMarkup(<ExperimentTree tree={[]} />);
-    expect(html).toContain("기록된 라운드 판정이 없습니다.");
+    expect(html).toContain("기록된 개선안 비교 결과가 없습니다.");
     expect(html).not.toContain("실행을 시작하면");
   });
 });
@@ -33,7 +33,7 @@ describe("수치 예시와 산출물 중립 문구", () => {
     expect(html).not.toContain("2분");
     // 문구는 다듬을 수 있지만, 개선에 쓰지 않는 질문이 있다는 사실은 안내 그림에 남아야 한다(SPEC §50).
     // 설명글은 지금 보고 있는 장만 DOM에 들어가므로, 그림 안의 문구로 확인한다.
-    expect(html).toContain("개선에 쓰지 않은 질문으로 시작과 끝을 따로 잽니다");
+    expect(html).toContain("최종 확인 질문으로 시작과 끝을 채점합니다");
   });
 
   it("점수 머리는 템플릿 종류와 무관한 산출물 문구를 쓴다", () => {

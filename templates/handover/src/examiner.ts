@@ -79,12 +79,12 @@ export async function runExaminerBattery(
       ? check("stability", "pass", "같은 문서를 다시 채점해도 판정이 흔들리지 않습니다.")
       : drift <= 15
         ? check("stability", "warn", "재채점에서 점수가 다소 흔들립니다 — 판정을 참고 지표로 함께 보세요.")
-        : check("stability", "fail", "재채점마다 점수가 크게 흔들립니다 — 이 저지 모델은 신뢰하기 어렵습니다.");
+        : check("stability", "fail", "재채점마다 점수가 크게 흔들립니다 — 선택한 AI 모델의 평가를 신뢰하기 어렵습니다.");
 
   onCheck?.(stability);
 
   // ② 꼼수 내성 — grader 프로브 2종 (자신 있는 날조·아첨)
-  onProgress?.("날조·아첨 오염 응답으로 채점 모델을 찔러보는 중…");
+  onProgress?.("선택한 AI가 꾸며낸 답이나 칭찬만 하는 답을 가려내는지 확인하는 중…");
   const probeNotes: string[] = [];
   const probeVerdicts: ExaminerVerdict[] = [];
 

@@ -65,7 +65,7 @@ export function ActivityConsole({
     <div className="stream" style={{ ["--stream-h" as string]: `${height}px` }}>
       <div className="stream-top">
         {live ? <span className="stream-dot" aria-hidden="true" /> : null}
-        <span className="stream-name">추론 실황</span>
+        <span className="stream-name">AI 작업 기록</span>
         {status ? <span className="stream-phase">· {status}</span> : null}
         {model ? <span className="stream-model">{model}</span> : null}
       </div>

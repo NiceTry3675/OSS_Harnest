@@ -22,6 +22,10 @@ export const PROVIDER_LABEL: Record<JudgeProvider, string> = {
   mock: "모의",
 };
 
+export function formatModelLabel(provider: JudgeProvider, model: string): string {
+  return provider === "mock" ? "모의 모델" : `${PROVIDER_LABEL[provider]} · ${model}`;
+}
+
 const KEY_STORAGE: Record<CredentialProvider, string> = {
   gemini: "harnest.byo.gemini",
   vertex: "harnest.byo.vertex",

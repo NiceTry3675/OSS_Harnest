@@ -70,10 +70,10 @@ export const questions: Question[] = [
     id: "cases",
     role: "material",
     type: "caseList",
-    label: "실제로 받았던 질문과, 그때 당신이 한 답을 알려주세요.",
+    label: "실제로 받았던 질문과,\n그때 당신이 한 답을 알려주세요.",
     shortLabel: "질문과 답",
-    help: `한 줄씩 넣으면 됩니다. ${MIN_CASES}~${MAX_CASES}개를 넣을 수 있고, 질문은 자동으로 세 묶음으로 나뉩니다 — 고치는 데 쓰는 질문, 중간 점검 질문(한쪽으로 치우치지 않게), 숨긴 질문(시작과 끝에만 채점).`,
-    nextLabel: "채점 모델 고르기",
+    help: `한 줄씩 ${MIN_CASES}~${MAX_CASES}개 입력하세요. 질문은 개선·중간 점검·최종 확인에 나누어 씁니다. 최종 확인 질문은 시작과 끝에만 채점합니다.`,
+    nextLabel: "분량 정하러 가기",
     // 케이스 수 상한의 정본은 이 선언 — 위저드는 min/max를 읽어 렌더하고 compile이 재검증한다
     min: MIN_CASES,
     max: MAX_CASES,
@@ -84,8 +84,8 @@ export const questions: Question[] = [
     type: "number",
     label: "문서는 몇 자까지 허용할까요?",
     shortLabel: "분량",
-    nextLabel: "간결성 설정으로",
-    help: `이 분량을 넘는 문서는 실격 처리됩니다 (${LENGTH_CAP_MIN}~${LENGTH_CAP_MAX.toLocaleString()}자). 기록 전체가 상한 안에 들어갈 만큼 넉넉하면 베끼기 방어(분량 게이트)가 약해집니다`,
+    nextLabel: "간결성과 AI 모델 정하기",
+    help: `이 분량을 넘는 문서는 점수 비교에서 제외됩니다 (${LENGTH_CAP_MIN}~${LENGTH_CAP_MAX.toLocaleString()}자). 기록 전체가 상한 안에 들어갈 만큼 넉넉하면 필수 분량 조건만으로 베끼기를 막기 어려워집니다`,
     min: LENGTH_CAP_MIN,
     max: LENGTH_CAP_MAX,
     defaultValue: LENGTH_CAP_DEFAULT,
@@ -94,13 +94,12 @@ export const questions: Question[] = [
     id: "conciseness",
     role: "criteria",
     type: "toggle",
-    label: "분량을 아껴 쓰면 가점을 줄까요?",
+    label: "문서 길이를 점수에 반영할까요?",
     shortLabel: "간결성·모델",
     nextLabel: "작성 완료 — 승인 화면으로",
     help:
-      "켜면 커버리지 80% + 간결성 20%로 채점합니다 — 같은 커버리지면 짧은 문서가 더 높은 점수를 받아, " +
-      "상한이 넉넉해도 만점 포화 없이 문서를 계속 다듬습니다. 답변력이 0인 문서는 간결성 점수도 0입니다. " +
-      "끄면 케이스 답변력 100%로만 채점합니다.",
+      "사용: 답변 가능성 80% + 간결성 20%. 답변 수준이 같으면 더 짧은 문서가 높은 점수를 받습니다.\n" +
+      "사용 안 함: 문서 길이는 점수에 반영하지 않습니다.",
     defaultValue: true,
   },
 ];
@@ -215,7 +214,7 @@ export async function compile(
         scorer: "handover_case_answering",
         params: { visibleCases: visibleCases.length, scale: "0/0.5/1", casesDigest },
         weight: useConciseness ? COVERAGE_WEIGHT : 1.0,
-        label: `문서만 보고 실제 질문에 답할 수 있는가 (질문 ${visibleCases.length}개로 실제 확인)`,
+        label: "답변 가능성",
       },
       // 간결성(선택) — 상한 대비 여유의 결정적 산술. 커버리지와 정면으로 충돌하는 축이라
       // "전부 담으면 만점" 포화를 없앤다. 답변력 0이면 0점(빈 문서 역전 방지, runtime.ts).
@@ -247,14 +246,15 @@ export async function compile(
       judge: { provider: opts.judgeProvider, model: opts.judgeModel },
       // 검증 리포트는 승인 전 요건으로 구현됨(./examiner.ts) — forDigest 결속이라 팩 필드가 아니다
       pairwiseNotice:
-        "미적용 — 중간 점검 점수가 떨어지지 않고 합계 점수가 이전보다 확실히 오를 때만 채택합니다(SPEC §5.1.1)",
+        "필수 조건과 중간 점검을 통과하고, 종합 점수가 현재 결과보다 높아야 합니다.",
     },
     holdoutPolicy: {
       mode: "seeded_split",
       note:
-        `질문 ${cases.length}개를 골고루 섞어 고치는 데 쓰는 질문 ${visibleCases.length} · 중간 점검 ${guardCases.length} · ` +
-        `숨긴 질문 ${holdoutCount}개로 나눕니다. 중간 점검은 합계 점수가 떨어지지 않았는지 볼 때만 쓰이고, ` +
-        `숨긴 질문은 시작할 때와 끝날 때만 채점합니다`,
+        `질문을 세 가지 용도로 나눕니다.\n` +
+        `개선용: 평가 결과를 다음 개선에 반영합니다.\n` +
+        `중간 점검용: 매 회차 평가하되 합계 점수만 새 개선안의 채택 판단에 사용합니다.\n` +
+        `최종 확인용: 개선에는 사용하지 않고 시작과 끝에서만 평가합니다.`,
       guardCaseIds: guardCases.map((c) => c.id),
       holdoutCaseIds: holdoutCases.map((c) => c.id),
       guardTolerance,
@@ -281,9 +281,8 @@ export async function compile(
   const notices: string[] = [];
   if (verbatimLength <= lengthCap) {
     notices.push(
-      `기록 전체(약 ${verbatimLength.toLocaleString()}자)가 분량 상한 ${lengthCap.toLocaleString()}자 안에 들어갑니다 — ` +
-        "정답을 통째로 옮겨 적는 문서를 분량 게이트가 걸러내지 못하는 설정입니다. " +
-        "상한을 낮추면 베끼기 방어가 살아나며, 결과에서는 숨김 케이스 점수를 함께 확인하세요.",
+      `질문·답 전체(약 ${verbatimLength.toLocaleString()}자)를 그대로 옮겨도 ${lengthCap.toLocaleString()}자 제한을 넘지 않습니다.\n` +
+        "이를 막으려면 분량 상한을 낮추세요. 그대로 두려면 최종 확인 점수를 확인하세요.",
     );
   }
 

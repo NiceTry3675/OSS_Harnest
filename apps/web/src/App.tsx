@@ -5,6 +5,7 @@ import { WizardPage } from "./pages/WizardPage";
 import { ApprovalPage } from "./pages/ApprovalPage";
 import { ConsolePage } from "./pages/ConsolePage";
 import { ResultsPage } from "./pages/ResultsPage";
+import { TerminologyComparePage } from "./pages/TerminologyComparePage";
 import { StepBar } from "./components/StepBar";
 import { useProject } from "./state";
 import {
@@ -62,6 +63,7 @@ export function App() {
       <header className="topbar">
         <Link to="/" className="brand">Harnest</Link>
         <div className="topbar-right">
+          {import.meta.env.DEV ? <Link to="/terminology-compare" className="compare-link">용어 비교</Link> : null}
           <StepBar />
           <ThemeToggle />
         </div>
@@ -75,6 +77,7 @@ export function App() {
             <Route path="/approve" element={<ApprovalPage />} />
             <Route path="/console" element={<ConsolePage />} />
             <Route path="/results" element={<ResultsPage />} />
+            {import.meta.env.DEV ? <Route path="/terminology-compare" element={<TerminologyComparePage />} /> : null}
           </Routes>
         ) : (
           <div className="card">

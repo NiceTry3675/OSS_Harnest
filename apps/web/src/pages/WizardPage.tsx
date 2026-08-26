@@ -143,7 +143,13 @@ function CharRing({ filled, max }: { filled: number; max: number }) {
 }
 
 export function WizardPage() {
-  const { templateId, answers: savedAnswers, setAnswers, setCompiled } = useProject();
+  const {
+    templateId,
+    answers: savedAnswers,
+    compiled: savedCompiled,
+    setAnswers,
+    setCompiled,
+  } = useProject();
   const navigate = useNavigate();
   const entry = getTemplate(templateId);
   const questions = entry?.questions ?? [];
@@ -178,6 +184,14 @@ export function WizardPage() {
     return init;
   });
   const [step, setStep] = useState(0);
+  const [furthestStep, setFurthestStep] = useState(() =>
+    questions.reduce(
+      (furthest, question, index) =>
+        savedAnswers[question.id] !== undefined ? Math.max(furthest, index) : furthest,
+      0,
+    ),
+  );
+  const [judgeTouched, setJudgeTouched] = useState(savedCompiled !== null);
 
   // 단계가 바뀌면 맨 위에서 시작한다 — 긴 목록 중간에서 열리면 어디인지 알 수 없다
   useEffect(() => {
@@ -259,6 +273,21 @@ export function WizardPage() {
 
   const q = questions[step];
   const isLast = step === questions.length - 1;
+  const reachedQuestions = questions.slice(0, Math.max(step, furthestStep) + 1);
+  const criteriaQuestions = questions.filter((question) => question.role === "criteria");
+  const allCriteriaReached = criteriaQuestions.every((question) =>
+    reachedQuestions.some((reached) => reached.id === question.id),
+  );
+  const blueprintVisibility = {
+    deterministicCriteria: allCriteriaReached,
+    gates: reachedQuestions.some(
+      (question) =>
+        question.type === "number" &&
+        (question.role === "criteria" || question.role === "constraints"),
+    ),
+    questionUse: allCriteriaReached,
+    judge: judgeTouched,
+  };
 
   const busy = submitting || assistBusy || attachBusy;
 
@@ -516,6 +545,7 @@ export function WizardPage() {
       return;
     }
     if (!isLast) {
+      setFurthestStep((furthest) => Math.max(furthest, step + 1));
       setStep(step + 1);
       return;
     }
@@ -816,10 +846,10 @@ export function WizardPage() {
             {isLast && entry.needsModel ? (
               <div className="field judge-block">
                 <label className="q-big" style={{ fontSize: "var(--t-h2)" }}>
-                  무엇으로 채점할까요?
+                  사용할 AI 모델 선택
                 </label>
                 <p className="sub" style={{ marginBottom: 16 }}>
-                  고른 모델은 판정 절차와 함께 잠깁니다. 바꾸려면 다시 승인해야 합니다.
+                  선택한 AI가 결과물을 만들고 평가합니다. 모델을 변경하면 다시 승인해야 합니다.
                 </p>
                 <div className="models">
                   {PROVIDER_CHOICES.map((id) => {
@@ -831,6 +861,7 @@ export function WizardPage() {
                         className={`model${judgeChoice === id ? " is-on" : ""}`}
                         aria-pressed={judgeChoice === id}
                         onClick={() => {
+                          setJudgeTouched(true);
                           setJudgeChoice(id);
                           // 공급자를 바꾸면 이전 목록·선택은 의미가 없다
                           setModelList([]);
@@ -859,6 +890,7 @@ export function WizardPage() {
                       idPrefix="judge"
                       disabled={busy}
                       onChange={(value) => {
+                        setJudgeTouched(true);
                         // 키 형식으로 회사를 알아낸다 — 카드를 먼저 고르지 않아도 된다
                         const found = detectByoCredential(value);
                         const target =
@@ -905,6 +937,7 @@ export function WizardPage() {
                         busy={modelBusy}
                         disabled={busy}
                         onChange={(id) => {
+                          setJudgeTouched(true);
                           setJudgeModel(id);
                           setError(null);
                         }}
@@ -926,6 +959,7 @@ export function WizardPage() {
                     className={judgeChoice === "mock" ? "primary" : ""}
                     disabled={busy}
                     onClick={() => {
+                      setJudgeTouched(true);
                       setJudgeChoice("mock");
                       setModelList([]);
                       setJudgeModel("");
@@ -972,7 +1006,12 @@ export function WizardPage() {
 
         {isLast ? null : (
           <div className="wizard-side">
-            <WizardBlueprint entry={entry} answers={liveAnswers} judge={judge} />
+            <WizardBlueprint
+              entry={entry}
+              answers={liveAnswers}
+              judge={judge}
+              visibility={blueprintVisibility}
+            />
             <button
               type="submit"
               form="wizard-form"

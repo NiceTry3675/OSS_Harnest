@@ -129,13 +129,13 @@ export async function compile(submission: InterviewSubmission): Promise<Compiled
     judgeProcedure: {
       kind: "deterministic_only",
       exemptions: {
-        examinerReport: "해당 없음 — 결정적 채점 전용 (SPEC §10)",
+        examinerReport: "해당 없음 — AI 판단 없이 규칙 기반 채점 (SPEC §10)",
         pairwise: "미적용 — 점수가 확실히 오를 때만 채택 (SPEC §10)",
       },
     },
     holdoutPolicy: {
       mode: "none",
-      note: "해당 없음 — 이 개발용 템플릿에는 숨긴 질문이 없습니다 (SPEC §10)",
+      note: "해당 없음 — 이 개발용 템플릿에는 최종 확인용 평가 사례가 없습니다 (SPEC §10)",
     },
   };
 

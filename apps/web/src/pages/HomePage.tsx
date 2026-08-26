@@ -32,16 +32,17 @@ export function HomePage() {
     <div>
       <section className="hero">
         <div>
-          <span className="eyebrow">AI 개선 관제실</span>
+          <span className="eyebrow">목표 맞춤 AI</span>
           <h1 className="hero-title">
-            목표를 정하고
+            목표를 정하세요.
             <br />
-            기준을 잠그세요.
+            기준을 승인하세요.
             <br />
             AI가 목표에 도달합니다.
           </h1>
           <p className="hero-lead">
-            채점 기준을 승인하는 순간 잠깁니다. AI는 실행 내내 그 기준을 바꿀 수 없습니다.
+            채점 기준을 결정하면 AI는 실행 내내 그 기준을 바꿀 수 없습니다.
+            <br />
             올라간 점수를 믿을 수 있는 이유입니다.
           </p>
           <div className="hero-cta">

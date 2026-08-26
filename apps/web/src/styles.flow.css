@@ -239,9 +239,9 @@
 /* ── 랩 배치: 큰 질문 + 안내문 ── */
 .q-big {
   font-size: var(--t-q); font-weight: 800; letter-spacing: -0.035em;
-  line-height: 1.25; margin: 0; text-wrap: balance;
+  line-height: 1.25; margin: 0; text-wrap: balance; white-space: pre-line;
 }
-.q-help { color: var(--ink-2); font-size: 16px; margin: 12px 0 0; max-width: 40em; }
+.q-help { color: var(--ink-2); font-size: 16px; margin: 12px 0 0; max-width: 40em; white-space: pre-line; }
 .wizard-main form { margin-top: var(--s-5); }
 .wizard-main .field > label:not(.q-big) { font-size: var(--t-sm); }
 
@@ -488,6 +488,43 @@ label.dropzone input[type="file"] { display: none; }
 }
 .artifact-head h2 { margin: 0; }
 .artifact-head button { margin-left: auto; height: 46px; padding: 0 22px; font-size: var(--t-sm); }
+
+/* ── 결과 화면 정보 위계 ── */
+.result-meta {
+  margin-top: 4px; color: var(--ink-2); font-size: var(--t-sm); font-weight: 600;
+}
+.result-warning {
+  margin: var(--s-3) 0 0; padding: var(--s-3) var(--s-4);
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--border));
+  border-radius: 10px; background: var(--warn-soft); color: var(--ink-2);
+  font-size: var(--t-sm); line-height: 1.6;
+}
+.result-action-message { flex-basis: 100%; color: var(--ink-2); font-size: var(--t-xs); }
+.result-save-detail { flex-basis: 100%; }
+.result-save-detail > summary,
+.result-detail > summary {
+  cursor: pointer; list-style: none; color: var(--ink-2); font-size: var(--t-sm); font-weight: 700;
+}
+.result-save-detail > summary::-webkit-details-marker,
+.result-detail > summary::-webkit-details-marker { display: none; }
+.result-save-detail > summary::before,
+.result-detail > summary::before { content: "▸ "; color: var(--ink-3); }
+.result-save-detail[open] > summary::before,
+.result-detail[open] > summary::before { content: "▾ "; }
+.result-save-detail > summary:hover,
+.result-detail > summary:hover { color: var(--accent); }
+.result-save-detail p {
+  margin: var(--s-2) 0 0; max-width: 64em; color: var(--ink-2); font-size: var(--t-xs); line-height: 1.6;
+}
+.result-detail { padding: 0 var(--s-5); }
+.result-detail > summary { padding: var(--s-4) 0; }
+.result-detail-body { padding: 0 0 var(--s-5); border-top: 1px solid var(--border); }
+.result-detail-body h3 { margin: var(--s-4) 0 var(--s-3); font-size: var(--t-body); }
+.result-badges { display: flex; gap: var(--s-2); flex-wrap: wrap; }
+.result-log { max-height: 260px; overflow-y: auto; }
+.result-log ul { list-style: none; margin: 0; padding: 0; }
+.result-log li { padding: 2px 0; color: var(--ink-2); }
+.result-log li > span { color: var(--ink-3); }
 
 
 /* ── 승인 화면: 기준은 왼쪽, 시험 기록은 오른쪽 ── */

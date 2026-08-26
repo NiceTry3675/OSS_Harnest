@@ -38,10 +38,10 @@ import { ExperimentTree } from "../components/ExperimentTree";
 import { ProviderCredentialInput } from "../components/ProviderCredentialInput";
 
 const STATUS_LABEL: Record<string, string> = {
-  idle: "대기",
-  running: "실행 중",
-  paused: "일시정지",
-  done: "완료",
+  idle: "개선 준비",
+  running: "개선 중…",
+  paused: "개선 일시정지",
+  done: "개선 완료",
 };
 
 function fmt(n: number): string {
@@ -60,8 +60,8 @@ function describeRunError(e: unknown): string {
 
 function holdoutLabel(result: HoldoutEvaluation, phase: string): string {
   return result.gateRejected
-    ? `숨긴 질문(${phase}): 분량 조건을 못 지켜 탈락 — 점수 없음`
-    : `숨긴 질문(${phase}): ${fmt(result.score)}점`;
+    ? `최종 확인(${phase}): 필수 조건 위반 — 점수 없음`
+    : `최종 확인(${phase}): ${fmt(result.score)}점`;
 }
 
 export function ConsolePage() {
@@ -154,7 +154,7 @@ export function ConsolePage() {
         if (cancelled || saved === null) return;
         if (saved.packDigest !== compiled.pack.definitionDigest) {
           setRunError(
-            "체크포인트의 판정 절차가 현재 승인본과 다릅니다 — 이어받을 수 없습니다(재승인 필요).",
+            "저장된 진행 상태의 평가 구성이 현재 승인본과 다릅니다. 다시 승인해야 이어갈 수 있습니다.",
           );
           return;
         }
@@ -192,7 +192,7 @@ export function ConsolePage() {
     try {
       // 승인·동결된 팩의 저지 선언과 실행 모델이 어긋나면 여기서 throw — 재승인 원칙
       const raw = entry.createLlm(compiled);
-      const llm = raw ? withActivityLog(raw, "산출물을 만들고 채점하는 중") : raw;
+      const llm = raw ? withActivityLog(raw, "결과물을 만들고 평가하는 중") : raw;
       // 루프가 무엇을 보고 어떻게 고쳐 쓰는지를 화면으로 흘린다.
       // 생성기는 "지금 산출물이 못 채운 것"을 받아 그것만 보강한다 — 그게 이 루프의 추론이다.
       const base = entry.createRuntime(compiled, llm);
@@ -268,29 +268,33 @@ export function ConsolePage() {
       if (last !== undefined && last.round !== lastLoggedRound.current) {
         lastLoggedRound.current = last.round;
         const why = last.adopted
-          ? "더 나아서 채택"
+          ? "개선안 채택"
           : last.gateRejected
-            ? "필수 조건을 못 지켜 탈락"
+            ? "필수 조건 위반"
             : !last.guardSafe
-              ? "중간 점검이 떨어져 기각"
-              : "지금 것이 더 나음";
+              ? "중간 점검 점수 기준 미달"
+              : "점수 개선 없음";
         // 왜 그렇게 판단했는지를 남긴다 — 점수만으로는 이유를 알 수 없다.
         // 채택 조건은 셋을 모두 넘어야 한다: 필수 조건 · 중간 점검 비퇴보 · 엄격한 점수 개선.
         const gap = last.candidateScore - last.championScore;
         const guard =
           last.candidateGuardScore === null
             ? ""
-            : ` 중간 점검은 ${last.candidateGuardScore.toFixed(1)}점으로 ${
-                last.guardSafe ? "떨어지지 않았습니다" : "허용 오차를 넘어 떨어졌습니다"
+            : ` 중간 점검 점수는 ${last.candidateGuardScore.toFixed(1)}점으로 ${
+                last.guardSafe ? "허용 범위 안입니다" : "허용 범위보다 낮습니다"
               }.`;
         const detail = last.gateRejected
-          ? "반드시 지켜야 할 조건을 못 지켜 점수와 무관하게 탈락했습니다."
+          ? "새 개선안이 필수 조건을 지키지 않아 점수를 비교하지 않고 제외했습니다."
           : !last.guardSafe
-            ? `점수는 ${last.candidateScore.toFixed(1)}점이지만 눈에 보이는 질문에만 맞춰 쓴 것으로 보아 기각합니다.${guard}`
+            ? `새 개선안의 중간 점검 점수${
+                last.candidateGuardScore === null
+                  ? "가"
+                  : ` ${last.candidateGuardScore.toFixed(1)}점이`
+              } 허용 범위보다 낮아 현재 결과물을 유지했습니다.`
             : last.adopted
-              ? `새 산출물 ${last.candidateScore.toFixed(1)}점이 기존 ${last.championScore.toFixed(1)}점보다 ${gap.toFixed(1)}점 높아 바꿔 답았습니다.${guard}`
-              : `새 산출물 ${last.candidateScore.toFixed(1)}점이 기존 ${last.championScore.toFixed(1)}점을 넘지 못해 기존을 유지합니다 — 동점도 바꾸지 않습니다.${guard}`;
-        appendStream(detail, `${last.round}회차 판단 — ${why}`);
+              ? `새 개선안의 종합 점수 ${last.candidateScore.toFixed(1)}점이 현재 결과물보다 ${gap.toFixed(1)}점 높아 채택했습니다.${guard}`
+              : `새 개선안의 종합 점수 ${last.candidateScore.toFixed(1)}점이 현재 결과물의 ${last.championScore.toFixed(1)}점보다 높지 않아 현재 결과물을 유지했습니다. 동점도 바꾸지 않습니다.${guard}`;
+        appendStream(detail, `${last.round}회차 채택 결정 — ${why}`);
         setStreamStatus(`${last.round}회차 — ${why}`);
       }
       setCheckpoint(cp);
@@ -405,11 +409,11 @@ export function ConsolePage() {
   if (!ready) {
     return (
       <div>
-        <h1>관제실</h1>
+        <h1>실행</h1>
         <div className="card">
           <p className="sub">
-            실행 전에 채점 기준을 확인하고 승인해야 합니다. 승인된 기준만이 실행에 쓰이며,
-            실행 중에는 변경되지 않습니다.
+            실행하기 전에 채점 기준을 확인하고 승인해야 합니다. 승인된 기준만 사용하며,
+            실행 중에는 바뀌지 않습니다.
           </p>
           <button
             className="primary"
@@ -475,10 +479,10 @@ export function ConsolePage() {
 
   return (
     <div>
-      <h1>관제실</h1>
+      <h1>실행</h1>
       <p className="sub">
-        채점 기준은 당신이 승인했고, 실행 중 AI는 이 기준을 변경할 수 없습니다.{" "}
-        <span className="lock-badge">기준 잠김</span>{" "}
+        AI가 결과물을 만들고 평가하는 동안, 승인한 평가 구성은 바뀌지 않습니다.{" "}
+        <span className="lock-badge">평가 구성 적용 중</span>{" "}
         <span className="mono digest">{compiled.pack.definitionDigest.slice(0, 16)}…</span>
       </p>
 
@@ -486,7 +490,7 @@ export function ConsolePage() {
         <div className="card" style={{ borderColor: "var(--bad)" }}>
           <p className="error" style={{ marginTop: 0 }}>{setupError}</p>
           <div className="field">
-            <label>채점 모델 자격 증명</label>
+            <label>AI 모델 연결 정보</label>
             {compiled.pack.judgeProcedure.kind === "case_answering" &&
             compiled.pack.judgeProcedure.judge.provider !== "mock" ? (
               <ProviderCredentialInput
@@ -515,11 +519,11 @@ export function ConsolePage() {
             <button className="primary" disabled={credentialBusy} onClick={() => void retrySetup()}>
               {credentialBusy ? "연결 확인 중…" : "연결 확인 후 다시 시도"}
             </button>
-            <button onClick={() => navigate("/wizard")}>기준 다시 만들기</button>
+            <button onClick={() => navigate("/wizard")}>평가 구성 다시 설정</button>
           </div>
           <p className="hint" style={{ marginBottom: 0 }}>
-            자격 증명 없이 사용하려면 기준을 처음부터 다시 만들어 모의 모델로 승인해 주세요 — 승인된
-            판정 절차는 여기서 바꿀 수 없습니다.
+            연결 정보가 없으면 모의 모델로 평가 구성을 다시 승인하세요. 승인된 평가 구성은
+            여기서 바꿀 수 없습니다.
           </p>
         </div>
       )}
@@ -529,7 +533,7 @@ export function ConsolePage() {
         baseline={checkpoint && checkpoint.curve.length > 0 ? checkpoint.curve[0] : null}
         round={checkpoint?.round ?? 0}
         maxRounds={compiled.loopSpec.maxRounds}
-        statusLabel={preparing ? "처음 산출물을 만드는 중" : (STATUS_LABEL[status] ?? status)}
+        statusLabel={preparing ? "개선 준비 중…" : (STATUS_LABEL[status] ?? status)}
         running={preparing || status === "running"}
       />
 
@@ -538,7 +542,7 @@ export function ConsolePage() {
           <div>
             <span className="badge">중간 점검: {fmt(checkpoint.championGuardScore!)}점</span>
             <span className="hint" style={{ marginLeft: 4 }}>
-              중간 점검 질문 점수 — 이 점수가 떨어지는 후보는 채택되지 않습니다
+              개선안이 기존 결과보다 크게 나빠지지 않았는지 확인한 점수입니다.
             </span>
           </div>
         )}
@@ -549,25 +553,25 @@ export function ConsolePage() {
             </span>
             {baselineHoldoutError !== null && (
               <span className="hint" style={{ marginLeft: 4 }}>
-                시작할 때 숨긴 질문 채점 오류: {baselineHoldoutError}
+                시작할 때 최종 확인 채점 오류: {baselineHoldoutError}
               </span>
             )}
           </div>
         )}
         {holdout.baseline === null && baselineHoldoutError !== null && (
           <p className="hint" style={{ marginBottom: 0 }}>
-            시작할 때 숨긴 질문 채점 오류: {baselineHoldoutError} (보여주는 숫자만 빠졌고 결과에는 영향 없음)
+            시작할 때 최종 확인 채점 오류: {baselineHoldoutError} (표시할 숫자만 빠졌고 개선 결과에는 영향 없음)
           </p>
         )}
         {finalHoldoutError !== null && (
           <p className="hint" style={{ marginBottom: 0 }}>
-            끝날 때 숨긴 질문 채점 오류: {finalHoldoutError} (보여주는 숫자만 빠졌고 결과에는 영향 없음)
+            끝날 때 최종 확인 채점 오류: {finalHoldoutError} (표시할 숫자만 빠졌고 개선 결과에는 영향 없음)
           </p>
         )}
         {callsPerRound > 0 && (
           <p className="hint" style={{ marginTop: 10, marginBottom: 0 }}>
-            라운드당 약 {callsPerRound}회 모델 호출 · 최대 {compiled.loopSpec.maxRounds}라운드
-            {maxCallsPerRun > 0 ? ` · 실행 1회 호출 예산 ${maxCallsPerRun}회` : ""}
+            회차당 AI 요청 약 {callsPerRound}회 · 최대 {compiled.loopSpec.maxRounds}회 개선
+            {maxCallsPerRun > 0 ? ` · 실행 1회 AI 요청 한도 ${maxCallsPerRun}회` : ""}
           </p>
         )}
         <div className="run-controls">
@@ -576,7 +580,7 @@ export function ConsolePage() {
             onClick={start}
             disabled={starting || status !== "idle" || setupError !== null}
           >
-            {preparing ? "시작하는 중…" : "실행 시작"}
+            {preparing ? "준비 중…" : "시작"}
           </button>
           <button onClick={() => handleRef.current?.pause()} disabled={status !== "running"}>
             일시정지
@@ -590,7 +594,7 @@ export function ConsolePage() {
             </button>
           )}
           {status === "done" && !holdoutSettled && (
-            <button disabled>숨긴 질문 채점 중…</button>
+            <button disabled>최종 확인 채점 중…</button>
           )}
         </div>
       </div>
@@ -599,7 +603,7 @@ export function ConsolePage() {
         <div className="card" style={{ borderColor: "var(--bad)" }}>
           <p className="error" style={{ marginTop: 0 }}>{runError}</p>
           <p className="hint">
-            지금까지의 진행은 체크포인트에 저장되어 있습니다 — 다시 시도하면 이어서 진행됩니다.
+            진행 상태가 저장되었습니다. 다시 시도하면 이어집니다.
           </p>
           <button onClick={start}>다시 시도</button>
         </div>
@@ -629,7 +633,7 @@ export function ConsolePage() {
             ? compiled.pack.judgeProcedure.judge.model
             : undefined
         }
-        empty="실행을 시작하면 모델이 답을 내기 전에 정리한 생각과 회차별 판정이 여기에 흐릅니다."
+        empty="개선을 시작하면 AI 작업 내용과 회차별 평가 결과가 여기에 표시됩니다."
         height={440}
       />
     </div>

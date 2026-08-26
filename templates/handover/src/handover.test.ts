@@ -218,10 +218,10 @@ describe("compile", () => {
     expect(explicitOn.pack.definitionDigest).toBe(on.pack.definitionDigest);
   });
 
-  it("기록 전체가 상한 안이면 베끼기 방어 정적 안내를 남기고, 상한을 넘으면 안내가 없다", async () => {
-    // 짧은 답 + 넉넉한 상한 2,000자 — 통째 베끼기를 분량 게이트가 못 걸러내는 설정
+  it("질문·답 전체가 상한 안이면 그대로 옮길 수 있다는 안내를 남기고, 상한을 넘으면 안내가 없다", async () => {
+    // 짧은 답 + 넉넉한 상한 2,000자 — 질문·답 전체를 옮겨도 분량 조건이 걸러내지 못하는 설정
     const roomy = await compile(makeSubmission(6, 2000), mockJudge);
-    expect(roomy.notices.some((n) => n.includes("베끼기"))).toBe(true);
+    expect(roomy.notices.some((n) => n.includes("그대로 옮겨도"))).toBe(true);
 
     // 상한 500자 — 피드백 기록 전체(3케이스 × 약 200자)가 상한을 넘어 게이트가 방어한다
     const padded = makeSubmission(6, 500);

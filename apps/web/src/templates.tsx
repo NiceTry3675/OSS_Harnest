@@ -127,7 +127,7 @@ const timetableEntry: TemplateEntry = {
   needsModel: false,
   questions: timetable.questions,
   flow: {
-    approval: { pending: "기준 승인", approved: "잠금" },
+    approval: { pending: "평가 구성 승인", approved: "기준 확정" },
     run: "실행",
     result: "결과",
   },
@@ -174,7 +174,7 @@ const handoverEntry: TemplateEntry = {
   needsModel: true,
   questions: handover.questions,
   flow: {
-    approval: { pending: "점검·승인", approved: "잠금" },
+    approval: { pending: "사전 점검·승인", approved: "기준 확정" },
     run: "실행",
     result: "결과",
   },
@@ -199,7 +199,7 @@ const handoverEntry: TemplateEntry = {
         : createSharedGeminiClient(jp.judge.model);
     }
     throw new Error(
-      `승인된 채점 모델(${PROVIDER_LABEL[provider]})의 키가 없습니다 — 키를 입력하거나, 기준을 다시 만들어 모의 모델로 승인하세요.`,
+      `승인된 AI 모델(${PROVIDER_LABEL[provider]})의 연결 정보가 없습니다 — 연결 정보를 입력하거나, 평가 구성을 다시 만들어 모의 모델로 승인하세요.`,
     );
   },
   caseAssist: {
@@ -228,7 +228,7 @@ const handoverEntry: TemplateEntry = {
       ),
   },
   createRuntime(compiled, llm) {
-    if (!llm) throw new Error("채점 모델이 준비되지 않았습니다 — 키를 입력하거나 모의 모델을 선택하세요.");
+    if (!llm) throw new Error("AI 모델이 준비되지 않았습니다 — 연결 정보를 입력하거나 모의 모델을 선택하세요.");
     const jp = compiled.pack.judgeProcedure;
     if (
       jp.kind === "case_answering" &&
@@ -237,7 +237,7 @@ const handoverEntry: TemplateEntry = {
     ) {
       // 승인 시 동결된 저지와 실행 모델이 다르면 실행 불가 — 재승인 원칙(SPEC §8)
       throw new Error(
-        `승인된 채점 모델(${jp.judge.provider}/${jp.judge.model})을 사용할 수 없습니다 — 기준을 다시 만들어 승인해 주세요.`,
+        `승인된 AI 모델(${jp.judge.provider}/${jp.judge.model})을 사용할 수 없습니다 — 평가 구성을 다시 만들어 승인해 주세요.`,
       );
     }
     const problem = compiled.problem as handover.HandoverProblem;
