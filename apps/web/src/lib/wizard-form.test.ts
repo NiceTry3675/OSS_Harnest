@@ -100,3 +100,23 @@ describe("toggle 질문", () => {
     expect(toAnswers([offDefault], { conciseness: "" })).toEqual({ conciseness: false });
   });
 });
+
+describe("채점 모델 질문", () => {
+  const judgeQ: Question = {
+    id: "judgeModel",
+    role: "criteria",
+    type: "judgeModel",
+    label: "어떤 AI가 채점할까요?",
+  };
+
+  // 모델 선택은 위저드가 따로 들고 있어 draft에 값이 없다.
+  // 빈 값 검사에 걸리면 마지막 단계에서 제출 자체가 막힌다.
+  it("값이 없어도 다음으로 넘어갈 수 있다", () => {
+    expect(validate(judgeQ, "")).toBeNull();
+  });
+
+  it("답변 맵에 빈 값을 남기지 않는다", () => {
+    const answers = toAnswers([judgeQ], { judgeModel: "" });
+    expect("judgeModel" in answers).toBe(false);
+  });
+});
