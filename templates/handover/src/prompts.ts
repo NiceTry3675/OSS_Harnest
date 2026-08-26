@@ -5,12 +5,14 @@
 
 import type { CaseDef } from "@harnest/contracts";
 import type { HandoverProblem } from "./index";
+import { hardLengthCapFor, MAX_LENGTH_OVERFLOW_PENALTY } from "./length";
 
 export function limitBlock(cap: number): string {
   const target = Math.floor(cap * 0.8);
+  const hardCap = hardLengthCapFor(cap);
   return (
-    `절대 분량 제한: ${cap}자 — 이를 넘는 문서는 실격(0점) 처리됩니다. ` +
-    `문자 수를 정확히 맞추기는 어려우니 약 ${target}자를 목표로 여유 있게 쓰세요.`
+    `권장 분량 상한: ${cap}자 — 초과분은 ${hardCap}자까지 점진적으로 최대 ${MAX_LENGTH_OVERFLOW_PENALTY}점 감점되고, ` +
+    `${hardCap}자를 넘으면 실격 처리됩니다. 약 ${target}자를 목표로 여유 있게 쓰세요.`
   );
 }
 

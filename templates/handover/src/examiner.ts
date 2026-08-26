@@ -23,9 +23,15 @@ import type {
 } from "@harnest/contracts";
 import { worstVerdict } from "@harnest/contracts";
 import type { HandoverProblem } from "./index";
+import { hardLengthCapFor } from "./length";
 import { buildFabricationResponse, buildSycophancyResponse } from "./probes";
 import { oneshotPrompt } from "./prompts";
-import { createScorer, gradeResponse, maxOutputTokensFor, type LlmClient } from "./runtime";
+import {
+  createScorer,
+  gradeResponse,
+  maxOutputTokensFor,
+  type LlmClient,
+} from "./runtime";
 
 /** 배터리 채점 케이스 상한 — 배치 채점으로 콜 수는 케이스 수와 무관해졌지만,
  *  배터리는 통과/주의/실패의 거친 판정이라 소표본이면 충분하고 프롬프트 비용을 줄인다 */
@@ -64,8 +70,8 @@ export async function runExaminerBattery(
       maxOutputTokens: maxOutputTokensFor(problem.lengthCap),
     })
   ).trim();
-  // 생성 문서가 게이트를 넘으면 결정적으로 절단 — 안정성 검사에는 채점 가능한 문서가 필요하다
-  if (sampleDoc.length > problem.lengthCap) {
+  // 생성 문서가 최대 안전 상한을 넘으면 결정적으로 절단 — 안정성 검사에는 채점 가능한 문서가 필요하다
+  if (sampleDoc.length > hardLengthCapFor(problem.lengthCap)) {
     sampleDoc = sampleDoc.slice(0, Math.floor(problem.lengthCap * 0.9));
   }
 

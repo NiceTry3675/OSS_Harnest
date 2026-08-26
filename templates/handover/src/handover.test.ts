@@ -23,6 +23,8 @@ import {
   createInitial,
   createScorer,
   gradeResponse,
+  hardLengthCapFor,
+  lengthOverflowPenalty,
   maxOutputTokensFor,
   scoreHoldout,
   withCallBudget,
@@ -204,6 +206,11 @@ describe("compile", () => {
       ["case_answerability", COVERAGE_WEIGHT],
       ["conciseness", CONCISENESS_WEIGHT],
     ]);
+    expect(on.pack.gates[0].params).toEqual({
+      maxChars: 2500,
+      softMaxChars: 2000,
+      maxOverflowPenalty: 20,
+    });
 
     const off = await compile(makeSubmission(6, 2000, false), mockJudge);
     expect(off.problem.useConciseness).toBe(false);
@@ -310,17 +317,55 @@ describe("compile", () => {
 });
 
 describe("createScorer", () => {
-  it("분량 초과는 게이트에서 실격되고 LLM은 한 번도 호출되지 않는다", async () => {
+  it("최대 안전 분량 초과만 게이트에서 실격되고 LLM은 한 번도 호출되지 않는다", async () => {
     const problem = makeProblem();
     const llm = createRecordingLlm(allCasesOf(problem));
     const scorer = createScorer(problem, llm);
+    const hardCap = hardLengthCapFor(problem.lengthCap);
 
-    const result = await scorer("가".repeat(problem.lengthCap + 1));
+    const result = await scorer("가".repeat(hardCap + 1));
     expect(result.gateRejected).toBe(true);
     expect(result.total).toBe(0);
     expect(result.guardScore).toBeNull();
-    expect(result.violations[0]).toContain("분량 초과");
+    expect(result.violations[0]).toBe(
+      `최대 분량 초과 실격: ${hardCap + 1}자 > ${hardCap}자 (권장 ${problem.lengthCap}자)`,
+    );
     expect(llm.prompts).toHaveLength(0);
+  });
+
+  it("권장 분량부터 최대 안전 분량까지는 초과 비율에 따라 선형 감점한다", async () => {
+    const problem = makeProblem({ guardCases: [] });
+    const llm = createRecordingLlm(allCasesOf(problem));
+    const scorer = createScorer(problem, llm);
+    const answers = problem.visibleCases.map((c) => c.expectedAnswer).join(" ");
+    const doc = answers.padEnd(2250, "가"); // 권장 2,000자와 최대 2,500자의 정중앙
+
+    const result = await scorer(doc);
+
+    expect(result.gateRejected).toBe(false);
+    expect(result.parts).toEqual({ case_answerability: 100, conciseness: 0 });
+    expect(result.adjustments).toEqual({ length_overflow: -10 });
+    expect(result.total).toBe(70); // 답변 가능성 80점 - 초과 감점 10점
+    expect(result.violations.at(-1)).toContain("종합 점수 10점 감점");
+    expect(llm.prompts).toHaveLength(2);
+  });
+
+  it("간결성을 끄더라도 권장 분량 초과 감점은 적용하되 답변 가능성 부분 점수는 보존한다", async () => {
+    const problem = makeProblem({ guardCases: [], useConciseness: false });
+    const llm = createRecordingLlm(allCasesOf(problem));
+    const answers = problem.visibleCases.map((c) => c.expectedAnswer).join(" ");
+    const result = await createScorer(problem, llm)(answers.padEnd(2250, "가"));
+
+    expect(result.parts).toEqual({ case_answerability: 100 });
+    expect(result.adjustments).toEqual({ length_overflow: -10 });
+    expect(result.total).toBe(90);
+  });
+
+  it("분량 감점 경계는 권장 상한 0점에서 최대 안전 상한 20점까지 이어진다", () => {
+    expect(lengthOverflowPenalty(8000, 8000)).toBe(0);
+    expect(lengthOverflowPenalty(8000, 8400)).toBe(4);
+    expect(lengthOverflowPenalty(8000, 9000)).toBe(10);
+    expect(lengthOverflowPenalty(8000, 10_000)).toBe(20);
   });
 
   it("피드백 케이스를 채점하고 가드는 별도 배치로 집계만 낸다 — 홀드아웃은 등장하지 않는다", async () => {
@@ -558,18 +603,32 @@ describe("scoreHoldout", () => {
     }
   });
 
-  it("분량 게이트 실격은 0점이 아니라 score null이며 모델을 호출하지 않는다", async () => {
+  it("최대 안전 분량의 게이트 실격은 0점이 아니라 score null이며 모델을 호출하지 않는다", async () => {
     const problem = makeProblem();
     const llm = createRecordingLlm(allCasesOf(problem));
-    const result = await scoreHoldout(problem, "가".repeat(problem.lengthCap + 1), llm);
+    const hardCap = hardLengthCapFor(problem.lengthCap);
+    const result = await scoreHoldout(problem, "가".repeat(hardCap + 1), llm);
 
     expect(result).toEqual({
       gateRejected: true,
       score: null,
       perCase: [],
-      violations: [`분량 초과 실격: ${problem.lengthCap + 1}자 > ${problem.lengthCap}자`],
+      violations: [
+        `최대 분량 초과 실격: ${hardCap + 1}자 > ${hardCap}자 (권장 ${problem.lengthCap}자)`,
+      ],
     });
     expect(llm.prompts).toHaveLength(0);
+  });
+
+  it("권장 분량만 넘은 문서는 최종 확인 질문을 정상 채점한다", async () => {
+    const problem = makeProblem();
+    const llm = createRecordingLlm(allCasesOf(problem));
+    const doc = problem.holdoutCases[0].expectedAnswer.padEnd(problem.lengthCap + 1, "가");
+    const result = await scoreHoldout(problem, doc, llm);
+
+    expect(result.gateRejected).toBe(false);
+    expect(result.score).toBe(50);
+    expect(llm.prompts).toHaveLength(2);
   });
 
   it("홀드아웃 질문을 피드백 질문과의 반복/신규로 구분하되 분할에서 제거하지 않는다", async () => {

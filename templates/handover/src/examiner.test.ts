@@ -235,7 +235,7 @@ describe("runExaminerBattery — 판정 규칙", () => {
 });
 
 describe("runExaminerBattery — 경계", () => {
-  it("생성 문서가 상한을 넘으면 90%로 절단해 채점한다 (게이트 실격 문서로는 검증 불가)", async () => {
+  it("생성 문서가 최대 안전 상한을 넘으면 권장 분량의 90%로 절단해 채점한다", async () => {
     const compiled = await compile(makeSubmission(6, 500, LONG_PAD), {
       judgeProvider: "mock",
       judgeModel: "테스트-모의",
