@@ -22,10 +22,13 @@ import {
   createGenerator,
   createInitial,
   createScorer,
+  createStrategyPlanner,
   gradeResponse,
   hardLengthCapFor,
+  LENGTH_POLICY,
   lengthOverflowPenalty,
   maxOutputTokensFor,
+  parseStrategy,
   scoreHoldout,
   withCallBudget,
   type LlmClient,
@@ -67,6 +70,7 @@ function makeProblem(over: Partial<HandoverProblem> = {}): HandoverProblem {
     guardCases: [c(5), c(6)],
     holdoutCases: [c(7), c(8)],
     lengthCap: 2000,
+    lengthPolicy: LENGTH_POLICY,
     useConciseness: true,
     ...over,
   };
@@ -190,6 +194,15 @@ describe("compile", () => {
     );
   });
 
+  it("새 컴파일은 분량 채점 정책 버전을 problem과 pack에 함께 결속한다", async () => {
+    const compiled = await compile(makeSubmission(6), mockJudge);
+
+    expect(compiled.problem.lengthPolicy).toBe(LENGTH_POLICY);
+    expect(compiled.pack.criteria[0].params.lengthPolicy).toBe(LENGTH_POLICY);
+    expect(compiled.pack.gates[0].params.lengthPolicy).toBe(LENGTH_POLICY);
+    expect(compiled.loopSpec.feedbackMode).toBe("recent_public_experiments_v1");
+  });
+
   it("케이스 상한을 넘는 입력은 거부한다", async () => {
     await expect(compile(makeSubmission(MAX_CASES + 1), mockJudge)).rejects.toThrow("최대");
   });
@@ -210,6 +223,7 @@ describe("compile", () => {
       maxChars: 2500,
       softMaxChars: 2000,
       maxOverflowPenalty: 20,
+      lengthPolicy: LENGTH_POLICY,
     });
 
     const off = await compile(makeSubmission(6, 2000, false), mockJudge);
@@ -317,6 +331,15 @@ describe("compile", () => {
 });
 
 describe("createScorer", () => {
+  it("분량 정책 버전이 없는 구버전 승인본은 새 scorer로 실행하지 않는다", () => {
+    const current = makeProblem();
+    const legacy = { ...current, lengthPolicy: undefined } as unknown as HandoverProblem;
+    const llm = createRecordingLlm(allCasesOf(current));
+
+    expect(() => createScorer(legacy, llm)).toThrow("평가 구성을 다시 만들어 승인");
+    expect(llm.prompts).toHaveLength(0);
+  });
+
   it("최대 안전 분량 초과만 게이트에서 실격되고 LLM은 한 번도 호출되지 않는다", async () => {
     const problem = makeProblem();
     const llm = createRecordingLlm(allCasesOf(problem));
@@ -680,6 +703,69 @@ describe("createGenerator", () => {
     }
   });
 
+  it("직전 공개 기각 사유는 변이 프롬프트에 싣되 비공개 판정 필드는 계약에 두지 않는다", () => {
+    const problem = makeProblem();
+    const prompt = mutatePrompt(
+      problem,
+      "챔피언 문서",
+      42,
+      ["현재 챔피언 위반"],
+      3,
+      {
+        candidateScore: 40,
+        scoreDelta: -2,
+        gateRejected: false,
+        violations: ["직전 후보의 공개 위반"],
+      },
+    );
+
+    expect(prompt).toContain("직전 기각 시도에서 공개 기준으로 확인한 것");
+    expect(prompt).toContain("후보 점수: 40/100 (-2.0점)");
+    expect(prompt).toContain("직전 후보의 공개 위반");
+    expect(prompt).not.toContain("guardSafe");
+    expect(prompt).not.toContain("중간 점검 점수");
+  });
+
+  it("선택한 전략과 최근 공개 실험 기록을 후보 생성 프롬프트에 함께 싣는다", async () => {
+    const problem = makeProblem();
+    const llm = createRecordingLlm(allCasesOf(problem));
+    const strategy = {
+      key: "compress_and_reallocate",
+      summary: "중복 설명을 줄여 실패 질문의 예외 조건을 보강한다.",
+    };
+
+    await createGenerator(problem, llm)(
+      "챔피언 문서",
+      () => 0,
+      {
+        round: 3,
+        championScore: 42,
+        championViolations: ["현재 실패"],
+        recentPublicExperiments: [
+          {
+            round: 2,
+            strategy: { key: "targeted_repair", summary: "누락 항목 직접 추가" },
+            candidateScore: 40,
+            scoreDelta: -2,
+            adopted: false,
+            gateRejected: false,
+            violations: ["직전 공개 실패"],
+          },
+        ],
+        blockedStrategyKeys: [],
+      },
+      strategy,
+    );
+
+    const prompt = llm.prompts[0];
+    expect(prompt).toContain("## 이번 수정 전략");
+    expect(prompt).toContain("compress_and_reallocate");
+    expect(prompt).toContain(strategy.summary);
+    expect(prompt).toContain("## 최근 공개 실험 기록");
+    expect(prompt).toContain("targeted_repair");
+    expect(prompt).toContain("직전 공개 실패");
+  });
+
   it("가드가 없는 절차의 변이 프롬프트에는 비공개 검증 안내가 없다", async () => {
     const problem = makeProblem({ guardCases: [] });
     const llm = createRecordingLlm(allCasesOf(problem));
@@ -700,6 +786,79 @@ describe("createGenerator", () => {
       championViolations: [],
     });
     expect(llm.prompts[0]).not.toContain("간결성 가점");
+  });
+});
+
+describe("createStrategyPlanner", () => {
+  it("반복 실패로 차단된 전략을 거부하고 형식 재시도에서 다른 전략을 선택한다", async () => {
+    const problem = makeProblem();
+    const responses = [
+      JSON.stringify({ key: "targeted_repair", summary: "같은 전략을 반복" }),
+      JSON.stringify({
+        key: "restructure_for_retrieval",
+        summary: "절차를 작업 순서별 제목과 체크리스트로 재구성한다.",
+      }),
+    ];
+    const prompts: string[] = [];
+    const llm: LlmClient = {
+      providerId: "mock",
+      model: "테스트-모의",
+      async complete(prompt) {
+        prompts.push(prompt);
+        return responses.shift() ?? "";
+      },
+    };
+    const feedback = {
+      round: 3,
+      championScore: 42,
+      championViolations: ["현재 실패"],
+      recentPublicExperiments: [
+        {
+          round: 1,
+          strategy: { key: "targeted_repair", summary: "첫 시도" },
+          candidateScore: 40,
+          scoreDelta: -2,
+          adopted: false,
+          gateRejected: false,
+          violations: ["실패 A"],
+        },
+        {
+          round: 2,
+          strategy: { key: "targeted_repair", summary: "두 번째 시도" },
+          candidateScore: 41,
+          scoreDelta: -1,
+          adopted: false,
+          gateRejected: false,
+          violations: ["실패 B"],
+        },
+      ],
+      blockedStrategyKeys: ["targeted_repair"],
+    };
+
+    const result = await createStrategyPlanner(problem, llm)("챔피언 문서", () => 0, feedback);
+
+    expect(result).toEqual({
+      key: "restructure_for_retrieval",
+      summary: "절차를 작업 순서별 제목과 체크리스트로 재구성한다.",
+    });
+    expect(prompts).toHaveLength(2);
+    expect(prompts[0]).toContain("최근 공개 실험 기록");
+    expect(prompts[0]).toContain("targeted_repair");
+    expect(prompts[0]).toContain("이번에 선택할 수 없는 전략");
+    for (const hidden of [...problem.guardCases, ...problem.holdoutCases]) {
+      expect(prompts[0]).not.toContain(hidden.question);
+      expect(prompts[0]).not.toContain(hidden.expectedAnswer);
+    }
+  });
+
+  it("전략 파서는 지원하지 않는 키와 차단된 키를 거부한다", () => {
+    expect(() => parseStrategy('{"key":"unknown","summary":"설명"}')).toThrow("지원하는 전략");
+    expect(() =>
+      parseStrategy(
+        '{"key":"targeted_repair","summary":"설명"}',
+        ["targeted_repair"],
+      ),
+    ).toThrow("다시 선택할 수 없습니다");
   });
 });
 
@@ -782,9 +941,11 @@ describe("withCallBudget", () => {
   it("선언된 실행 예산은 최대 구성의 이론적 최악 호출 수를 넘는 백스톱이다", async () => {
     const { loopSpec } = await compile(makeSubmission(MAX_CASES), mockJudge);
     // 배치 채점 1회 최악 = responder + 형식 재시도 + grader + 형식 재시도 = 4콜.
-    // 라운드마다 피드백·가드 배치가 각각 1회씩이므로 채점 최악은 2배다.
+    // 라운드마다 공개·가드 배치가 각각 1회이고, 전략 선택은 형식 재시도까지 최대 2콜이다.
     const perScoringWorst = 4;
-    const worst = (loopSpec.maxRounds + 1) * (1 + 2 * perScoringWorst) + 2 * perScoringWorst;
+    const initialWorst = 1 + 2 * perScoringWorst;
+    const perRoundWorst = 2 + 1 + 2 * perScoringWorst;
+    const worst = initialWorst + loopSpec.maxRounds * perRoundWorst + 2 * perScoringWorst;
     expect(MAX_CALLS_PER_RUN).toBeGreaterThan(worst);
   });
 });

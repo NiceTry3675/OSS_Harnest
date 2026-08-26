@@ -569,6 +569,207 @@ describe("createLoopRun — Generator 피드백", () => {
     expect(final?.championViolations).toEqual(["위반 C"]);
     expect(final?.curve).toEqual([10, 30, 30, 30, 55]);
   });
+
+  it("새 피드백 모드는 직전 공개 기각 사유를 다음 생성에 전달한다", async () => {
+    const results: Record<string, ScoreResult> = {
+      c0: { total: 10, violations: ["초기 위반"], parts: {}, gateRejected: false },
+      c1: { total: 5, violations: ["질문 A 악화"], parts: {}, gateRejected: false },
+      c2: { total: 6, violations: ["질문 B 악화"], parts: {}, gateRejected: false },
+    };
+    const captured: Array<unknown> = [];
+    let n = 0;
+    const store = new MemoryCheckpointStore<string>();
+
+    await createLoopRun<string>({
+      runId: "public-rejection-feedback",
+      pack,
+      spec: makeSpec({
+        maxRounds: 2,
+        feedbackMode: "champion_and_last_public_rejection",
+      }),
+      scorer: (artifact) => results[artifact],
+      generate: (_champion, _rng, feedback) => {
+        captured.push(feedback.previousPublicAttempt);
+        return `c${++n}`;
+      },
+      initial: () => "c0",
+      store,
+      onEvent: () => {},
+    }).start();
+
+    expect(captured).toEqual([
+      undefined,
+      {
+        candidateScore: 5,
+        scoreDelta: -5,
+        gateRejected: false,
+        violations: ["질문 A 악화"],
+      },
+    ]);
+  });
+
+  it("가드에서 기각된 후보의 점수·트레이스는 다음 생성 피드백에 싣지 않는다", async () => {
+    const guardedPack: EvaluationPack = {
+      ...pack,
+      holdoutPolicy: {
+        mode: "seeded_split",
+        note: "-",
+        guardCaseIds: ["guard-1"],
+        holdoutCaseIds: ["holdout-1"],
+        guardTolerance: 5,
+      },
+    };
+    const results: Record<string, ScoreResult> = {
+      c0: {
+        total: 10,
+        violations: ["초기 공개 위반"],
+        parts: {},
+        gateRejected: false,
+        guardScore: 60,
+      },
+      c1: {
+        total: 99,
+        violations: ["후보 공개 트레이스"],
+        parts: {},
+        gateRejected: false,
+        guardScore: 0,
+      },
+      c2: {
+        total: 9,
+        violations: [],
+        parts: {},
+        gateRejected: false,
+        guardScore: 60,
+      },
+    };
+    const captured: Array<unknown> = [];
+    let n = 0;
+
+    await createLoopRun<string>({
+      runId: "guard-feedback-isolation",
+      pack: guardedPack,
+      spec: makeSpec({
+        maxRounds: 2,
+        feedbackMode: "champion_and_last_public_rejection",
+      }),
+      scorer: (artifact) => results[artifact],
+      generate: (_champion, _rng, feedback) => {
+        captured.push(feedback.previousPublicAttempt);
+        return `c${++n}`;
+      },
+      initial: () => "c0",
+      store: new MemoryCheckpointStore<string>(),
+      onEvent: () => {},
+    }).start();
+
+    expect(captured).toEqual([undefined, undefined]);
+  });
+
+  it("최근 공개 실험 3개와 반복 실패 전략을 전달하되 가드 기각 시도는 통째로 제외한다", async () => {
+    const guardedPack: EvaluationPack = {
+      ...pack,
+      holdoutPolicy: {
+        mode: "seeded_split",
+        note: "-",
+        guardCaseIds: ["guard-1"],
+        holdoutCaseIds: ["holdout-1"],
+        guardTolerance: 5,
+      },
+    };
+    const results: Record<string, ScoreResult> = {
+      c0: { ...ok(10), guardScore: 60 },
+      c1: { ...ok(5), violations: ["공개 실패 A"], guardScore: 60 },
+      c2: { ...ok(6), violations: ["공개 실패 B"], guardScore: 60 },
+      // 공개 점수는 높지만 가드에서 기각 — 다음 공개 실험 기억에 흔적을 남기면 안 된다.
+      c3: { ...ok(99), violations: ["숨겨야 할 후보 흔적"], guardScore: 0 },
+      c4: { ...ok(7), violations: ["공개 실패 C"], guardScore: 60 },
+      c5: { ...ok(8), violations: ["공개 실패 D"], guardScore: 60 },
+      c6: { ...ok(9), violations: ["공개 실패 E"], guardScore: 60 },
+    };
+    const strategyKeys = [
+      "targeted_repair",
+      "targeted_repair",
+      "restructure_for_retrieval",
+      "compress_and_reallocate",
+      "source_regrounding",
+      "consistency_pass",
+    ];
+    const captured: Array<{
+      recent: unknown;
+      blocked: unknown;
+    }> = [];
+    const generatedWith: string[] = [];
+    let n = 0;
+    let planAt = 0;
+    const store = new MemoryCheckpointStore<string>();
+
+    await createLoopRun<string>({
+      runId: "public-experiment-memory",
+      pack: guardedPack,
+      spec: makeSpec({ maxRounds: 6, feedbackMode: "recent_public_experiments_v1" }),
+      scorer: (artifact) => results[artifact],
+      planStrategy: (_champion, _rng, feedback) => {
+        captured.push({
+          recent: structuredClone(feedback.recentPublicExperiments),
+          blocked: structuredClone(feedback.blockedStrategyKeys),
+        });
+        const key = strategyKeys[planAt++];
+        return { key, summary: `${key} 실행` };
+      },
+      generate: (_champion, _rng, _feedback, strategy) => {
+        generatedWith.push(strategy?.key ?? "none");
+        return `c${++n}`;
+      },
+      initial: () => "c0",
+      store,
+      onEvent: () => {},
+    }).start();
+
+    expect(captured[0]).toEqual({ recent: [], blocked: [] });
+    expect(captured[2].blocked).toEqual(["targeted_repair"]);
+    expect(captured[2].recent).toEqual([
+      expect.objectContaining({ round: 1, scoreDelta: -5, adopted: false }),
+      expect.objectContaining({ round: 2, scoreDelta: -4, adopted: false }),
+    ]);
+    // 3회차는 가드 기각이므로 4회차 기억에도 점수·전략·실패 사유가 나타나지 않는다.
+    expect(JSON.stringify(captured[3])).not.toContain("99");
+    expect(JSON.stringify(captured[3])).not.toContain("숨겨야 할 후보 흔적");
+    expect(JSON.stringify(captured[3])).not.toContain("restructure_for_retrieval");
+    expect(captured[3].blocked).toEqual(["targeted_repair"]);
+    // 공개 실험이 3개를 넘으면 오래된 기록부터 빠진다. 가드 기각 3회차는 여전히 없다.
+    expect((captured[5].recent as Array<{ round: number }>).map((record) => record.round)).toEqual([
+      2,
+      4,
+      5,
+    ]);
+    expect(captured[5].blocked).toEqual([]);
+    expect(generatedWith).toEqual(strategyKeys);
+
+    const final = await store.load("public-experiment-memory");
+    expect(final?.tree.map((record) => record.strategy?.key)).toEqual(strategyKeys);
+  });
+
+  it("반복 실패로 차단된 전략을 계획기가 다시 선택하면 후보를 만들기 전에 중단한다", async () => {
+    let generated = 0;
+    let n = 0;
+    await expect(
+      createLoopRun<string>({
+        runId: "blocked-strategy-enforced",
+        pack,
+        spec: makeSpec({ maxRounds: 3, feedbackMode: "recent_public_experiments_v1" }),
+        scorer: (artifact) => artifact === "c0" ? ok(10) : ok(5),
+        planStrategy: () => ({ key: "targeted_repair", summary: "같은 전략" }),
+        generate: () => {
+          generated += 1;
+          return `c${++n}`;
+        },
+        initial: () => "c0",
+        store: new MemoryCheckpointStore<string>(),
+        onEvent: () => {},
+      }).start(),
+    ).rejects.toThrow("다른 전략이 필요합니다");
+    expect(generated).toBe(2);
+  });
 });
 
 describe("IndexedDbCheckpointStore", () => {

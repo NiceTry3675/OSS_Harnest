@@ -7,7 +7,9 @@ import {
   createGenerator,
   createInitial,
   createScorer,
+  createStrategyPlanner,
   draftCases,
+  LENGTH_POLICY,
   runExaminerBattery,
   scoreHoldout,
 } from "@harnest/template-handover";
@@ -57,6 +59,7 @@ const problem: HandoverProblem = {
     c("case-5", "비밀 키는 어디에 보관하나요?", "모든 비밀 키는 볼트에 저장하며 저장소에 넣는 것은 금지입니다."),
   ],
   lengthCap: 2000,
+  lengthPolicy: LENGTH_POLICY,
   // 간결성 끔 — 이 파일의 관통 시나리오는 순수 커버리지 등반을 검증한다
   useConciseness: false,
 };
@@ -97,6 +100,7 @@ describe("모의 모델 관통", () => {
     const llm = createMockClient(problem);
     const scorer = createScorer(problem, llm);
     const initial = createInitial(problem, llm);
+    const planStrategy = createStrategyPlanner(problem, llm);
     const generate = createGenerator(problem, llm);
 
     const doc0 = await initial(() => 0);
@@ -105,11 +109,16 @@ describe("모의 모델 관통", () => {
     expect(s0.total).toBeGreaterThan(0);
     expect(s0.total).toBeLessThan(100);
 
-    const doc1 = await generate(doc0, () => 0, {
+    const feedback = {
       round: 1,
       championScore: s0.total,
       championViolations: s0.violations,
-    });
+      recentPublicExperiments: [],
+      blockedStrategyKeys: [],
+    };
+    const strategy = await planStrategy(doc0, () => 0, feedback);
+    const doc1 = await generate(doc0, () => 0, feedback, strategy);
+    expect(strategy.key).toBe("targeted_repair");
     const s1 = await scorer(doc1);
     expect(s1.total).toBeGreaterThan(s0.total);
   });

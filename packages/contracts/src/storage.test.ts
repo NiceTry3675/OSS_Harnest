@@ -70,6 +70,7 @@ function checkpoint(pack: EvaluationPack): LoopCheckpoint<string> {
         adopted: true,
         gateRejected: false,
         violations: [],
+        strategy: { key: "targeted_repair", summary: "누락 항목을 직접 보강" },
         candidateGuardScore: null,
         guardSafe: true,
       },
@@ -233,6 +234,35 @@ describe("ProjectExportEnvelope", () => {
     });
 
     expect(await projectExportIssues(envelope)).toEqual([]);
+  });
+
+  it("생성 피드백 모드를 정식 기록에 보존하고 알 수 없는 모드는 거부한다", async () => {
+    const pack = await makePack("deterministic");
+    const input = exportInput(pack, noHoldout);
+    input.project.loopSpec.feedbackMode = "recent_public_experiments_v1";
+    const envelope = await createProjectExportEnvelope(input);
+
+    expect(envelope.project.loopSpec.feedbackMode).toBe(
+      "recent_public_experiments_v1",
+    );
+    expect(envelope.result.checkpoint.tree[0].strategy).toEqual({
+      key: "targeted_repair",
+      summary: "누락 항목을 직접 보강",
+    });
+    const broken = structuredClone(envelope);
+    Object.assign(broken.project.loopSpec, { feedbackMode: "leak_guard_signal" });
+    expect((await projectExportIssues(broken)).map((entry) => entry.path)).toContain(
+      "project.loopSpec.feedbackMode",
+    );
+
+    const brokenStrategy = structuredClone(envelope);
+    brokenStrategy.result.checkpoint.tree[0].strategy = {
+      key: "잘못된 전략 키",
+      summary: "",
+    };
+    const strategyPaths = (await projectExportIssues(brokenStrategy)).map((entry) => entry.path);
+    expect(strategyPaths).toContain("result.checkpoint.tree[0].strategy.key");
+    expect(strategyPaths).toContain("result.checkpoint.tree[0].strategy.summary");
   });
 
   it("시험관 리포트는 두 필수 검사(안정성·꼼수 내성)를 각각 정확히 한 번 포함해야 한다", async () => {
