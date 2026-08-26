@@ -1,121 +1,148 @@
-/** 첫 방문 안내 — 다섯 단계를 화면 미리보기와 함께 넘겨 본다.
+/** 첫 방문 안내 — 목표에서 결과까지 다섯 장으로 보여준다.
  *
- *  "숨긴 질문"이나 "기준 잠금" 같은 개념은 글로만 읽으면 와닿지 않는다.
- *  나중에 실제 화면에서 만났을 때 알아볼 수 있도록 축소한 모습을 미리 보여준다.
+ *  Harnest는 특정 문서를 만들어 주는 도구가 아니다. 사용자가 목표를 말하면
+ *  그것을 채점표로 정리하고, 그 채점표를 잠근 뒤, 통과할 때까지 고쳐 쓴다.
+ *  그래서 안내도 산출물이 아니라 그 절차를 따라간다.
+ *
+ *  그림은 실제 화면의 배치를 닮게 그린다. 나중에 진짜 화면에서 만났을 때
+ *  알아볼 수 있어야 안내가 값을 한다.
+ *
  *  한 번 닫으면 이 브라우저에서는 다시 뜨지 않는다. */
 
 import { useCallback, useEffect, useState } from "react";
 
 const SEEN_KEY = "harnest.tour.seen";
 
-const SLIDES = [
-  {
-    title: "무엇을 맡길지 고릅니다",
-    desc: "잘 만들었는지 사람이 판단해야 하는 일을 맡깁니다.",
-  },
-  {
-    title: "실제 질문과 답을 넣습니다",
-    desc: "이 질문들로 채점합니다. 일부는 개선에 쓰지 않고 시작과 끝에만 별도로 확인합니다.",
-  },
-  {
-    title: "기준을 확인하고 잠급니다",
-    desc: "무엇으로 몇 점을 줄지 직접 봅니다. 승인하는 순간 AI도 바꿀 수 없습니다.",
-  },
-  {
-    title: "같은 기준으로 후보를 비교합니다",
-    desc: "AI가 고칠 때마다 채점하고, 엄격히 더 나은 산출물만 남깁니다.",
-  },
-  {
-    title: "숨긴 질문으로 시작과 끝을 확인합니다",
-    desc: "숨긴 질문과 점수는 생성, 채택, 중단 결정에 사용하지 않습니다.",
-  },
-] as const;
+interface Slide {
+  /** 화면 상단 부제 — 장마다 다르다 */
+  lead: string;
+  title: string;
+  desc: string;
+}
 
-/** 각 단계를 축소해 그린 그림 — 실제 화면의 배치를 닮게만 만든다 */
+const SLIDES: Slide[] = [
+  {
+    lead: "1 — 목표",
+    title: "무엇을 만들지, 무엇을 잘한 걸로 볼지 적습니다",
+    desc: "맡길 일을 설명하고 실제로 받았던 질문과 답을 넣습니다. 분량과 채점 모델도 여기서 정합니다.",
+  },
+  {
+    lead: "2 — 채점표",
+    title: "그 목표가 그대로 채점표가 됩니다",
+    desc: "적은 내용이 기준과 가중치, 반드시 지켜야 할 조건으로 정리됩니다. 사람이 읽을 수 있는 형태입니다.",
+  },
+  {
+    lead: "3 — 점검·승인",
+    title: "채점할 AI가 제대로 채점하는지 먼저 시험합니다",
+    desc: "순서를 바꿔도 같은 판정을 내는지, 없는 내용을 지어내지 않는지 확인합니다. 통과해야 승인할 수 있습니다.",
+  },
+  {
+    lead: "4 — 잠금",
+    title: "승인하는 순간 채점표가 잠깁니다",
+    desc: "기준과 조건, 채점 모델까지 함께 잠깁니다. 실행이 끝날 때까지 AI도 사람도 바꾸지 못합니다.",
+  },
+  {
+    lead: "5 — 실행·결과",
+    title: "목표에 닿을 때까지 고쳐 씁니다",
+    desc: "회차마다 같은 채점표로 재고, 점수가 실제로 오른 것만 남깁니다. 시작과 끝을 같은 자로 비교해 보여줍니다.",
+  },
+];
+
+/** 각 장의 그림 — 실제 화면의 배치를 닮게만 그린다 */
 function Shot({ at }: { at: number }) {
+  // 1. 목표를 적는다
   if (at === 0) {
     return (
-      <div className="shot-rows">
-        <div className="sk-title" />
-        <div className="sk-title sk-sub" />
-        <div className="shot-split">
-          <div className="shot-grow">
-            <div className="sk-line" style={{ width: "88%" }} />
-            <div className="sk-line" style={{ width: "70%" }} />
-            <div className="sk-line" style={{ width: "52%" }} />
-          </div>
-          <div className="sk-orb">기준</div>
+      <div className="tv-goal">
+        <span className="tv-label">맡길 일</span>
+        <div className="tv-field">신입이 물어보지 않고도 일할 수 있는 문서를 만들고 싶습니다</div>
+        <div className="tv-chips">
+          <span>질문·답 10개</span>
+          <span>분량 8,000자</span>
+          <span>채점 모델 선택</span>
         </div>
       </div>
     );
   }
+
+  // 2. 목표가 채점표가 된다
   if (at === 1) {
     return (
-      <div className="shot-split">
-        <div className="shot-grow">
-          <div className="sk-card">
-            <div className="sk-line" style={{ width: "64%" }} />
-            <div className="sk-line sk-faint" style={{ width: "86%" }} />
-          </div>
-          <div className="sk-card">
-            <div className="sk-line" style={{ width: "52%" }} />
-            <div className="sk-line sk-faint" style={{ width: "78%" }} />
-          </div>
-          <div className="sk-card sk-hidden">
-            <span className="sk-pill">숨김</span>
-            <div className="sk-line sk-blur" style={{ width: "44%" }} />
-          </div>
-          <div className="sk-card sk-hidden">
-            <span className="sk-pill">숨김</span>
-            <div className="sk-line sk-blur" style={{ width: "38%" }} />
-          </div>
+      <div className="tv-make">
+        <div className="tv-from">
+          <span className="tv-label">적은 내용</span>
+          <div className="tv-field is-small">질문 10개 · 분량 8,000자</div>
         </div>
-        <div className="sk-panel">
-          <div className="sk-item"><i>1</i><span /></div>
-          <div className="sk-item"><i className="sk-gate">!</i><span /></div>
-          <div className="sk-item"><i>2</i><span /></div>
-          <div className="sk-item"><i className="sk-seal">?</i><span /></div>
+        <span className="tv-arrow" aria-hidden="true">→</span>
+        <div className="tv-to">
+          <div className="tv-rule">
+            <span>문서만 보고 답할 수 있는가</span>
+            <b>80%</b>
+          </div>
+          <div className="tv-rule">
+            <span>간결성</span>
+            <b>20%</b>
+          </div>
+          <div className="tv-rule is-gate">
+            <span>분량 8,000자 이하</span>
+            <b>필수</b>
+          </div>
         </div>
       </div>
     );
   }
+
+  // 3. 채점 모델을 시험한다
   if (at === 2) {
     return (
-      <div className="shot-mid">
-        <div className="sk-lock" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <div className="tv-checks">
+        <div className="tv-check-row is-ok"><i aria-hidden="true">✓</i>순서를 바꿔도 같은 판정</div>
+        <div className="tv-check-row is-ok"><i aria-hidden="true">✓</i>좋은 답과 나쁜 답을 가려냄</div>
+        <div className="tv-check-row is-ok"><i aria-hidden="true">✓</i>두 번 재도 점수가 같음</div>
+        <div className="tv-check-row"><i aria-hidden="true">…</i>없는 내용에 점수를 주지 않음</div>
+      </div>
+    );
+  }
+
+  // 4. 승인하면 잠긴다
+  if (at === 3) {
+    return (
+      <div className="tv-lockshot">
+        <div className="tv-lockmark">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true">
             <path d="M7 10.5V7.5a5 5 0 0 1 10 0v3" />
             <rect x="4.5" y="10.5" width="15" height="10" rx="3" fill="currentColor" stroke="none" />
           </svg>
         </div>
-        <div className="sk-hash">3f9c2ab41d7e0c86</div>
-        <div className="sk-checks">
-          <i className="is-ok" /><i className="is-ok" /><i className="is-ok" /><i />
+        <div className="tv-locked">
+          <span>기준 · 가중치</span>
+          <span>반드시 지켜야 할 조건</span>
+          <span>채점 모델</span>
+        </div>
+        <div className="tv-hash">3f9c2ab41d7e0c86</div>
+      </div>
+    );
+  }
+
+  // 5. 실행하고 결과를 본다
+  return (
+    <div className="tv-run">
+      <svg className="tv-curve" viewBox="0 0 200 76" preserveAspectRatio="none" aria-hidden="true">
+        <line x1="0" x2="200" y1="68" y2="68" />
+        <path d="M6 62 L52 55 L98 34 L144 26 L194 12" />
+        <circle cx="194" cy="12" r="4" />
+      </svg>
+      <div className="tv-beforeafter">
+        <div>
+          <i>시작</i>
+          <b>62.5</b>
+        </div>
+        <span className="tv-arrow" aria-hidden="true">→</span>
+        <div className="is-after">
+          <i>종료</i>
+          <b>87.5</b>
         </div>
       </div>
-    );
-  }
-  if (at === 3) {
-    return (
-      <div className="sk-stage">
-        <div className="sk-score">후보 비교</div>
-        <div className="sk-from">승인한 같은 절차로 매번 채점합니다</div>
-        <svg viewBox="0 0 260 46" preserveAspectRatio="none" className="sk-curve" aria-hidden="true">
-          <path d="M0,40 L36,38 L58,34 L80,10 L120,7 L180,4 L260,4" />
-          <line x1="0" x2="260" y1="40" y2="40" />
-          <circle cx="260" cy="4" r="3.4" />
-        </svg>
-      </div>
-    );
-  }
-  return (
-    <div className="shot-mid">
-      <div className="sk-jump">
-        <span className="sk-old">현재</span>
-        <span className="sk-arrow">→</span>
-        <span className="sk-new">후보</span>
-      </div>
-      <div className="sk-reveal">숨긴 질문은 시작과 끝에만 별도 확인</div>
     </div>
   );
 }
@@ -159,18 +186,18 @@ export function IntroTour({ open, onClose }: { open: boolean; onClose: () => voi
           <h2>이렇게 진행됩니다</h2>
           <span className="tour-count">{at + 1} / {SLIDES.length}</span>
         </div>
-        <p className="hint" style={{ margin: 0 }}>기준을 잠근 뒤 같은 절차로 후보를 비교합니다.</p>
+        <p className="tour-lead">{SLIDES[at].lead}</p>
 
         <div className="tour-frame">
-          {SLIDES.map((_, i) => (
-            <div key={i} className={`tour-shot${i === at ? " is-on" : ""}`} aria-hidden={i !== at}>
+          {SLIDES.map((s, i) => (
+            <div key={s.title} className={`tour-shot${i === at ? " is-on" : ""}`} aria-hidden={i !== at}>
               <Shot at={i} />
             </div>
           ))}
         </div>
 
         <div className="tour-text">
-          <strong>{at + 1}. {SLIDES[at].title}</strong>
+          <strong>{SLIDES[at].title}</strong>
           <p>{SLIDES[at].desc}</p>
         </div>
 
@@ -181,18 +208,27 @@ export function IntroTour({ open, onClose }: { open: boolean; onClose: () => voi
                 key={s.title}
                 type="button"
                 className={i === at ? "is-on" : ""}
-                aria-label={`${i + 1}단계 안내 보기`}
+                aria-label={`${i + 1}번째 안내 보기`}
                 onClick={() => move(i)}
               />
             ))}
           </div>
           <button type="button" className="tour-arrow" disabled={at === 0}
             aria-label="이전 안내" onClick={() => move(at - 1)}>‹</button>
-          <button type="button" className="tour-arrow" disabled={at === last}
-            aria-label="다음 안내" onClick={() => move(at + 1)}>›</button>
-          <button type="button" className="primary tour-go" onClick={onClose}>
-            {at === last ? "시작하기" : "둘러보기"}
-          </button>
+          {at === last ? (
+            <button type="button" className="primary tour-go" onClick={onClose}>
+              시작하기
+            </button>
+          ) : (
+            <>
+              <button type="button" className="tour-skip" onClick={onClose}>
+                건너뛰기
+              </button>
+              <button type="button" className="primary tour-go" onClick={() => move(at + 1)}>
+                다음
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
