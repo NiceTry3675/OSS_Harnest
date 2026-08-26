@@ -13,6 +13,7 @@ import { ActivityConsole } from "../components/ActivityConsole";
 import { appendStream, clearStream, endStream, withActivityLog } from "../lib/activityLog";
 import { WizardCaseList, type CasePair } from "../components/WizardCaseList";
 import { ModelPicker } from "../components/ModelPicker";
+import { pickModel } from "../lib/modelChoice";
 import { ProviderCredentialInput } from "../components/ProviderCredentialInput";
 import { appendFileTexts, extractFileText, FILE_ACCEPT } from "../lib/attachText";
 import {
@@ -248,10 +249,12 @@ export function WizardPage() {
   // 기본값을 공급자로 둔다 — 키 칸이 처음부터 보여야 한다는 요청
   const [judgeChoice, setJudgeChoice] = useState<JudgeChoice>("openai");
   // 초안은 실제 모델로 뽑아야 쓸 만하다 — 모의 모델은 화면 확인용이라 기본값에서 뺀다
-  const [assistChoice, setAssistChoice] = useState<JudgeChoice>("gemini");
+  // 채점 모델 기본값과 같은 공급자로 둔다 — 키를 한 번만 넣으면 초안까지 바로 된다
+  const [assistChoice, setAssistChoice] = useState<JudgeChoice>("openai");
   const [assistBusy, setAssistBusy] = useState(false);
   // 클릭 1회에 요청할 초안 개수 — 남은 슬롯까지 자유롭게 고른다(호출은 개수와 무관하게 클릭당 1회)
-  const [assistCount, setAssistCount] = useState(3);
+  // 숨긴 질문이 생기려면 쌍이 최소 4개는 있어야 한다 — 한 번에 그만큼 만들어 둔다
+  const [assistCount, setAssistCount] = useState(4);
   // 초안 난이도 — 값의 의미는 템플릿의 difficulty 선언이 소유한다
   const [assistDifficulty, setAssistDifficulty] = useState(
     () => entry?.caseAssist?.difficulty?.defaultValue ?? 1,
@@ -362,9 +365,9 @@ export function WizardPage() {
         .then((models) => {
           if (!alive) return;
           setModelList(models);
-          setJudgeModel((current) =>
-            current && models.some((m) => m.id === current) ? current : (models[0]?.id ?? current),
-          );
+          // 벤더 목록의 첫 번째가 아니라 추린 목록의 첫 번째를 집는다 —
+          // 그러지 않으면 구형 모델(babbage-002 등)이 기본으로 잡힌다
+          setJudgeModel((current) => pickModel(models, current));
         })
         .catch((err: unknown) => {
           if (!alive) return;
@@ -402,8 +405,8 @@ export function WizardPage() {
       setModelList(models);
       if (models.length === 0) {
         setModelNote("쓸 수 있는 모델을 찾지 못했습니다.");
-      } else if (!models.some((m) => m.id === judgeModel)) {
-        setJudgeModel(models[0].id);
+      } else {
+        setJudgeModel(pickModel(models, judgeModel));
       }
     } catch (err) {
       setModelList([]);

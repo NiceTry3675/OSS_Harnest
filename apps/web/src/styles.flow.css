@@ -62,6 +62,19 @@
 }
 @keyframes q-pop { from { opacity: 0; transform: translateY(14px) scale(0.98); } }
 .q-item:hover { border-color: var(--accent); transform: translateY(-1px); box-shadow: 0 10px 24px -14px rgba(49, 130, 246, 0.6); }
+/* 접힌 쌍 — 질문 한 줄만 남는다. 스무 개가 되어도 훑을 수 있어야 한다. */
+.q-item.is-folded { padding: 10px var(--s-4); }
+.q-item.is-folded .q-top { gap: var(--s-3); }
+.q-peek {
+  /* 버튼 기본이 가운데 정렬이라, 그대로 두면 긴 질문이 앞뒤로 잘린다 */
+  display: block; justify-content: flex-start;
+  flex: 1; min-width: 0; height: auto; padding: 0; border: 0; background: none;
+  text-align: left; font-size: var(--t-sm); font-weight: 600; color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;
+}
+.q-peek:hover:not(:disabled) { transform: none; }
+.q-peek:hover { color: var(--accent); }
+.q-item.is-folded:hover { transform: none; box-shadow: none; }
 .q-top { display: flex; align-items: center; gap: var(--s-2); }
 .q-no {
   width: 21px; height: 21px; border-radius: 50%; flex: none;
@@ -192,15 +205,17 @@
  * 전에는 카드가 sticky여서, 뒤따르는 콘솔이 스크롤하며 카드 위에 겹쳐 그려졌다
  * (나중에 놓인 위치 지정 요소가 위에 칠해진다). 붙잡는 대상을 콘솔로 바꾸면
  * 겹칠 일이 없다 — 콘솔이 멈추는 지점은 이미 카드가 지나간 뒤다. */
-.wizard-side { display: flex; flex-direction: column; gap: var(--s-3); min-height: 100%; }
+/* 목록이 길어져도 다음 단계 버튼이 화면에 남아야 한다.
+ * 기둥이 화면보다 짧으므로 통째로 붙이기만 하면 된다 — 안의 크기는 그대로 둔다. */
+.wizard-side {
+  display: flex; flex-direction: column; gap: var(--s-3);
+  align-self: start; position: sticky; top: var(--s-4);
+}
 .wizard-side .blueprint { position: static; }
-.wizard-side .stream { position: sticky; top: var(--s-4); }
+.wizard-side .stream { position: static; }
 /* 왼쪽 기둥만큼 자리를 잡아야 콘솔이 따라 내려올 수 있다 */
 .wizard-grid { align-items: stretch; }
-@media (max-width: 940px) {
-  .wizard-side { min-height: 0; }
-  .wizard-side .stream { position: relative; }
-}
+@media (max-width: 940px) { .wizard-side { position: static; } }
 .wizard-go { width: 100%; height: 52px; font-size: var(--t-body); }
 
 /* ── AI 초안 도우미: 한 줄로 두고 설정은 접는다 ── */
@@ -310,8 +325,8 @@ label.dropzone input[type="file"] { display: none; }
 
 /* ── 질문·답을 한 번에 넣는 입력줄 ── */
 .pair-input {
-  display: grid; grid-template-columns: 1fr 1fr auto; gap: var(--s-3);
-  align-items: end;
+  display: grid; grid-template-columns: 1fr; gap: var(--s-3);
+  align-items: stretch;
   border: 2px solid var(--accent); border-radius: var(--radius-sm);
   padding: var(--s-4); background: var(--surface);
   box-shadow: 0 0 0 5px var(--accent-soft);
@@ -323,7 +338,7 @@ label.dropzone input[type="file"] { display: none; }
   color: var(--ink-2); margin-bottom: 5px;
 }
 .pair-field textarea { min-height: 0; resize: vertical; }
-.pair-add { height: 44px; padding: 0 20px; font-size: var(--t-sm); }
+.pair-add { height: 44px; padding: 0 24px; font-size: var(--t-sm); justify-self: end; }
 @media (max-width: 820px) { .pair-add { width: 100%; } }
 
 /* 카드 안 질문·답 직접 편집 */

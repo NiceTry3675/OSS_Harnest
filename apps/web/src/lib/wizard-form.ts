@@ -28,6 +28,9 @@ export function validate(q: Question, value: DraftValue): string | null {
   }
   const v = typeof value === "string" ? value.trim() : "";
   if (q.type === "toggle") return null; // 켬/끔 — 기본값이 있으므로 항상 유효
+  // 채점 모델은 답변 맵이 아니라 위저드가 따로 들고 있다(공급자·키·모델 이름).
+  // 여기에 실릴 값이 없으므로 빈 값 검사에 걸려선 안 된다.
+  if (q.type === "judgeModel") return null;
   if (q.type === "textarea") {
     if (q.maxChars !== undefined && v.length > q.maxChars) {
       return `최대 ${q.maxChars.toLocaleString()}자까지 입력할 수 있습니다 (현재 ${v.length.toLocaleString()}자).`;
@@ -83,6 +86,8 @@ export function toAnswers(
       answers[q.id] = raw === "" ? q.defaultValue !== false : raw !== "false";
       continue;
     }
+    // 채점 모델은 judgeProcedure로 따로 들어간다 — 답변 맵에 빈 값을 남기지 않는다
+    if (q.type === "judgeModel") continue;
     answers[q.id] = q.type === "number" ? Number(raw) : raw;
   }
   return answers;
