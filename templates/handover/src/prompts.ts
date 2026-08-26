@@ -17,6 +17,30 @@ export function limitBlock(cap: number): string {
   );
 }
 
+/** 수정용 분량 안내.
+ *
+ *  원샷과 달리 목표 글자 수를 주지 않는다. 간결성을 켠 평가에서 "상한의 80%를 목표로"는
+ *  간결성 점수와 정면으로 싸운다 — 점수는 상한 대비 남는 여유가 클수록 높은데,
+ *  프롬프트가 80% 언저리에 머물라고 지시하면 남은 여지에 손을 못 댄다.
+ *  대신 지금 몇 점이고 줄이면 몇 점이 되는지를 숫자로 준다. */
+export function reviseLimitBlock(cap: number, docLength: number, useConciseness: boolean): string {
+  const hardCap = hardLengthCapFor(cap);
+  const limits =
+    `분량: ${cap}자를 넘으면 ${hardCap}자까지 점진적으로 최대 ${MAX_LENGTH_OVERFLOW_PENALTY}점 감점되고, ` +
+    `${hardCap}자를 넘으면 실격입니다.`;
+  if (!useConciseness) return `${limits} 현재 ${docLength.toLocaleString()}자입니다.`;
+
+  const score = (length: number): number => Math.round(Math.max(0, 1 - length / cap) * 100);
+  const trimmed = Math.max(Math.floor(cap * 0.3), Math.floor(docLength * 0.7));
+  return (
+    `${limits}\n` +
+    `간결성 점수 = (1 − 길이 ÷ ${cap}) × 100 입니다. ` +
+    `현재 ${docLength.toLocaleString()}자로 ${score(docLength)}점이고, ` +
+    `${trimmed.toLocaleString()}자까지 줄이면 ${score(trimmed)}점이 됩니다.\n` +
+    `목표 글자 수를 따로 맞추려 하지 말고, 질문에 답하는 데 필요 없는 중복·군더더기를 덜어내 짧게 만드세요.`
+  );
+}
+
 function casesBlock(cases: CaseDef[]): string {
   return cases
     .map((c) => `### 질문 (${c.id})\n${c.question}\n\n### 그때의 답\n${c.expectedAnswer}`)
@@ -33,6 +57,12 @@ export const HANDOVER_STRATEGIES = [
     key: "restructure_for_retrieval",
     label: "검색 가능한 구조로 재편",
     description: "제목·순서·표·체크리스트를 재구성해 필요한 답을 더 쉽게 찾게 한다.",
+  },
+  {
+    key: "tighten",
+    label: "군더더기 덜어내기",
+    description:
+      "새 내용을 넣지 않고 중복·장황한 설명·반복되는 머리말만 걷어내 문서를 더 짧게 만든다. 답에 필요한 사실은 하나도 빼지 않는다.",
   },
   {
     key: "compress_and_reallocate",
@@ -192,11 +222,7 @@ ${publicExperimentsBlock(recentPublicExperiments)}
 실패 목록만 좁게 때우거나 기록의 문답을 그대로 옮겨 적지 말고, 참고 자료의 다른 주제 커버리지도 함께 유지하세요.`
       : ""
   }
-${limitBlock(problem.lengthCap)}${
-    problem.useConciseness
-      ? `\n간결성 가점: 같은 커버리지면 짧은 문서가 더 높은 점수를 받습니다 (현재 ${championDoc.length.toLocaleString()}자).`
-      : ""
-  }
+${reviseLimitBlock(problem.lengthCap, championDoc.length, problem.useConciseness)}
 
 ## 업무 소개 · 참고 자료
 ${problem.material || "(제공되지 않음)"}
@@ -208,7 +234,9 @@ ${casesBlock(problem.visibleCases)}
 ${championDoc}
 
 ## 실패 목록
-${violations.length > 0 ? violations.join("\n") : "(없음 — 표현을 다듬되 내용 커버리지를 유지하세요)"}
+${violations.length > 0 ? violations.join("\n") : problem.useConciseness
+      ? "(없음 — 공개 질문은 모두 답할 수 있습니다. 남은 점수 여지는 간결성뿐이니, 커버리지를 지키면서 분량을 줄이세요.)"
+      : "(없음 — 표현을 다듬되 내용 커버리지를 유지하세요)"}
 ${previousAttemptBlock}
 ${experimentBlock}
 ${strategyBlock}

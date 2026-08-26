@@ -26,6 +26,8 @@ export interface ExperimentStrategy {
   key: string;
   /** 이번 후보에서 실제로 하려는 일을 설명하는 짧은 공개 기록 */
   summary: string;
+  /** 사람이 읽는 전략 이름 — 화면이 key 대신 쓴다. 생략하면 key를 그대로 보인다. */
+  label?: string;
 }
 
 export interface ScoreResult {
