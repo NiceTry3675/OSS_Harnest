@@ -390,6 +390,8 @@ export function draftCasesPrompt(
   existingQuestions: string[],
   count: number,
   hops = 1,
+  /** 무엇을 확인하는 질문이어야 하는지 — 0단계에서 정해 내려온다 */
+  focus: readonly string[] = [],
 ): string {
   const existingBlock =
     existingQuestions.length > 0
@@ -404,6 +406,11 @@ export function draftCasesPrompt(
 - 질문은 하나여야 하고, 답은 짧은 사실 하나(1~3문장)여야 합니다. 독립된 두 질문을 '그리고'로 잇는 복합 질문은 무효입니다.
 - 답을 도출하려면 자료의 서로 다른 위치(다른 항목·절·단락)에 있는 사실 ${hops}개가 모두 필요해야 합니다. 한 사실만으로 답할 수 있으면 무효입니다.
 - 각 초안에 "evidence"로, 답의 근거가 된 서로 다른 위치의 대목 ${hops}곳을 자료에서 글자 그대로 복사해(각 20~200자) 담으세요.`
+      : "";
+  // 목표에서 정한 확인 방향이 있으면 그쪽으로 뽑는다. 없으면 지금까지처럼 자료 전반에서 뽑는다.
+  const focusBlock =
+    focus.length > 0
+      ? `\n## 이 질문들로 확인하려는 것\n${focus.map((f) => `- ${f}`).join("\n")}\n위 항목들을 고르게 덮도록 질문을 나누어 만드세요.\n`
       : "";
   const schema =
     hops >= 2
@@ -424,7 +431,7 @@ export function draftCasesPrompt(
 
 ## 참고 자료
 ${material}
-${existingBlock}
+${focusBlock}${existingBlock}
 설명·코드 펜스 없이 JSON 배열 하나만 출력하세요:
 ${schema}`;
 }
@@ -436,8 +443,9 @@ export function draftCasesRetryPrompt(
   count: number,
   malformed: string,
   hops = 1,
+  focus: readonly string[] = [],
 ): string {
-  return `${draftCasesPrompt(material, existingQuestions, count, hops)}
+  return `${draftCasesPrompt(material, existingQuestions, count, hops, focus)}
 
 이전 출력은 형식 검증에 실패했습니다:
 <invalid-output>

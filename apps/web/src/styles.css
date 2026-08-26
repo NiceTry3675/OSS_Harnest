@@ -497,7 +497,8 @@ table.grid td:not(:first-child), table.grid th:not(:first-child) { text-align: r
 /* ═══ 1. 홈 ═══ */
 .hero {
   display: grid; grid-template-columns: 1.15fr 0.85fr;
-  gap: 66px; align-items: center; min-height: 70vh;
+  /* 창이 세로로 길면 70vh가 그만큼 늘어나 아래가 텅 빈다 — 바닥만 잡고 천장을 씌운다 */
+  gap: 66px; align-items: center; min-height: min(70vh, 560px);
 }
 @media (max-width: 940px) { .hero { grid-template-columns: 1fr; gap: var(--s-6); } }
 .hero-title { font-size: var(--t-hero); line-height: 1.18; letter-spacing: -0.038em; font-weight: 800; margin: 0; }
@@ -629,8 +630,17 @@ table.grid td:not(:first-child), table.grid th:not(:first-child) { text-align: r
 .flow-still span { display: block; margin-top: 4px; font-size: var(--t-sm); color: #9aa4b2; }
 
 .picks { padding-top: var(--s-6); scroll-margin-top: var(--s-6); }
-.picks-title { font-size: var(--t-h1); font-weight: 800; letter-spacing: -0.03em; margin: 0 0 var(--s-5); }
+/* 구역 이름은 카드보다 조용해야 한다 — 내용은 카드고 이건 이름표다 */
+.picks-title {
+  font-size: var(--t-body); font-weight: 700; letter-spacing: 0.01em;
+  color: var(--ink-2); margin: 0 0 var(--s-4);
+}
 .template-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: var(--s-4); align-items: start; }
+/* 한 장뿐이어도 제공된 카드와 같은 폭이어야 한다.
+   제공된 쪽은 auto-fit이라 카드가 둘이면 남는 칸을 흡수해 2단이 된다 —
+   여기서 auto-fill을 쓰면 칸 수가 달라져 폭이 어긋나므로, 같은 2단으로 못박는다. */
+.template-grid.is-mine { grid-template-columns: repeat(2, minmax(320px, 1fr)); }
+@media (max-width: 780px) { .template-grid.is-mine { grid-template-columns: 1fr; } }
 .template-card { display: flex; flex-direction: column; gap: var(--s-3); margin-bottom: 0; }
 .template-name { font-size: var(--t-h2); font-weight: 800; letter-spacing: -0.02em; margin: 0; display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
 .template-desc { margin: 0; flex: 1; }

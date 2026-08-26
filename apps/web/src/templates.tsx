@@ -18,7 +18,8 @@ import * as handover from "@harnest/template-handover";
 import type { CompiledGeneric, HoldoutEvaluation } from "./state";
 import type { LlmClient } from "@harnest/template-handover";
 import { DEV_SAMPLES } from "./lib/devSamples";
-import type { TemplateFlow } from "./lib/flowStep";
+import type { PlanTemplateChoice } from "./lib/templatePlan";
+import { buildFlowSteps, type TemplateFlow } from "./lib/flowStep";
 import { TimetableGrid } from "./components/TimetableGrid";
 import { HandoverDocView } from "./components/HandoverDocView";
 import {
@@ -59,6 +60,18 @@ export interface TemplateEntry {
   name: string;
   description: string;
   badge?: string;
+  /** 0단계 빌더가 임의의 목표에 붙일 수 있는 절차인지.
+   *  입력 모양이 고정된 절차(예: 근무자 명단을 받는 시간표)는 아무 목표에나 얹을 수 없다. */
+  fitsAnyGoal?: boolean;
+  /** 이 절차가 무엇을 어떻게 재는지, **절차 이름을 쓰지 않고** 설명한 문장.
+   *  0단계 밑줄에 그대로 걸리고, 빌더가 모델에게 넘기는 설명도 이것을 쓴다.
+   *  이름("인수인계·온보딩 문서")을 넘기면 모델이 그 어휘로 끌려간다 —
+   *  플레이리스트를 만드는 목표에 "음악 추천 인수인계 템플릿"이 나온다. */
+  builderSummary?: string;
+  /** 0단계 빌더가 모델에게 넘길, 각 칸이 하는 일. FlowStep.id로 건다.
+   *  이 절차가 지금 쓰는 이름은 넘기지 않는다 — 넘기면 모델이 그대로 베껴,
+   *  목표가 회사 업무가 아닐 때도 "업무 소개" 같은 이름이 나온다. */
+  builderStagePurpose?: Record<string, string>;
   /** true면 BYO 키 또는 모의 모델 선택이 필요(저지 모델은 승인 전에 확정 — SPEC §8) */
   needsModel: boolean;
   questions: Question[];
@@ -105,6 +118,8 @@ export interface TemplateEntry {
       count: number,
       llm: LlmClient,
       difficulty?: number,
+      /** 0단계에서 정한 확인 방향 — 초안을 그쪽으로 뽑는다 */
+      focus?: readonly string[],
     ): Promise<
       Array<{
         question: string;
@@ -131,6 +146,7 @@ const timetableEntry: TemplateEntry = {
   description:
     "근무자 명단과 원칙만 알려주세요. 연속 근무 한도·주당 상한·배정 형평을 당신이 승인한 기준으로 채점하며, 통과할 때까지 근무표를 스스로 다듬습니다.",
   badge: "개발용 테스트 템플릿",
+  fitsAnyGoal: false,
   needsModel: false,
   questions: timetable.questions,
   flow: {
@@ -176,6 +192,23 @@ const timetableEntry: TemplateEntry = {
 const handoverEntry: TemplateEntry = {
   id: handover.TEMPLATE_ID,
   name: handover.TEMPLATE_NAME,
+  // 질문·답으로 재는 절차라 목표가 무엇이든 붙는다
+  fitsAnyGoal: true,
+  builderSummary:
+    "결과물은 글로 된 문서입니다. 그 문서만 읽은 AI가 사용자가 미리 준 확인 질문들에 실제로 답해보게 해서 채점합니다. 답이 맞을수록, 정한 분량 안에서 짧을수록 높은 점수입니다.",
+  builderStagePurpose: {
+    "question:material":
+      "AI가 결과물을 만들 때 근거로 삼을 자료를 사용자에게서 받는 칸. 긴 자유 서술과 파일 첨부를 받는다. 사용자가 이미 알고 있는 것을 꺼내게 하는 칸이다.",
+    "question:cases":
+      "결과물이 제대로 됐는지 확인할 질문과, 사용자가 이미 아는 답을 쌍으로 받는 칸. 나중에 이 질문들을 결과물만 읽은 AI에게 던져 채점한다.",
+    "question:lengthCap":
+      "결과물의 분량 상한과, 같은 내용이면 짧을수록 점수를 줄지를 받는 칸.",
+    "question:judgeModel": "채점을 맡을 AI 모델을 고르는 칸.",
+    "approval:pending": "기준을 잠그기 전에 사용자가 검토하는 칸.",
+    "approval:approved": "기준이 잠긴 칸. 이후 바꾸려면 다시 승인해야 한다.",
+    run: "잠긴 기준으로 결과물을 반복해서 고쳐 올리는 칸.",
+    result: "최종 결과물과 점수 변화를 보는 칸.",
+  },
   description:
     "실제로 받았던 질문과 그때의 답을 넣으세요. 문서만 읽은 AI가 그 질문들에 실제로 답해보는 방식으로 채점하며, 당신이 정한 분량 안에서 커버리지를 넓혀 갑니다.",
   needsModel: true,
@@ -221,8 +254,8 @@ const handoverEntry: TemplateEntry = {
       describe: (value) => (value === 1 ? "사실 1개 · 회수형" : `사실 ${value}개 교차`),
       hint: "2 이상이면 자료의 서로 다른 위치에 있는 사실들을 종합해야만 답할 수 있는 질문을 요구하고, 근거 인용을 초안 카드에 표시합니다.",
     },
-    draft: (material, existing, count, llm, difficulty) =>
-      handover.draftCases(llm, material, existing, count, difficulty),
+    draft: (material, existing, count, llm, difficulty, focus) =>
+      handover.draftCases(llm, material, existing, count, difficulty, focus),
   },
   examiner: {
     runBattery: (compiled, llm, onProgress, onCheck) =>
@@ -277,6 +310,30 @@ const handoverEntry: TemplateEntry = {
 };
 
 export const TEMPLATES: TemplateEntry[] = [handoverEntry, timetableEntry];
+
+/** 0단계 빌더가 모델에게 넘길 절차 설명 — 각 칸이 실제로 무엇을 받는지 그대로 적는다.
+ *  단계 목록의 정본은 buildFlowSteps다. 여기서 따로 만들지 않는다. */
+export function planChoices(entries: readonly TemplateEntry[]): PlanTemplateChoice[] {
+  return entries.map((entry) => ({
+    id: entry.id,
+    // 절차 이름과 원래 설명은 넘기지 않는다 — 모델이 그 어휘로 끌려간다
+    description: entry.builderSummary ?? entry.description,
+    stages: buildFlowSteps(entry.questions, entry.flow).map((step) => {
+      const id = step.id.startsWith("question:") ? step.id.slice("question:".length) : null;
+      const question = id === null ? undefined : entry.questions.find((q) => q.id === id);
+      return {
+        id: step.id,
+        // 모델에게 보이지 않는다 — 모델이 이름을 안 줬을 때의 대비용이다
+        name: step.label,
+        purpose: entry.builderStagePurpose?.[step.id] ?? null,
+        input: question?.type ?? null,
+      };
+    }),
+  }));
+}
+
+/** 0단계 빌더가 고를 수 있는 절차 — 입력 모양이 고정된 것은 뺀다 */
+export const BUILDABLE_TEMPLATES: TemplateEntry[] = TEMPLATES.filter((t) => t.fitsAnyGoal === true);
 
 export function getTemplate(id: string | null): TemplateEntry | null {
   return TEMPLATES.find((t) => t.id === id) ?? null;

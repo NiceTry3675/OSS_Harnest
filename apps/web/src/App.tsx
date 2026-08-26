@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, Route, Routes, useLocation } from "react-router-dom";
 import { HomePage } from "./pages/HomePage";
+import { BuilderPage } from "./pages/BuilderPage";
 import { WizardPage } from "./pages/WizardPage";
 import { ApprovalPage } from "./pages/ApprovalPage";
 import { ConsolePage } from "./pages/ConsolePage";
@@ -75,6 +76,7 @@ export function App() {
         {hydrated ? (
           <Routes>
             <Route path="/" element={<HomePage />} />
+            <Route path="/build" element={<BuilderPage />} />
             <Route path="/wizard" element={<WizardPage />} />
             <Route path="/approve" element={<ApprovalPage />} />
             <Route path="/console" element={<ConsolePage />} />

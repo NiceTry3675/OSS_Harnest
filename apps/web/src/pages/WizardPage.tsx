@@ -8,6 +8,7 @@ import { Link, useNavigate } from "react-router-dom";
 import type { Question } from "@harnest/contracts";
 import type { LlmClient } from "@harnest/template-handover";
 import { getTemplate } from "../templates";
+import { readVoice, voiceQuestions } from "../lib/templateVoice";
 import { WizardBlueprint } from "../components/WizardBlueprint";
 import { ActivityConsole } from "../components/ActivityConsole";
 import { appendStream, clearStream, endStream, withActivityLog } from "../lib/activityLog";
@@ -18,6 +19,7 @@ import { ProviderCredentialInput } from "../components/ProviderCredentialInput";
 import { appendFileTexts, extractFileText, FILE_ACCEPT } from "../lib/attachText";
 import {
   createByoClient,
+  DEFAULT_JUDGE_MODEL,
   createAssistMockClient,
   getByoCredential,
   loadSharedProviders,
@@ -52,15 +54,8 @@ const ROLE_LABEL: Record<Question["role"], string> = {
 type JudgeChoice = "mock" | CredentialProvider;
 
 /** 목록을 불러오기 전에 쓰는 기본 모델 — 고르면 그 값이 이긴다 */
-const JUDGE_MODEL: Record<JudgeChoice, string> = {
-  mock: "모의 모델",
-  gemini: "gemini-3.7-flash",
-  vertex: "gemini-3.7-flash",
-  openai: "gpt-5.6-sol",
-  anthropic: "claude-sonnet-4-5",
-  openrouter: "openai/gpt-5.6-sol",
-  ollama: "llama3.1",
-};
+/** 공급자별 기본 모델은 llm.ts가 소유한다 — 빌더 화면도 같은 값을 쓴다 */
+const JUDGE_MODEL = DEFAULT_JUDGE_MODEL;
 
 /** 카드로 고르는 공급자 — 모의 모델은 고르는 것이 아니라 빠져나가는 것이라 따로 둔다 */
 const PROVIDER_CHOICES: CredentialProvider[] = [
@@ -186,7 +181,20 @@ export function WizardPage() {
   } = useProject();
   const navigate = useNavigate();
   const entry = getTemplate(templateId);
-  const questions = entry?.questions ?? [];
+  /** 0단계에서 만든 템플릿으로 들어왔다면 그 어휘로 묻는다 — 묻는 칸과 검증은 그대로다 */
+  const voice = readVoice(savedAnswers);
+  const questions = useMemo(
+    () => (entry === null ? [] : voiceQuestions(entry.questions, voice)),
+    [entry, voice],
+  );
+  const builtName = voice?.name ?? null;
+  const builtGoal = voice !== null && voice.goal !== "" ? voice.goal : null;
+  /** 0단계 빌더가 정한 확인 방향 — 초안에만 쓰이고 답변 맵에는 실리지 않는다 */
+  const questionFocus = Array.isArray(savedAnswers.questionFocus)
+    ? (savedAnswers.questionFocus as unknown[]).filter(
+        (item): item is string => typeof item === "string",
+      )
+    : undefined;
   /** 화면 한 장에 함께 묻는 질문 묶음 — sameStep인 질문은 앞 묶음에 붙는다 */
   const stepGroups = useMemo(() => {
     const groups: Question[][] = [];
@@ -535,6 +543,8 @@ export function WizardPage() {
         Math.min(assistCount, remaining),
         withActivityLog(client, "자료를 읽고 질문을 뽑는 중"),
         assist.difficulty ? assistDifficulty : undefined,
+        // 0단계에서 정한 확인 방향이 있으면 그쪽으로 뽑는다
+        questionFocus,
       );
       if (assistChoice !== "mock") {
         // 실패한 자격 증명이 기존의 정상 값을 덮지 않도록 성공한 뒤에만 저장한다.
@@ -661,6 +671,14 @@ export function WizardPage() {
               </button>
             ) : null}
           </div>
+
+          {builtName !== null ? (
+            <div className="built-mark">
+              <span className="badge">내가 만든 템플릿</span>
+              <b>{builtName}</b>
+              {builtGoal !== null ? <span>“{builtGoal}”</span> : null}
+            </div>
+          ) : null}
 
           <h2 className="q-big">{q.label}</h2>
           {q.help ? <p className="q-help">{q.help}</p> : null}

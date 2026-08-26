@@ -30,6 +30,17 @@ export function formatModelLabel(provider: JudgeProvider, model: string): string
   return provider === "mock" ? "모의 모델" : `${PROVIDER_LABEL[provider]} · ${model}`;
 }
 
+/** 공급자별 기본 채점 모델 — 위저드와 빌더가 같은 값을 쓴다. */
+export const DEFAULT_JUDGE_MODEL: Record<JudgeProvider, string> = {
+  mock: "모의 모델",
+  gemini: "gemini-3.7-flash",
+  vertex: "gemini-3.7-flash",
+  openai: "gpt-5.6-sol",
+  anthropic: "claude-sonnet-4-5",
+  openrouter: "openai/gpt-5.6-sol",
+  ollama: "llama3.1",
+};
+
 const KEY_STORAGE: Record<CredentialProvider, string> = {
   gemini: "harnest.byo.gemini",
   vertex: "harnest.byo.vertex",
