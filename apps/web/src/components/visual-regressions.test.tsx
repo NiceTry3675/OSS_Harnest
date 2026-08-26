@@ -31,7 +31,9 @@ describe("수치 예시와 산출물 중립 문구", () => {
     expect(html).not.toContain("49.9");
     expect(html).not.toContain("92.5");
     expect(html).not.toContain("2분");
-    expect(html).toContain("숨긴 질문은 시작과 끝에만 별도 확인");
+    // 문구는 다듬을 수 있지만, 개선에 쓰지 않는 질문이 있다는 사실은 안내 그림에 남아야 한다(SPEC §50).
+    // 설명글은 지금 보고 있는 장만 DOM에 들어가므로, 그림 안의 문구로 확인한다.
+    expect(html).toContain("개선에 쓰지 않은 질문으로 시작과 끝을 따로 잽니다");
   });
 
   it("점수 머리는 템플릿 종류와 무관한 산출물 문구를 쓴다", () => {

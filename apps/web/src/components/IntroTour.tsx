@@ -44,7 +44,7 @@ const SLIDES: Slide[] = [
   {
     lead: "5 — 실행·결과",
     title: "목표에 닿을 때까지 고쳐 씁니다",
-    desc: "회차마다 같은 채점표로 재고, 점수가 실제로 오른 것만 남깁니다. 시작과 끝을 같은 자로 비교해 보여줍니다.",
+    desc: "회차마다 같은 채점표로 재고, 점수가 실제로 오른 것만 남깁니다. 일부 질문은 개선에 쓰지 않고 시작과 끝에만 따로 채점합니다.",
   },
 ];
 
@@ -132,17 +132,11 @@ function Shot({ at }: { at: number }) {
         <path d="M6 62 L52 55 L98 34 L144 26 L194 12" />
         <circle cx="194" cy="12" r="4" />
       </svg>
-      <div className="tv-beforeafter">
-        <div>
-          <i>시작</i>
-          <b>62.5</b>
-        </div>
-        <span className="tv-arrow" aria-hidden="true">→</span>
-        <div className="is-after">
-          <i>종료</i>
-          <b>87.5</b>
-        </div>
+      <div className="tv-ends">
+        <span>시작</span>
+        <span className="is-after">종료</span>
       </div>
+      <p className="tv-note">개선에 쓰지 않은 질문으로 시작과 끝을 따로 잽니다</p>
     </div>
   );
 }

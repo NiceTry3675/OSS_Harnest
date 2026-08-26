@@ -734,7 +734,7 @@ label.q-big {
 .tv-hash { font-family: var(--mono-font); font-size: 11px; color: var(--ink-3); letter-spacing: 0.04em; }
 
 /* 5. 실행하고 결과를 본다 */
-.tv-run { display: flex; flex-direction: column; justify-content: center; gap: var(--s-4); height: 100%; }
+.tv-run { display: flex; flex-direction: column; justify-content: center; gap: 9px; height: 100%; }
 .tv-curve {
   width: 100%; height: 76px; flex: none;
   border-radius: var(--radius-sm); background: #0b0e13; padding: 6px;
@@ -742,11 +742,15 @@ label.q-big {
 .tv-curve path { fill: none; stroke: #5b95ff; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
 .tv-curve line { stroke: #39404c; stroke-width: 1; stroke-dasharray: 4 4; }
 .tv-curve circle { fill: #fff; }
-.tv-beforeafter { display: flex; align-items: center; justify-content: center; gap: var(--s-5); }
-.tv-beforeafter div { text-align: center; }
-.tv-beforeafter i { display: block; font-style: normal; font-size: 11px; font-weight: 700; color: var(--ink-3); }
-.tv-beforeafter b { display: block; font-size: 26px; font-weight: 800; letter-spacing: -0.04em; color: var(--ink-3); font-variant-numeric: tabular-nums; }
-.tv-beforeafter .is-after b { color: var(--accent); font-size: 34px; }
+/* 곡선 양 끝의 이름 — 안내에 지어낸 점수를 싣지 않는다 */
+.tv-ends { display: flex; justify-content: space-between; padding: 0 4px; }
+.tv-ends span { font-size: 11.5px; font-weight: 700; color: var(--ink-3); }
+.tv-ends .is-after { color: var(--accent); }
+.tv-note {
+  margin: 0; align-self: center; padding: 6px 13px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 700;
+  background: var(--lock-soft); border: 1px solid var(--lock); color: var(--lock);
+}
 
 /* ═══ 접근성 ═══ */
 @media (prefers-reduced-motion: reduce) {
