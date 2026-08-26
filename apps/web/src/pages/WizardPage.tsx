@@ -13,6 +13,7 @@ import { ActivityConsole } from "../components/ActivityConsole";
 import { appendStream, clearStream, endStream, withActivityLog } from "../lib/activityLog";
 import { WizardCaseList, type CasePair } from "../components/WizardCaseList";
 import { ModelPicker } from "../components/ModelPicker";
+import { pickModel } from "../lib/modelChoice";
 import { ProviderCredentialInput } from "../components/ProviderCredentialInput";
 import { appendFileTexts, extractFileText, FILE_ACCEPT } from "../lib/attachText";
 import {
@@ -362,9 +363,9 @@ export function WizardPage() {
         .then((models) => {
           if (!alive) return;
           setModelList(models);
-          setJudgeModel((current) =>
-            current && models.some((m) => m.id === current) ? current : (models[0]?.id ?? current),
-          );
+          // 벤더 목록의 첫 번째가 아니라 추린 목록의 첫 번째를 집는다 —
+          // 그러지 않으면 구형 모델(babbage-002 등)이 기본으로 잡힌다
+          setJudgeModel((current) => pickModel(models, current));
         })
         .catch((err: unknown) => {
           if (!alive) return;
@@ -402,8 +403,8 @@ export function WizardPage() {
       setModelList(models);
       if (models.length === 0) {
         setModelNote("쓸 수 있는 모델을 찾지 못했습니다.");
-      } else if (!models.some((m) => m.id === judgeModel)) {
-        setJudgeModel(models[0].id);
+      } else {
+        setJudgeModel(pickModel(models, judgeModel));
       }
     } catch (err) {
       setModelList([]);

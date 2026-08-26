@@ -5,17 +5,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { AvailableModel } from "../lib/llm";
-
-/** 채점에 쓰지 않는 갈래 — 음성·이미지·임베딩·미리보기 등.
- *  목록이 수십 개로 불어나면 정작 고를 것을 못 찾는다. 기본은 추린 목록을 보여주고,
- *  필요하면 전체를 펼친다. 거르는 기준이 틀렸을 때를 대비해 전체 보기를 항상 남긴다. */
-const NOT_FOR_JUDGING =
-  /(preview|tts|embed|vision|audio|image|imagen|live|computer-use|deep-research|antigravity|realtime|moderation|whisper|dall-e|babbage|davinci|transcribe|speech|search|rerank|guard)/i;
-
-function common(models: AvailableModel[]): AvailableModel[] {
-  const kept = models.filter((m) => !NOT_FOR_JUDGING.test(m.id) && !NOT_FOR_JUDGING.test(m.label));
-  return kept.length > 0 ? kept : models;
-}
+import { preferredModels } from "../lib/modelChoice";
 
 export function ModelPicker({
   models,
@@ -49,13 +39,13 @@ export function ModelPicker({
 
   const needle = query.trim().toLowerCase();
   // 찾을 때는 전체에서 찾는다 — 추린 목록 밖에 있어도 이름을 알면 바로 고를 수 있어야 한다
-  const pool = needle || showAll ? models : common(models);
+  const pool = needle || showAll ? models : preferredModels(models);
   const shown = needle
     ? pool.filter(
         (m) => m.label.toLowerCase().includes(needle) || m.id.toLowerCase().includes(needle),
       )
     : pool;
-  const hiddenCount = models.length - common(models).length;
+  const hiddenCount = models.length - preferredModels(models).length;
 
   const picked = models.find((m) => m.id === value);
 
