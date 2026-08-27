@@ -5,15 +5,24 @@
 import type { Question } from "@harnest/contracts";
 import type { CasePair } from "../components/WizardCaseList";
 
-export type DraftValue = string | CasePair[];
+export type DraftValue = string | CasePair[] | unknown[];
 
 /** caseList 안내 기본 범위 — 질문이 min/max를 선언하면 그 값을 따른다 */
 export const CASE_MIN_DEFAULT = 4;
 export const CASE_MAX_DEFAULT = 9;
 
 export function validate(q: Question, value: DraftValue): string | null {
+  if (q.type === "sourceDocuments") {
+    const documents = Array.isArray(value) ? value : [];
+    const min = q.min ?? (q.required ? 1 : 0);
+    if (documents.length < min) return `자료 파일을 ${min}개 이상 첨부해 주세요.`;
+    if (q.max !== undefined && documents.length > q.max) {
+      return `자료 파일은 ${q.max}개까지 첨부할 수 있습니다.`;
+    }
+    return null;
+  }
   if (q.type === "caseList") {
-    const pairs = Array.isArray(value) ? value : [];
+    const pairs = (Array.isArray(value) ? value : []) as CasePair[];
     if (pairs.some((p) => p.needsConfirm)) {
       return "AI 초안 쌍을 검토한 뒤 확인 버튼을 눌러 주세요 — 확인하지 않은 초안은 제출되지 않습니다.";
     }
@@ -32,6 +41,7 @@ export function validate(q: Question, value: DraftValue): string | null {
   // 여기에 실릴 값이 없으므로 빈 값 검사에 걸려선 안 된다.
   if (q.type === "judgeModel") return null;
   if (q.type === "textarea") {
+    if (q.required && v === "") return "내용을 입력해 주세요.";
     if (q.maxChars !== undefined && v.length > q.maxChars) {
       return `최대 ${q.maxChars.toLocaleString()}자까지 입력할 수 있습니다 (현재 ${v.length.toLocaleString()}자).`;
     }
@@ -67,7 +77,7 @@ export function toAnswers(
   for (const q of questions) {
     const value = draft[q.id];
     if (q.type === "caseList") {
-      const pairs = Array.isArray(value) ? value : [];
+      const pairs = (Array.isArray(value) ? value : []) as CasePair[];
       answers[q.id] = pairs
         .filter((p) => !p.needsConfirm)
         .map((p) => ({
@@ -78,6 +88,10 @@ export function toAnswers(
             : {}),
         }))
         .filter((p) => p.question.length > 0 && p.expectedAnswer.length > 0);
+      continue;
+    }
+    if (q.type === "sourceDocuments") {
+      answers[q.id] = Array.isArray(value) ? structuredClone(value) : [];
       continue;
     }
     const raw = typeof value === "string" ? value.trim() : "";

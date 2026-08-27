@@ -44,6 +44,30 @@ describe("validate — textarea maxChars", () => {
     expect(validate(materialQ, "가".repeat(20))).toBeNull();
     expect(validate(materialQ, "")).toBeNull();
   });
+
+  it("required로 선언된 textarea는 빈 값을 거부한다", () => {
+    expect(validate({ ...materialQ, required: true }, "  ")).toContain("입력");
+  });
+});
+
+describe("구조화 자료 질문", () => {
+  const sourceQ: Question = {
+    id: "sources",
+    role: "material",
+    type: "sourceDocuments",
+    label: "자료",
+    min: 1,
+    max: 2,
+    required: true,
+  };
+
+  it("파일 수 범위를 검증하고 구조화 값을 그대로 답변에 보존한다", () => {
+    const source = { id: "source-1", filename: "설정.md", segments: [{ text: "본문" }] };
+    expect(validate(sourceQ, [])).toContain("1개 이상");
+    expect(validate(sourceQ, [source])).toBeNull();
+    expect(validate(sourceQ, [source, source, source])).toContain("2개까지");
+    expect(toAnswers([sourceQ], { sources: [source] })).toEqual({ sources: [source] });
+  });
 });
 
 describe("toAnswers — caseList provenance", () => {

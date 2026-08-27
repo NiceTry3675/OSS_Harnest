@@ -9,7 +9,8 @@ export interface InterviewSubmission {
 
 /** judgeModel — 채점 모델을 고르는 단계. 입력 UI는 위저드가 소유한다(공급자·키·모델 목록). */
 export type QuestionType =
-  | "text" | "number" | "staffList" | "textarea" | "caseList" | "toggle" | "judgeModel";
+  | "text" | "number" | "staffList" | "textarea" | "caseList" | "toggle" | "judgeModel"
+  | "sourceDocuments";
 
 /** 평가 케이스 — 케이스 기반 템플릿의 원료이자 정답(ground truth). */
 export interface CaseDef {
@@ -45,4 +46,8 @@ export interface Question {
   attachText?: boolean;
   /** 문자 수 상한 — 위저드가 범용으로 검증한다 */
   maxChars?: number;
+  /** textarea·sourceDocuments처럼 기본적으로 선택인 입력을 필수로 만들 때 사용한다. */
+  required?: boolean;
+  /** sourceDocuments 파일 선택기의 accept 문자열. 실제 형식 검증은 템플릿 추출기가 다시 한다. */
+  accept?: string;
 }

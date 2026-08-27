@@ -15,12 +15,15 @@ import type {
 import type { GeneratorFeedback } from "@harnest/loop-engine";
 import * as timetable from "@harnest/template-timetable";
 import * as handover from "@harnest/template-handover";
+import * as novel from "@harnest/template-novel";
 import type { CompiledGeneric, HoldoutEvaluation } from "./state";
 import type { LlmClient } from "@harnest/template-handover";
 import { DEV_SAMPLES } from "./lib/devSamples";
 import type { TemplateFlow } from "./lib/flowStep";
 import { TimetableGrid } from "./components/TimetableGrid";
 import { HandoverDocView } from "./components/HandoverDocView";
+import { NovelArtifactView } from "./components/NovelArtifactView";
+import { NovelCanonPreparationView } from "./components/NovelCanonPreparation";
 import {
   createByoClient,
   createMockClient,
@@ -62,6 +65,25 @@ export interface TemplateEntry {
   /** true면 BYO 키 또는 모의 모델 선택이 필요(저지 모델은 승인 전에 확정 — SPEC §8) */
   needsModel: boolean;
   questions: Question[];
+  /** 구조를 보존해야 하는 자료 첨부 질문의 추출·표시 어댑터. */
+  sourceDocuments?: {
+    extract(files: readonly File[]): Promise<unknown[]>;
+    describe(value: unknown): { id: string; name: string; detail: string };
+  };
+  /** 정적 질문 뒤, 컴파일 전에 실행하는 템플릿 소유 준비 단계. */
+  preparation?: {
+    analyze(
+      submission: InterviewSubmission,
+      judge: { provider: JudgeProvider; model: string },
+      llm: LlmClient | null,
+      onProgress?: (message: string) => void,
+    ): Promise<unknown>;
+    View: ComponentType<{
+      value: unknown;
+      onBack: () => void;
+      onComplete: (result: unknown) => void | Promise<void>;
+    }>;
+  };
   /** 질문 뒤 승인 전·후, 실행, 결과 단계의 템플릿별 표시 문구. */
   flow: TemplateFlow;
   compile(
@@ -123,6 +145,25 @@ export interface TemplateEntry {
   ): { filename: string; mime: string; text: string };
   /** 개발용 예시 답변(선택) — 개발 서버에서만 노출된다. 프로덕션 빌드에서는 제거된다. */
   devSample?: Record<string, unknown>;
+}
+
+function configuredLlm(
+  provider: JudgeProvider,
+  model: string,
+  mock: (() => LlmClient) | null,
+): LlmClient {
+  if (provider === "mock") {
+    if (mock === null) throw new Error("이 단계의 모의 모델이 준비되지 않았습니다.");
+    return mock();
+  }
+  const credential = getByoCredential(provider);
+  if (credential) return createByoClient(provider, credential, model);
+  if ((provider === "openai" || provider === "gemini") && hasSharedKey(provider)) {
+    return provider === "openai" ? createSharedOpenAIClient(model) : createSharedGeminiClient(model);
+  }
+  throw new Error(
+    `승인된 AI 모델(${PROVIDER_LABEL[provider]})의 연결 정보가 없습니다 — 연결 정보를 입력하거나 모의 모델로 다시 진행해 주세요.`,
+  );
 }
 
 const timetableEntry: TemplateEntry = {
@@ -190,23 +231,10 @@ const handoverEntry: TemplateEntry = {
   createLlm(compiled) {
     const jp = compiled.pack.judgeProcedure;
     if (jp.kind !== "case_answering") return null;
-    if (jp.judge.provider === "mock") {
-      return createMockClient(compiled.problem as handover.HandoverProblem);
-    }
-    const provider = jp.judge.provider;
-    const credential = getByoCredential(provider);
-    if (credential) {
-      return createByoClient(provider, credential, jp.judge.model);
-    }
-    // BYO 키가 없으면 관리자가 서버에 둔 공유 키로 대체한다(있을 때만).
-    // 이 경로는 요청이 Harnest 서버(/proxy/*)를 거친다 — README·SPEC의 공유 키 절 참고.
-    if ((provider === "openai" || provider === "gemini") && hasSharedKey(provider)) {
-      return provider === "openai"
-        ? createSharedOpenAIClient(jp.judge.model)
-        : createSharedGeminiClient(jp.judge.model);
-    }
-    throw new Error(
-      `승인된 AI 모델(${PROVIDER_LABEL[provider]})의 연결 정보가 없습니다 — 연결 정보를 입력하거나, 평가 구성을 다시 만들어 모의 모델로 승인하세요.`,
+    return configuredLlm(
+      jp.judge.provider,
+      jp.judge.model,
+      () => createMockClient(compiled.problem as handover.HandoverProblem),
     );
   },
   caseAssist: {
@@ -276,7 +304,108 @@ const handoverEntry: TemplateEntry = {
   ArtifactView: ({ artifact }) => <HandoverDocView doc={String(artifact ?? "")} />,
 };
 
-export const TEMPLATES: TemplateEntry[] = [handoverEntry, timetableEntry];
+const novelEntry: TemplateEntry = {
+  id: novel.TEMPLATE_ID,
+  name: novel.TEMPLATE_NAME,
+  description:
+    "이미 써 둔 설정집·시놉시스·초고를 읽고 모순을 먼저 확인합니다. 확정한 이야기 정본에 등장인물 관계와 사건을 묶은 뒤, 한 장씩 고쳐 장편의 설정 이탈을 줄입니다.",
+  badge: "실험적 템플릿",
+  needsModel: true,
+  questions: novel.questions,
+  flow: {
+    approval: { pending: "정본·평가 절차 승인", approved: "이야기 정본 확정" },
+    run: "집필 관제",
+    result: "완성 원고",
+  },
+  sourceDocuments: {
+    extract: (files) => novel.extractNovelSources(files),
+    describe(value) {
+      const source = value as novel.SourceDocument;
+      const chars = source.segments.reduce((sum, segment) => sum + segment.text.length, 0);
+      return {
+        id: source.id,
+        name: source.filename,
+        detail: `${source.kind.toUpperCase()} · ${chars.toLocaleString()}자 · ${source.segments.length.toLocaleString()}개 조각`,
+      };
+    },
+  },
+  preparation: {
+    async analyze(submission, judge, llm, onProgress) {
+      const sources = submission.answers.sources as novel.SourceDocument[];
+      const direction = String(submission.answers.creativeDirection ?? "");
+      onProgress?.("자료의 구조와 근거 위치를 확인하는 중…");
+      const analysis = judge.provider === "mock"
+        ? novel.createMockNovelAnalysis(sources, direction)
+        : await novel.analyzeNovelSources(sources, direction, llm!);
+      onProgress?.("모순과 애매한 설정을 인터뷰 질문으로 정리하는 중…");
+      return { analysis, interview: await novel.buildCanonInterview(analysis) };
+    },
+    View: NovelCanonPreparationView,
+  },
+  compile: (submission, judge) => novel.compile(submission, {
+    judgeProvider: judge.provider,
+    judgeModel: judge.model,
+  }),
+  createLlm(compiled) {
+    const procedure = compiled.pack.judgeProcedure;
+    if (procedure.kind !== "case_answering") return null;
+    return configuredLlm(
+      procedure.judge.provider,
+      procedure.judge.model,
+      () => novel.createNovelMockLlm(compiled.problem as novel.NovelProblem),
+    );
+  },
+  examiner: {
+    runBattery: (compiled, llm, onProgress, onCheck) =>
+      novel.runNovelExaminerBattery(
+        compiled.problem as novel.NovelProblem,
+        compiled.pack,
+        llm,
+        onProgress,
+        onCheck,
+      ),
+  },
+  createRuntime(compiled, llm) {
+    if (!llm) throw new Error("AI 모델이 준비되지 않았습니다.");
+    const procedure = compiled.pack.judgeProcedure;
+    if (
+      procedure.kind === "case_answering" &&
+      (procedure.judge.provider !== llm.providerId ||
+        (procedure.judge.provider !== "mock" && procedure.judge.model !== llm.model))
+    ) {
+      throw new Error("승인된 AI 모델과 현재 연결이 다릅니다 — 평가 구성을 다시 승인해 주세요.");
+    }
+    const problem = compiled.problem as novel.NovelProblem;
+    const budgeted = novel.withNovelCallBudget(llm, novel.MAX_CALLS_PER_RUN);
+    const scorer = novel.createNovelScorer(problem, budgeted);
+    const planner = novel.createNovelStrategyPlanner(problem, budgeted);
+    const generator = novel.createNovelGenerator(problem, budgeted);
+    return {
+      scorer: (artifact) => scorer(artifact as novel.NovelArtifact),
+      planStrategy: (champion, rng, feedback) =>
+        planner(champion as novel.NovelArtifact, rng, feedback),
+      generate: (champion, rng, feedback, strategy) =>
+        generator(champion as novel.NovelArtifact, rng, feedback, strategy),
+      initial: novel.createNovelInitial(problem, budgeted),
+      scoreHoldout: (artifact) =>
+        novel.scoreNovelHoldout(problem, artifact as novel.NovelArtifact, budgeted),
+      callsPerRound: novel.estimateNovelCallsPerRound(problem),
+      maxCallsPerRun: novel.MAX_CALLS_PER_RUN,
+      roundDelayMs: 0,
+    };
+  },
+  exportArtifact: (_problem, value) => {
+    const artifact = value as novel.NovelArtifact;
+    return {
+      filename: `${artifact.title || "소설-원고"}.md`,
+      mime: "text/markdown;charset=utf-8",
+      text: novel.novelText(artifact),
+    };
+  },
+  ArtifactView: ({ artifact }) => <NovelArtifactView artifact={artifact as novel.NovelArtifact} />,
+};
+
+export const TEMPLATES: TemplateEntry[] = [handoverEntry, novelEntry, timetableEntry];
 
 export function getTemplate(id: string | null): TemplateEntry | null {
   return TEMPLATES.find((t) => t.id === id) ?? null;

@@ -559,6 +559,103 @@ label.dropzone input[type="file"] { display: none; }
 .approve-side .stream { margin-top: 0; }
 .approve-side .stream-body { height: 420px; max-height: 420px; }
 
+/* ── 소설 자료 분석·정본화 ── */
+.novel-source-drop {
+  min-height: 180px; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: var(--s-2); text-align: center;
+}
+.novel-source-drop b { color: var(--ink); font-size: var(--t-body); }
+.novel-source-drop span { color: var(--ink-3); font-size: var(--t-xs); }
+.novel-source-list { display: grid; gap: var(--s-2); margin-top: var(--s-3); }
+.novel-source-item {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center;
+  gap: var(--s-3); padding: var(--s-3) var(--s-4); border: 1px solid var(--border);
+  border-radius: 12px; background: var(--surface);
+}
+.novel-source-item > span:first-child { color: var(--accent); font-size: 22px; }
+.novel-source-item b, .novel-source-item small { display: block; }
+.novel-source-item small { margin-top: 3px; color: var(--ink-3); font-size: 11px; }
+.novel-source-item button { height: 34px; padding: 0 11px; font-size: 12px; }
+
+.novel-preparation { max-width: 1260px; margin: 0 auto; }
+.novel-prep-head {
+  display: flex; align-items: end; justify-content: space-between; gap: var(--s-6);
+  padding: var(--s-4) 0 var(--s-6); border-bottom: 1px solid var(--border);
+}
+.novel-prep-head h1 { max-width: 720px; margin: var(--s-2) 0; }
+.novel-stat-row { display: flex; gap: var(--s-2); flex-wrap: wrap; justify-content: flex-end; }
+.novel-stat-row span {
+  min-width: 76px; padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: 10px; background: var(--surface); color: var(--ink-3); font-size: 11px;
+}
+.novel-stat-row b { display: block; color: var(--ink); font-size: 20px; }
+.novel-prep-grid {
+  display: grid; grid-template-columns: minmax(280px, .7fr) minmax(0, 1.3fr);
+  align-items: start; gap: var(--s-6); margin-top: var(--s-6);
+}
+.novel-canon-panel { position: sticky; top: 88px; display: grid; gap: var(--s-4); }
+.novel-canon-panel .card, .novel-interview .card { margin: 0; }
+.novel-canon-panel h2 { margin: var(--s-2) 0 var(--s-3); }
+.novel-empty { color: var(--ink-3); line-height: 1.6; }
+.novel-graph {
+  overflow: hidden; border: 1px solid var(--border); border-radius: 12px;
+  background: radial-gradient(circle at center, var(--accent-soft), transparent 68%);
+}
+.novel-graph svg { display: block; width: 100%; height: auto; min-height: 210px; }
+.novel-graph line { stroke: var(--border-strong); stroke-width: 1.5; }
+.novel-graph marker path { fill: var(--border-strong); }
+.novel-graph > svg > g > text { fill: var(--ink-3); font-size: 9px; text-anchor: middle; }
+.novel-graph-node circle { fill: var(--surface); stroke: var(--accent); stroke-width: 1.5; }
+.novel-graph-node text { fill: var(--ink); font-size: 11px; font-weight: 750; text-anchor: middle; }
+.novel-canon-summary > p { color: var(--ink-2); line-height: 1.7; }
+.novel-canon-summary dl { margin: var(--s-4) 0 0; }
+.novel-canon-summary dl div {
+  display: flex; justify-content: space-between; gap: var(--s-3);
+  padding: 9px 0; border-top: 1px solid var(--border); font-size: var(--t-xs);
+}
+.novel-canon-summary dt { color: var(--ink-3); }
+.novel-canon-summary dd { margin: 0; color: var(--ink); text-align: right; }
+.novel-interview { display: grid; gap: var(--s-4); }
+.novel-question-meta { display: flex; justify-content: space-between; color: var(--ink-3); font-size: 11px; }
+.novel-question h2 { margin: var(--s-3) 0 var(--s-2); }
+.novel-question-copy { color: var(--ink); font-size: var(--t-body); line-height: 1.65; }
+.novel-options { display: grid; gap: var(--s-2); margin-top: var(--s-4); }
+.novel-options label {
+  display: flex; align-items: flex-start; gap: var(--s-3); padding: var(--s-3);
+  border: 1px solid var(--border); border-radius: 11px; cursor: pointer;
+}
+.novel-options label.is-on { border-color: var(--accent); background: var(--accent-soft); }
+.novel-options input, .novel-unresolved input { width: auto; margin-top: 3px; }
+.novel-options small { display: block; margin-top: 3px; color: var(--ink-3); font-weight: 400; }
+.novel-evidence { margin-top: var(--s-3); color: var(--ink-3); font-size: var(--t-xs); }
+.novel-evidence summary { cursor: pointer; font-weight: 700; }
+.novel-evidence ul { padding-left: 20px; line-height: 1.55; }
+.novel-custom { display: grid; gap: 6px; margin-top: var(--s-4); color: var(--ink-2); font-size: var(--t-xs); }
+.novel-custom textarea { min-height: 94px; }
+.novel-unresolved { display: flex; align-items: flex-start; gap: 9px; margin-top: var(--s-3); color: var(--ink-2); font-size: var(--t-xs); }
+.novel-prep-actions { display: flex; gap: var(--s-2); flex-wrap: wrap; padding: var(--s-2) 0 var(--s-7); }
+.novel-prep-actions button { min-height: 48px; }
+
+.novel-artifact { max-width: 720px; margin: 0 auto; }
+.novel-artifact-meta { color: var(--ink-3); font-size: var(--t-xs); }
+.novel-artifact > h1 { margin: var(--s-2) 0 var(--s-7); text-align: center; }
+.novel-artifact section { margin: 0 0 var(--s-7); }
+.novel-artifact section h2 { margin-bottom: var(--s-5); text-align: center; }
+.novel-artifact p { margin: 0 0 1.2em; font-size: 16px; line-height: 1.95; text-indent: 1em; }
+
+@media (max-width: 900px) {
+  .novel-prep-head { align-items: flex-start; flex-direction: column; }
+  .novel-stat-row { justify-content: flex-start; }
+  .novel-prep-grid { grid-template-columns: 1fr; }
+  .novel-canon-panel { position: static; }
+}
+@media (max-width: 560px) {
+  .novel-stat-row span { flex: 1; min-width: 65px; }
+  .novel-source-item { grid-template-columns: auto minmax(0, 1fr); }
+  .novel-source-item button { grid-column: 2; justify-self: start; }
+  .novel-prep-actions button { width: 100%; }
+}
+
 /* ── 활동 기록 줄 ── */
 .stream-empty { color: #6b7482; }
 /* 흐르는 글은 줄바꿈을 그대로 살린다 — 문서가 써지는 모양이 보여야 한다 */

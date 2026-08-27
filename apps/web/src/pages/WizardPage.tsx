@@ -18,6 +18,8 @@ import { ProviderCredentialInput } from "../components/ProviderCredentialInput";
 import { appendFileTexts, extractFileText, FILE_ACCEPT } from "../lib/attachText";
 import {
   createByoClient,
+  createSharedGeminiClient,
+  createSharedOpenAIClient,
   createAssistMockClient,
   getByoCredential,
   loadSharedProviders,
@@ -50,6 +52,19 @@ const ROLE_LABEL: Record<Question["role"], string> = {
 };
 
 type JudgeChoice = "mock" | CredentialProvider;
+
+interface SavedPreparation {
+  value: unknown;
+  judge: { provider: JudgeChoice; model: string };
+  answers: Record<string, unknown>;
+}
+
+function savedPreparation(value: unknown): SavedPreparation | null {
+  if (typeof value !== "object" || value === null) return null;
+  const candidate = value as Partial<SavedPreparation>;
+  if (!candidate.value || !candidate.judge || !candidate.answers) return null;
+  return candidate as SavedPreparation;
+}
 
 /** 목록을 불러오기 전에 쓰는 기본 모델 — 고르면 그 값이 이긴다 */
 const JUDGE_MODEL: Record<JudgeChoice, string> = {
@@ -187,6 +202,7 @@ export function WizardPage() {
   const navigate = useNavigate();
   const entry = getTemplate(templateId);
   const questions = entry?.questions ?? [];
+  const restoredPreparation = savedPreparation(savedAnswers.__preparation);
   /** 화면 한 장에 함께 묻는 질문 묶음 — sameStep인 질문은 앞 묶음에 붙는다 */
   const stepGroups = useMemo(() => {
     const groups: Question[][] = [];
@@ -215,6 +231,10 @@ export function WizardPage() {
           : [];
         // 빈 카드를 미리 깔지 않는다 — 입력창에서 하나씩 추가한다
         init[q.id] = pairs;
+        continue;
+      }
+      if (q.type === "sourceDocuments") {
+        init[q.id] = Array.isArray(saved) ? structuredClone(saved) : [];
         continue;
       }
       init[q.id] =
@@ -246,8 +266,11 @@ export function WizardPage() {
   }, [stepGroups, step]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [preparation, setPreparation] = useState<SavedPreparation | null>(restoredPreparation);
   // 기본값을 공급자로 둔다 — 키 칸이 처음부터 보여야 한다는 요청
-  const [judgeChoice, setJudgeChoice] = useState<JudgeChoice>("openai");
+  const [judgeChoice, setJudgeChoice] = useState<JudgeChoice>(
+    restoredPreparation?.judge.provider ?? "openai",
+  );
   // 초안은 실제 모델로 뽑아야 쓸 만하다 — 모의 모델은 화면 확인용이라 기본값에서 뺀다
   // 채점 모델 기본값과 같은 공급자로 둔다 — 키를 한 번만 넣으면 초안까지 바로 된다
   const [assistChoice, setAssistChoice] = useState<JudgeChoice>("openai");
@@ -273,7 +296,7 @@ export function WizardPage() {
     }),
   );
   // 고른 모델 — 비어 있으면 공급자 기본값을 쓴다
-  const [judgeModel, setJudgeModel] = useState("");
+  const [judgeModel, setJudgeModel] = useState(restoredPreparation?.judge.model ?? "");
   // 공급자별로 불러온 모델 목록
   const [modelList, setModelList] = useState<AvailableModel[]>([]);
   const [modelBusy, setModelBusy] = useState(false);
@@ -483,6 +506,31 @@ export function WizardPage() {
     setAttachBusy(false);
   }
 
+  /** 구조화 자료 첨부 — 문단·페이지 위치와 원문 근거를 보존해 템플릿 분석기로 넘긴다. */
+  async function onAttachSourceDocuments(e: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    if (files.length === 0 || !entry?.sourceDocuments) return;
+    setAttachBusy(true);
+    setError(null);
+    try {
+      const extracted = await entry.sourceDocuments.extract(files);
+      const current = (Array.isArray(draft[q.id]) ? draft[q.id] : []) as unknown[];
+      const ids = new Set(current.map((item) => entry.sourceDocuments!.describe(item).id));
+      const fresh = extracted.filter((item) => !ids.has(entry.sourceDocuments!.describe(item).id));
+      const next = [...current, ...fresh];
+      if (q.max !== undefined && next.length > q.max) {
+        throw new Error(`자료 파일은 ${q.max}개까지 첨부할 수 있습니다.`);
+      }
+      onChange(next);
+      if (fresh.length < extracted.length) setError("이미 첨부된 동일한 자료는 다시 넣지 않았습니다.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "자료 파일을 읽지 못했습니다.");
+    } finally {
+      setAttachBusy(false);
+    }
+  }
+
   /** AI 케이스 초안 — 클릭당 본 호출 1회(+형식 재시도 1회), 실행 예산 밖(SPEC §5.2).
    *  초안은 "확인 필요" 상태로 들어가며, 확인 전에는 검증·수집이 모두 차단한다. */
   async function onDraftCases() {
@@ -622,6 +670,31 @@ export function WizardPage() {
         }
       }
       const answers = toAnswers(questions, draft);
+      if (entry!.preparation) {
+        let preparationLlm: LlmClient | null = null;
+        if (judge.provider !== "mock") {
+          const credentialProvider = judgeChoice as CredentialProvider;
+          const credential = credentialFor(credentialProvider);
+          preparationLlm = credential
+            ? createByoClient(credentialProvider, credential, judge.model)
+            : credentialProvider === "openai"
+              ? createSharedOpenAIClient(judge.model)
+              : createSharedGeminiClient(judge.model);
+        }
+        clearStream("작품 자료를 분석하는 중");
+        const value = await entry!.preparation!.analyze(
+          { schemaVersion: "skeleton-1", templateId: entry!.id, answers },
+          judge,
+          preparationLlm === null ? null : withActivityLog(preparationLlm, "자료 분석 모델 응답"),
+          (message) => appendStream(message, "분석 단계"),
+        );
+        endStream("자료 분석과 확인 질문 준비를 마쳤습니다");
+        const snapshot: SavedPreparation = { value, judge, answers };
+        setAnswers({ ...answers, __preparation: snapshot });
+        setPreparation(snapshot);
+        setSubmitting(false);
+        return;
+      }
       const compiled = await entry!.compile(
         { schemaVersion: "skeleton-1", templateId: entry!.id, answers },
         judge,
@@ -633,6 +706,41 @@ export function WizardPage() {
       setError(err2 instanceof Error ? err2.message : "답변을 확인해 주세요.");
       setSubmitting(false);
     }
+  }
+
+  async function completePreparation(result: unknown) {
+    if (!preparation) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const finalAnswers = { ...preparation.answers, canon: result };
+      const compiled = await entry!.compile(
+        { schemaVersion: "skeleton-1", templateId: entry!.id, answers: finalAnswers },
+        preparation.judge,
+      );
+      setAnswers(finalAnswers);
+      setCompiled(compiled);
+      navigate("/approve");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "정본을 확정하지 못했습니다.");
+      setSubmitting(false);
+      throw cause;
+    }
+  }
+
+  if (preparation && entry.preparation) {
+    const PreparationView = entry.preparation.View;
+    return (
+      <PreparationView
+        value={preparation.value}
+        onBack={() => {
+          setPreparation(null);
+          setAnswers(preparation.answers);
+          setError(null);
+        }}
+        onComplete={completePreparation}
+      />
+    );
   }
 
   return (
@@ -667,7 +775,40 @@ export function WizardPage() {
 
           <form id="wizard-form" onSubmit={onSubmit}>
             <div className="field">
-              {q.type === "caseList" ? (
+              {q.type === "sourceDocuments" ? (
+                <>
+                  <label className="dropzone novel-source-drop">
+                    <input
+                      type="file"
+                      multiple
+                      accept={q.accept}
+                      disabled={busy}
+                      onChange={onAttachSourceDocuments}
+                    />
+                    <b>{attachBusy ? "문서 구조를 읽는 중…" : "작성해 둔 자료를 선택하세요"}</b>
+                    <span>txt · md · pdf · docx · 파일마다 문단과 페이지 위치를 보존합니다</span>
+                  </label>
+                  {Array.isArray(draft[q.id]) && draft[q.id].length > 0 ? (
+                    <div className="novel-source-list">
+                      {(draft[q.id] as unknown[]).map((source, index) => {
+                        const item = entry.sourceDocuments!.describe(source);
+                        return (
+                          <div key={item.id} className="novel-source-item">
+                            <span aria-hidden="true">◇</span>
+                            <span><b>{item.name}</b><small>{item.detail}</small></span>
+                            <button
+                              type="button"
+                              aria-label={`${item.name} 제거`}
+                              onClick={() => onChange((draft[q.id] as unknown[]).filter((_, target) => target !== index))}
+                            >제거</button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                  <p className="hint">원문은 Harnest 서버에 업로드되지 않습니다. 분석을 시작하면 선택한 AI 벤더에 추출된 글과 위치 정보가 전송됩니다.</p>
+                </>
+              ) : q.type === "caseList" ? (
                 <>
                   <WizardCaseList
                     pairs={Array.isArray(draft[q.id]) ? (draft[q.id] as CasePair[]) : []}
@@ -1040,6 +1181,14 @@ export function WizardPage() {
             ) : null}
 
             {error ? <div className="error" style={{ marginBottom: 12 }}>{error}</div> : null}
+
+            {isLast && entry.preparation ? (
+              <ActivityConsole
+                model={judge.provider === "mock" ? "모의 모델" : judge.model}
+                empty="자료 분석을 시작하면 문서 구조 확인과 설정 추출 진행 상황이 여기에 표시됩니다."
+                height={240}
+              />
+            ) : null}
 
             <div className="wizard-nav">
               {isLast ? (
