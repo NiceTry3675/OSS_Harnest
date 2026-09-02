@@ -1,6 +1,13 @@
-# 용어 통일 반영 현황
+# 용어 통일 반영 현황 (2026-08-26 보관본)
 
-이 문서는 [`terminology-inventory.md`](terminology-inventory.md)에 정리한 용어안 중 **현재 작업 트리에 실제로 반영된 내용과 아직 반영하지 않은 내용**을 구분해 기록한다. 용어 후보를 검토하는 문서와 실제 적용 상태를 분리하여, 이후 작업에서는 이 문서를 진행 현황의 기준으로 사용한다.
+> [!NOTE]
+> 이 문서는 1차 용어 통일 프런트 패치가 커밋되기 전의 진행 현황 기록이다. 아래 본문의
+> "미커밋 상태"는 당시 상태이며, 해당 패치는 `00b9f58 feat: 사용자 화면 용어 정리`(2026-08-26)로
+> 커밋됐다. §4의 남은 용어 묶음은 [`ROADMAP.md`](../../ROADMAP.md)의 "용어 통일 2차" 항목이
+> 이어받고, 대표 용어의 기준은 [`terminology-inventory.md`](../terminology-inventory.md) §2다.
+> 본문은 역사적 기록으로 보존하며 고쳐 쓰지 않는다.
+
+이 문서는 [`terminology-inventory.md`](../terminology-inventory.md)에 정리한 용어안 중 **현재 작업 트리에 실제로 반영된 내용과 아직 반영하지 않은 내용**을 구분해 기록한다. 용어 후보를 검토하는 문서와 실제 적용 상태를 분리하여, 이후 작업에서는 이 문서를 진행 현황의 기준으로 사용한다.
 
 - 기준 브랜치: `terminology`
 - 문서 기준점: `fa6f74f 사용자 시나리오와 용어 통일 기준 정리`
@@ -90,24 +97,24 @@
 
 | 화면·영역 | 상태 | 이번 패치에서 바꾼 내용 | 관련 파일 |
 |---|---|---|---|
-| 첫 방문 안내 | **반영 완료** | `채점표`, `잠금`, `채점 모델`을 `평가 기준`, `기준 확정`, `사용할 AI 모델`로 바꾸고 단계명은 `실행`으로 정리 | [`IntroTour.tsx`](../apps/web/src/components/IntroTour.tsx) |
-| 홈 헤드라인 | **사용자 요청 반영** | 서비스 분류를 `AI 결과물 생성·평가`로 바꾸고, `목표를 정하세요. / 기준을 승인하세요. / AI가 목표에 도달합니다.`와 `올라간 점수를 믿을 수 있는 이유입니다.`를 포함한 채점 기준 유지 설명 적용 | [`HomePage.tsx`](../apps/web/src/pages/HomePage.tsx) |
-| 홈 애니메이션 | **의도적 제외** | 브랜드 표현으로 유지 | [`HeroLoop.tsx`](../apps/web/src/components/HeroLoop.tsx) |
-| 입력 마지막 단계 | **일부 반영** | `문서 길이를 점수에 반영할까요?`로 선택 목적을 명확히 하고 사용·사용 안 함의 차이를 짧게 설명. 선택한 모델이 결과물 생성과 평가를 모두 맡는다고 명시 | [`WizardPage.tsx`](../apps/web/src/pages/WizardPage.tsx), [`handover/index.ts`](../templates/handover/src/index.ts) |
-| 입력 중 평가 미리보기 | **반영 완료** | 질문·답 단계에서는 `답변 가능성`만 표시하고, 분량·간결성·질문 사용 구분·AI 모델은 실제 설정 단계에 도달하거나 사용자가 선택한 뒤에만 표시. 긴 설명은 `i` 도움말로 분리하고 중복된 다음 단계 승인 안내는 제거 | [`WizardBlueprint.tsx`](../apps/web/src/components/WizardBlueprint.tsx), [`WizardPage.tsx`](../apps/web/src/pages/WizardPage.tsx) |
-| 상단 진행 단계 | **반영 완료** | `점검·승인 → 사전 점검·승인`, `잠금 → 기준 확정`, 실행 단계는 `실행`으로 유지 | [`templates.tsx`](../apps/web/src/templates.tsx) |
-| 승인 화면 | **반영 완료** | 평가 구성 승인, 평가 기준, 필수 조건, AI 평가 사전 점검, 질문 사용 목적을 변경. 모의 모델 이름 중복을 제거하고 긴 분량 상한 안내를 선택 행동 중심으로 축약 | [`ApprovalPage.tsx`](../apps/web/src/pages/ApprovalPage.tsx), [`handover/index.ts`](../templates/handover/src/index.ts) |
-| 승인 완료 화면 | **반영 완료** | `기준 확정`, AI가 결과물을 만들고 평가하는 동안 평가 구성이 바뀌지 않는다는 설명, `확인 코드` 적용 | [`SealPanel.tsx`](../apps/web/src/components/SealPanel.tsx) |
-| 실행 화면 | **반영 완료** | `관제실`을 `실행`으로, 실행 상태를 `개선 준비·개선 중·개선 일시정지·개선 완료`로 구분하고 평가 구성 적용, 중간 점검, 최종 확인 안내 적용. 제어 버튼은 `시작·일시정지·재개`로 축약 | [`ConsolePage.tsx`](../apps/web/src/pages/ConsolePage.tsx) |
-| 개선안 비교 목록 | **반영 완료** | 후보·챔피언과 포괄 판정을 개선안·현재 결과 및 원인별 상태로 변경 | [`ExperimentTree.tsx`](../apps/web/src/components/ExperimentTree.tsx) |
-| 결과 화면 | **반영 완료** | 점수·결과물·남은 실패 항목을 중심으로 재구성. 중간 점검과 최종 확인 설명은 `i` 도움말로 이동하고, 저장 범위·보호 규칙·전체 기록은 접힌 상세 영역으로 정리. 만점 조기 종료 안내는 경고 스타일로 분리 | [`ResultsPage.tsx`](../apps/web/src/pages/ResultsPage.tsx), [`styles.flow.css`](../apps/web/src/styles.flow.css) |
-| 템플릿 제공 도움말·오류 | **일부 반영** | 인수인계 질문 분류와 사용할 AI 모델 문구, 시간표의 규칙 기반 채점 면제 문구를 변경 | [`handover/index.ts`](../templates/handover/src/index.ts), [`handover/examiner.ts`](../templates/handover/src/examiner.ts), [`timetable/index.ts`](../templates/timetable/src/index.ts) |
-| 저장·복원 오류 | **반영 완료** | `숨긴 질문 채점`을 `최종 확인 채점`으로 변경 | [`project-export.ts`](../apps/web/src/lib/project-export.ts), [`project-snapshot.ts`](../apps/web/src/lib/project-snapshot.ts) |
-| 기존·변경 비교 화면 | **반영 완료** | 동일한 축약 UI를 두 열로 배치하고, 그 아래에 첫 방문 안내부터 연결·복원 오류까지 사용자 노출 변경을 화면 위치별로 대조 | [`TerminologyComparePage.tsx`](../apps/web/src/pages/TerminologyComparePage.tsx), [`App.tsx`](../apps/web/src/App.tsx), [`styles.css`](../apps/web/src/styles.css) |
+| 첫 방문 안내 | **반영 완료** | `채점표`, `잠금`, `채점 모델`을 `평가 기준`, `기준 확정`, `사용할 AI 모델`로 바꾸고 단계명은 `실행`으로 정리 | [`IntroTour.tsx`](../../apps/web/src/components/IntroTour.tsx) |
+| 홈 헤드라인 | **사용자 요청 반영** | 서비스 분류를 `AI 결과물 생성·평가`로 바꾸고, `목표를 정하세요. / 기준을 승인하세요. / AI가 목표에 도달합니다.`와 `올라간 점수를 믿을 수 있는 이유입니다.`를 포함한 채점 기준 유지 설명 적용 | [`HomePage.tsx`](../../apps/web/src/pages/HomePage.tsx) |
+| 홈 애니메이션 | **의도적 제외** | 브랜드 표현으로 유지 | [`HeroLoop.tsx`](../../apps/web/src/components/HeroLoop.tsx) |
+| 입력 마지막 단계 | **일부 반영** | `문서 길이를 점수에 반영할까요?`로 선택 목적을 명확히 하고 사용·사용 안 함의 차이를 짧게 설명. 선택한 모델이 결과물 생성과 평가를 모두 맡는다고 명시 | [`WizardPage.tsx`](../../apps/web/src/pages/WizardPage.tsx), [`handover/index.ts`](../../templates/handover/src/index.ts) |
+| 입력 중 평가 미리보기 | **반영 완료** | 질문·답 단계에서는 `답변 가능성`만 표시하고, 분량·간결성·질문 사용 구분·AI 모델은 실제 설정 단계에 도달하거나 사용자가 선택한 뒤에만 표시. 긴 설명은 `i` 도움말로 분리하고 중복된 다음 단계 승인 안내는 제거 | [`WizardBlueprint.tsx`](../../apps/web/src/components/WizardBlueprint.tsx), [`WizardPage.tsx`](../../apps/web/src/pages/WizardPage.tsx) |
+| 상단 진행 단계 | **반영 완료** | `점검·승인 → 사전 점검·승인`, `잠금 → 기준 확정`, 실행 단계는 `실행`으로 유지 | [`templates.tsx`](../../apps/web/src/templates.tsx) |
+| 승인 화면 | **반영 완료** | 평가 구성 승인, 평가 기준, 필수 조건, AI 평가 사전 점검, 질문 사용 목적을 변경. 모의 모델 이름 중복을 제거하고 긴 분량 상한 안내를 선택 행동 중심으로 축약 | [`ApprovalPage.tsx`](../../apps/web/src/pages/ApprovalPage.tsx), [`handover/index.ts`](../../templates/handover/src/index.ts) |
+| 승인 완료 화면 | **반영 완료** | `기준 확정`, AI가 결과물을 만들고 평가하는 동안 평가 구성이 바뀌지 않는다는 설명, `확인 코드` 적용 | [`SealPanel.tsx`](../../apps/web/src/components/SealPanel.tsx) |
+| 실행 화면 | **반영 완료** | `관제실`을 `실행`으로, 실행 상태를 `개선 준비·개선 중·개선 일시정지·개선 완료`로 구분하고 평가 구성 적용, 중간 점검, 최종 확인 안내 적용. 제어 버튼은 `시작·일시정지·재개`로 축약 | [`ConsolePage.tsx`](../../apps/web/src/pages/ConsolePage.tsx) |
+| 개선안 비교 목록 | **반영 완료** | 후보·챔피언과 포괄 판정을 개선안·현재 결과 및 원인별 상태로 변경 | [`ExperimentTree.tsx`](../../apps/web/src/components/ExperimentTree.tsx) |
+| 결과 화면 | **반영 완료** | 점수·결과물·남은 실패 항목을 중심으로 재구성. 중간 점검과 최종 확인 설명은 `i` 도움말로 이동하고, 저장 범위·보호 규칙·전체 기록은 접힌 상세 영역으로 정리. 만점 조기 종료 안내는 경고 스타일로 분리 | [`ResultsPage.tsx`](../../apps/web/src/pages/ResultsPage.tsx), [`styles.flow.css`](../../apps/web/src/styles.flow.css) |
+| 템플릿 제공 도움말·오류 | **일부 반영** | 인수인계 질문 분류와 사용할 AI 모델 문구, 시간표의 규칙 기반 채점 면제 문구를 변경 | [`handover/index.ts`](../../templates/handover/src/index.ts), [`handover/examiner.ts`](../../templates/handover/src/examiner.ts), [`timetable/index.ts`](../../templates/timetable/src/index.ts) |
+| 저장·복원 오류 | **반영 완료** | `숨긴 질문 채점`을 `최종 확인 채점`으로 변경 | [`project-export.ts`](../../apps/web/src/lib/project-export.ts), [`project-snapshot.ts`](../../apps/web/src/lib/project-snapshot.ts) |
+| 기존·변경 비교 화면 | **반영 완료** | 동일한 축약 UI를 두 열로 배치하고, 그 아래에 첫 방문 안내부터 연결·복원 오류까지 사용자 노출 변경을 화면 위치별로 대조 | [`TerminologyComparePage.tsx`](../../apps/web/src/pages/TerminologyComparePage.tsx), [`App.tsx`](../../apps/web/src/App.tsx), [`styles.css`](../../apps/web/src/styles.css) |
 
 ## 4. 아직 반영하지 않은 용어 묶음
 
-아래 항목은 [`terminology-inventory.md`](terminology-inventory.md)에 후보와 교체 방향이 있지만 이번 프런트 패치에는 포함하지 않았다.
+아래 항목은 [`terminology-inventory.md`](../terminology-inventory.md)에 후보와 교체 방향이 있지만 이번 프런트 패치에는 포함하지 않았다.
 
 | 남은 묶음 | 상태 | 남겨 둔 이유 또는 다음 작업 |
 |---|---|---|
@@ -127,8 +134,8 @@
 
 | 문서 | 상태 | 현재 반영 내용 |
 |---|---|---|
-| [`terminology-inventory.md`](terminology-inventory.md) | **일부 반영** | `퇴보 확인`과 `품질 유지 확인`을 폐기하고 `중간 점검` 기준으로 갱신. 실제 제품 문서 전체 교체는 아직 시작하지 않음 |
-| [`user-scenario.md`](user-scenario.md) | **일부 반영** | 시나리오와 Mermaid에서 `중간 점검` 표현을 확정 |
+| [`terminology-inventory.md`](../terminology-inventory.md) | **일부 반영** | `퇴보 확인`과 `품질 유지 확인`을 폐기하고 `중간 점검` 기준으로 갱신. 실제 제품 문서 전체 교체는 아직 시작하지 않음 |
+| [`user-scenario.md`](../user-scenario.md) | **일부 반영** | 시나리오와 Mermaid에서 `중간 점검` 표현을 확정 |
 | `README.md` | **미반영** | 기존 `검증 가드`, `퇴보`, `시험관`, `저지` 등이 남아 있음 |
 | `SPEC.md` | **미반영** | 정책 정본이므로 용어만 바꾸더라도 계약 의미를 보존하며 별도 검토 필요 |
 | `PHILOSOPHY.md` | **미반영** | 제품 설명과 설계 비유를 나누어 교체해야 함 |

@@ -11,8 +11,9 @@ Guidance for coding agents working in this repository. `CLAUDE.md` loads this fi
 - Design rationale: `PHILOSOPHY.md`
 - Unimplemented or deferred scope: `ROADMAP.md`
 - Empirical evidence: `experiments/`
+- Explanatory material (code-derived loop walkthrough, user scenario, terminology reference): `docs/` — descriptive, not normative
 
-Drafts and archived documents are not current contracts. Before changing an invariant, inspect the relevant SPEC section and contract tests.
+Drafts and archived documents (`docs/archive/`) are not current contracts. Before changing an invariant, inspect the relevant SPEC section and contract tests.
 
 ## Commands
 
@@ -51,7 +52,7 @@ packages/contracts    Evaluation Pack, examiner, checkpoint, and digest contract
 packages/loop-engine  Browser improvement loop with checkpoint and resume support
 templates/handover    Handover questions, compilation, scoring, and generation
 templates/timetable   Deterministic template for development and testing
-apps/web              React SPA with OpenAI, Gemini, and mock model clients
+apps/web              React SPA with mock, OpenAI, Gemini, Vertex AI, Claude, OpenRouter, and Ollama clients
 apps/api              Optional FastAPI + SQLite persistence API
 experiments           Frozen protocols, measurement code, and results
 ```

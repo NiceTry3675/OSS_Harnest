@@ -8,6 +8,10 @@
 - **핵심 UX 다듬기** — 구현된 수정→재검증 왕복과 결과 화면을 사용자 테스트로 확인하고,
   확인된 문제만 고친다.
 
+- **용어 통일 2차** — 1차 프런트 적용(2026-08-26)에서 남긴 입력 화면·AI 연결·저장 버튼·종료
+  사유 문구와 핵심 제품 문서의 용어를 [`docs/terminology-inventory.md`](docs/terminology-inventory.md)
+  §2의 대표 용어 기준으로 정리한다.
+
 ## 보류
 
 - **호스티드 무료 체험 프록시** — 운영 비용과 쿼터 정책을 결정하기 전에는 구현하지 않는다.
@@ -28,6 +32,6 @@
 
 ## 현재 범위 밖
 
-- **추가 BYO 공급자** — Anthropic 어댑터와 추가 CORS 실측
-- **커스텀 endpoint** — OpenAI 호환 base URL UI와 OpenRouter·Ollama 대표 실측
+- **커스텀 endpoint** — OpenAI 호환 임의 base URL 입력. Ollama 로컬 주소는 받지만 그 외
+  임의 endpoint는 받지 않는다.
 - **제품 확장** — 추가 템플릿과 부가 기능

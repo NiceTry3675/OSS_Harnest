@@ -1,10 +1,44 @@
 # Harnest
 
-**[▶ 브라우저에서 바로 실행](https://harnest.p-e.kr)**
+**[▶ 브라우저에서 바로 실행](https://harnest.p-e.kr)** — 설치도 가입도 없습니다. 모의 모델을 고르면 API 키 없이 전체 흐름을 볼 수 있습니다.
 
 AI에게 일을 맡기면 결과물은 한 번에 나옵니다. 문제는 그게 잘된 건지 아무도 채점하지 않는다는 것입니다. 확인하려면 기준이 있어야 하는데, 기준마저 AI가 정하면 점수는 의미가 없습니다.
 
-**Harnest는 순서를 뒤집습니다.** 사용자가 채점 기준을 먼저 정하고 승인하면 그 기준이 잠기고, AI는 바뀌지 않는 기준 위에서 결과물을 반복해 고쳐 씁니다. 설치도 가입도 없이 브라우저에서 돌아가며, 모의 모델을 고르면 API 키 없이도 전체 흐름을 볼 수 있습니다.
+**Harnest는 순서를 뒤집습니다.** 사용자가 채점 기준을 먼저 정하고 승인하면 그 기준이 잠기고, AI는 바뀌지 않는 기준 위에서 결과물을 반복해 고쳐 씁니다. 처음 결과와 마지막 결과를 같은 기준으로 재고, 개선 과정에서 쓰지 않은 질문으로 마지막에 한 번 더 확인합니다.
+
+## 시작하기
+
+**웹에서** — [harnest.p-e.kr](https://harnest.p-e.kr)
+
+1. 제공된 템플릿을 고르거나, `템플릿 만들기`에 목표를 한 문장 적습니다.
+2. 자료와 실제 질문·답을 넣고 사용할 AI 모델을 고릅니다. 모의 모델은 키가 필요 없습니다.
+3. 만들어진 평가 구성을 확인하고 승인합니다.
+4. 실행을 지켜보고 결과와 근거를 확인합니다.
+
+**로컬에서** (Node 22 이상)
+
+```bash
+git clone https://github.com/NiceTry3675/OSS_Harnest.git
+cd OSS_Harnest
+npm install
+npm run dev            # http://localhost:5173
+```
+
+웹 앱은 백엔드 없이 완결됩니다. 결과를 서버에 기록하는 저장 API가 필요할 때만 별도로 실행합니다.
+
+```bash
+cd apps/api
+pip3 install -r requirements.txt
+python3 -m uvicorn main:app --port 8000
+```
+
+## 어떻게 진행되나
+
+1. **평가 구성 만들기** — 입력한 자료·질문·조건으로 평가 기준과 필수 조건을 만듭니다. 질문은 개선용·중간 점검용·최종 확인용으로 나뉘며, 같은 입력은 언제 다시 만들어도 같은 분할입니다.
+2. **사전 점검과 승인** — 채점을 맡을 AI가 같은 문서를 다시 채점해도 안정적인지, 꾸며낸 답을 가려내는지 점검합니다. 통과하지 못하면 승인이 막힙니다. 승인하면 평가 구성이 확인 코드(SHA-256)와 함께 고정됩니다.
+3. **처음 결과 측정** — 개선 전 결과물을 먼저 만들어 같은 기준으로 채점합니다. 이 점수가 출발점입니다.
+4. **반복 개선** — AI가 개선안을 내면 필수 조건, 중간 점검, 종합 점수 순으로 판정합니다. 종합 점수가 현재 결과보다 높을 때만 채택하고, 같으면 지금 것을 유지합니다.
+5. **최종 확인** — 만점, 연속 미채택, 최대 회차 중 하나에 도달하면 멈춥니다. 개선 과정에서 쓰지 않은 최종 확인 질문으로 처음과 마지막 결과를 비교해 보여줍니다.
 
 ## 핵심 기능
 
@@ -22,30 +56,26 @@ AI에게 일을 맡기면 결과물은 한 번에 나옵니다. 문제는 그게
 
 기본 제공 템플릿은 **인수인계·온보딩 문서**(글로 된 결과물, 질문·답으로 채점)와 **근무표 짜기**(표로 된 결과물, 규칙 위반으로 채점) 둘입니다. 결과물이 문서든 배정표든 같은 흐름이 돕니다.
 
-> 예시 실행 — 인수인계 템플릿, 질문 15개, `gpt-5.6-sol`: 처음 75점 → 고친 뒤 **93점**, 원자료 44,669자에서 2,818자 결과물, 중간 점검에서 기각 2회.
+> 예시 실행 1회 — 인수인계 템플릿, 질문 15개, `gpt-5.6-sol`: 처음 75점 → 고친 뒤 **93점**, 원자료 44,669자에서 2,818자 결과물, 중간 점검에서 기각 2회. 단일 실행의 예시이며 일반적인 개선 폭을 보장하지 않습니다.
 
-## 시작하기
+## 모델 지원
 
-**웹에서**: [harnest.p-e.kr](https://harnest.p-e.kr) → `템플릿 만들기` 또는 제공된 템플릿 선택 → 질문·답 입력 → 기준 승인 → 실행
+**BYO API 키와 모델 호출은 Harnest 서버를 거치지 않습니다.** 키는 브라우저 `localStorage`에만 저장되고, 요청 본문은 브라우저에서 벤더로 직행합니다. 키를 붙여넣으면 형식만으로 공급자를 판별하며, 판별 과정에서 키를 외부로 보내지 않습니다.
 
-**로컬에서** (Node 22+):
+| 경로 | 지원 |
+|---|---|
+| 모의 모델 | 키 없이 전체 흐름 실행 · 결정적 회귀 테스트 |
+| OpenAI | `gpt-5.6-sol` 등 — Responses API, 스트리밍 |
+| Gemini · Vertex AI | `gemini-3.8-flash` — Vertex는 서비스 계정 JSON, 리전 `global` 고정 |
+| Claude (Anthropic) | API 키로 브라우저 직접 호출 |
+| OpenRouter | 한 키로 여러 회사 모델, 쓸 수 있는 모델 목록 불러오기 |
+| Ollama | 내 컴퓨터의 로컬 주소, 키 없음 |
 
-```bash
-git clone https://github.com/NiceTry3675/OSS_Harnest.git
-cd OSS_Harnest
-npm install
-npm run dev            # http://localhost:5173
-```
+Vertex 경로에서는 private key로 브라우저 안에서 JWT를 서명하고, 서명된 assertion만 Google OAuth에 보내 단기 access token을 받습니다. CORS 정상·401 경로와 스모크 테스트 관측값은 [OpenAI BYO 실측 결과](experiments/byo-cors-openai/RESULT.md)에 있습니다.
 
-웹 앱은 백엔드 없이 완결됩니다. 결과 저장 API가 필요할 때만 별도로 실행합니다.
+서버로 데이터가 가는 경우는 하나뿐입니다 — 결과 화면에서 **서버에 기록**을 직접 누를 때. 같은 형식을 서버 없이 파일로 내보낼 수도 있습니다. 관리자가 `SHARED_OPENAI_API_KEY` / `SHARED_GEMINI_API_KEY`를 설정하면 사용자가 키 없이 쓸 수 있는 공유 키 경로가 열리며, 이 키는 서버의 비밀 환경변수에만 저장합니다.
 
-```bash
-cd apps/api
-pip3 install -r requirements.txt
-python3 -m uvicorn main:app --port 8000
-```
-
-## 기술 스택
+## 기술 스택과 구조
 
 | 영역 | 사용 기술 |
 |---|---|
@@ -60,8 +90,6 @@ python3 -m uvicorn main:app --port 8000
 
 npm workspaces 모노레포이며, 외부 상태 관리 라이브러리나 UI 프레임워크를 쓰지 않습니다.
 
-## 프로젝트 구조
-
 ```
 packages/contracts    평가 팩·시험관·체크포인트·기록 계약과 다이제스트
 packages/loop-engine  체크포인트와 재개를 지원하는 브라우저 개선 루프
@@ -70,30 +98,16 @@ templates/timetable   개발·테스트용 결정적 템플릿(모델 호출 없
 apps/web              React SPA · 벤더 6종 클라이언트
 apps/api              선택형 FastAPI + SQLite 저장 API
 experiments           동결된 프로토콜·측정 코드·결과
+docs                  코드 기준 루프 구조·사용자 시나리오·용어 기준
 ```
 
 의존 방향은 `contracts` ← `loop-engine` / `templates/*` ← `apps/web` 입니다. 템플릿별 동작은 `TemplateEntry` 경계에서만 합성되고, 페이지나 엔진에는 템플릿 분기가 없습니다.
-
-## 모델 지원
-
-**BYO API 키와 모델 호출은 Harnest 서버를 거치지 않습니다.** 키는 브라우저 `localStorage`에만 저장되고, 요청 본문은 브라우저에서 벤더로 직행합니다.
-
-| 경로 | 지원 |
-|---|---|
-| 모의 모델 | 키 없이 전체 흐름 실행 · 결정적 회귀 테스트 |
-| OpenAI | `gpt-5.6-sol` 등 — Responses API, 스트리밍 |
-| Gemini · Vertex AI | `gemini-3.8-flash` — Vertex는 서비스 계정 JSON, `global` 고정 |
-| Anthropic · OpenRouter · Ollama | 스트리밍 생성·채점 |
-
-Vertex 경로에서는 private key로 브라우저 안에서 JWT를 서명하고, 서명된 assertion만 Google OAuth에 보내 단기 access token을 받습니다. CORS 정상·401 경로와 스모크 테스트 관측값은 [OpenAI BYO 실측 결과](experiments/byo-cors-openai/RESULT.md)에 있습니다.
-
-서버로 데이터가 가는 경우는 하나뿐입니다 — 결과 화면에서 **서버에 기록**을 직접 누를 때. 같은 형식을 서버 없이 파일로 내보낼 수도 있습니다. 관리자가 `SHARED_OPENAI_API_KEY` / `SHARED_GEMINI_API_KEY`를 설정하면 사용자가 키 없이 쓸 수 있는 공유 키 경로가 열리며, 이 키는 서버의 비밀 환경변수에만 저장합니다.
 
 ## 개발
 
 ```bash
 npm run typecheck                              # 전 워크스페이스 타입 검사
-npm test                                       # Vitest 281개
+npm test                                       # Vitest 전체
 npm run build                                  # 프로덕션 웹 빌드
 npx vitest run packages/loop-engine/src/engine.test.ts
 ```
@@ -107,7 +121,7 @@ API를 변경했다면 `apps/api`에서 `python3 test_api.py`도 실행합니다
 | 웹 | https://harnest.p-e.kr | `main` push → GitHub Pages 자동 배포 |
 | 저장 API | https://api.harnest.p-e.kr | `main` push → Fly.io 자동 배포 |
 
-다른 API 주소를 쓰려면 저장소 변수 `VITE_API_BASE`에 넣고 Pages 배포를 다시 실행하세요. API를 직접 호스팅하려면 `fly.toml`과 `Deploy API to Fly` 워크플로우를 사용하고, GitHub Secret `FLY_API_TOKEN`을 등록하세요. SQLite 파일은 `/data/harnest.db`를 쓰므로 `/data`에 영구 볼륨을 연결해야 합니다.
+다른 API 주소를 쓰려면 저장소 변수 `VITE_API_BASE`에 넣고 Pages 배포를 다시 실행하세요. API를 직접 호스팅하려면 `fly.toml`과 `Deploy API to Fly` 워크플로우를 사용하고, GitHub Secret `FLY_API_TOKEN`을 등록하세요. SQLite 파일은 `/data/harnest.db`를 쓰므로 `/data`에 영구 볼륨을 연결해야 합니다. 자세한 운영 설정은 [`apps/api/README.md`](apps/api/README.md)에 있습니다.
 
 ## 문서
 
@@ -118,6 +132,7 @@ API를 변경했다면 `apps/api`에서 `python3 test_api.py`도 실행합니다
 | 왜 그런 규칙을 택했는가 | [PHILOSOPHY.md](PHILOSOPHY.md) |
 | 아직 구현하지 않았거나 보류한 것은 무엇인가 | [ROADMAP.md](ROADMAP.md) |
 | 정확한 필드와 실행 계약은 무엇인가 | [`packages/contracts`](packages/contracts)와 테스트 |
+| 루프가 코드 수준에서 어떻게 도는가, 사용자 여정은 어떤가 | [`docs/`](docs/README.md) |
 | 실제로 측정했는가 | [`experiments`](experiments) |
 | 저장소에서 어떻게 작업하는가 | [AGENTS.md](AGENTS.md) |
 
