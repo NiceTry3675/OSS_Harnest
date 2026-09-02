@@ -89,7 +89,7 @@ Vertex 경로에서는 private key로 브라우저 안에서 JWT를 서명하고
 | 문서 파싱 | `pdfjs-dist` · `mammoth` (브라우저에서 PDF·DOCX 추출) |
 | 모델 연동 | 벤더 6종 SSE·NDJSON 스트리밍 직접 파싱 (SDK 미사용) |
 | 백엔드(선택) | FastAPI · Uvicorn · SQLite |
-| 테스트 | Vitest — 285개 (`fake-indexeddb`로 체크포인트 포함) |
+| 테스트 | Vitest — 289개 (`fake-indexeddb`로 체크포인트 포함) |
 | 배포 | GitHub Pages(웹) · Fly.io(API) — `main` push 시 자동 |
 
 npm workspaces 모노레포이며, 외부 상태 관리 라이브러리나 UI 프레임워크를 쓰지 않습니다.

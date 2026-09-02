@@ -212,16 +212,38 @@ export function createLoopRun<A>(opts: LoopRunOptions<A>): LoopHandle {
               }
             : {}),
         };
-        const strategy = planStrategy === undefined
-          ? undefined
-          : await planStrategy(c.champion, rng, feedback);
-        if (strategy !== undefined && blockedKeys.includes(strategy.key)) {
-          throw new Error(
-            `반복 실패한 수정 전략(${strategy.key})을 다시 선택했습니다 — 다른 전략이 필요합니다.`,
+        let strategy: ExperimentStrategy | undefined;
+        let candidate: A;
+        let result: Awaited<ReturnType<typeof scorer>>;
+        try {
+          strategy = planStrategy === undefined
+            ? undefined
+            : await planStrategy(c.champion, rng, feedback);
+          if (strategy !== undefined && blockedKeys.includes(strategy.key)) {
+            // 차단은 다양성을 위한 휴리스틱이지 불변식이 아니다 — 한 번 더 고르게 하고,
+            // 그래도 같으면 전략 없이 생성한다. 실행 전체를 중단할 일은 아니다.
+            const blocked = strategy.key;
+            strategy = await planStrategy!(c.champion, rng, feedback);
+            if (blockedKeys.includes(strategy.key)) {
+              note(c, "round", `라운드 ${round}: 차단된 전략(${blocked})을 거듭 선택 — 전략 없이 생성`);
+              strategy = undefined;
+            }
+          }
+          candidate = await generate(c.champion, rng, feedback, strategy);
+          result = await scorer(candidate);
+        } catch (error) {
+          // 실패한 라운드는 기록하지 않는다(0점 기록·회차 소모 없음). 직전 라운드 경계에서
+          // 일시정지로 저장해 사용자가 사유를 보고 재개할 수 있게 한다.
+          c.status = "paused";
+          c.rngState = rng.state;
+          note(
+            c,
+            "error",
+            `라운드 ${round} 실패 — ${error instanceof Error ? error.message : String(error)}`,
           );
+          await commit(c);
+          throw error;
         }
-        const candidate = await generate(c.champion, rng, feedback, strategy);
-        const result = await scorer(candidate);
         const prevScore = c.championScore;
         const prevGuardScore = c.championGuardScore;
         const candidateGuardScore = result.guardScore ?? null;

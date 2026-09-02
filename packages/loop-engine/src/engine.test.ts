@@ -506,9 +506,14 @@ describe("createLoopRun", () => {
 
     await expect(createLoopRun(opts).start()).rejects.toThrow("채점 출력 형식 오류");
     const beforeRetry = await store.load(opts.runId);
+    // 실패한 라운드는 회차·곡선·tree에 남지 않고, 사유를 단 채 일시정지로 저장된다
+    expect(beforeRetry?.status).toBe("paused");
     expect(beforeRetry?.round).toBe(0);
     expect(beforeRetry?.tree).toEqual([]);
     expect(beforeRetry?.curve).toEqual([0]);
+    const errorNote = beforeRetry?.provenance.find((p) => p.type === "error");
+    expect(errorNote?.detail).toContain("라운드 1 실패");
+    expect(errorNote?.detail).toContain("채점 출력 형식 오류");
 
     await createLoopRun(opts).start();
     const afterRetry = await store.load(opts.runId);
@@ -813,26 +818,96 @@ describe("createLoopRun — Generator 피드백", () => {
     expect(final?.tree.map((record) => record.strategy?.key)).toEqual(strategyKeys);
   });
 
-  it("반복 실패로 차단된 전략을 계획기가 다시 선택하면 후보를 만들기 전에 중단한다", async () => {
-    let generated = 0;
+  it("차단된 전략을 거듭 선택하면 한 번 더 고르게 한 뒤 전략 없이 생성한다 — 실행은 계속된다", async () => {
+    const events: LoopCheckpoint<string>[] = [];
+    const strategiesSeen: Array<string | undefined> = [];
+    let plans = 0;
     let n = 0;
-    await expect(
-      createLoopRun<string>({
-        runId: "blocked-strategy-enforced",
-        pack,
-        spec: makeSpec({ maxRounds: 3, feedbackMode: "recent_public_experiments_v1" }),
-        scorer: (artifact) => artifact === "c0" ? ok(10) : ok(5),
-        planStrategy: () => ({ key: "targeted_repair", summary: "같은 전략" }),
-        generate: () => {
-          generated += 1;
-          return `c${++n}`;
-        },
-        initial: () => "c0",
-        store: new MemoryCheckpointStore<string>(),
-        onEvent: () => {},
-      }).start(),
-    ).rejects.toThrow("다른 전략이 필요합니다");
-    expect(generated).toBe(2);
+    await createLoopRun<string>({
+      runId: "blocked-strategy-fallback",
+      pack,
+      spec: makeSpec({ maxRounds: 3, feedbackMode: "recent_public_experiments_v1" }),
+      scorer: (artifact) => artifact === "c0" ? ok(10) : ok(5),
+      planStrategy: () => {
+        plans += 1;
+        return { key: "targeted_repair", summary: "같은 전략" };
+      },
+      generate: (_champ, _rng, _feedback, strategy) => {
+        strategiesSeen.push(strategy?.key);
+        return `c${++n}`;
+      },
+      initial: () => "c0",
+      store: new MemoryCheckpointStore<string>(),
+      onEvent: (cp) => events.push(cp),
+    }).start();
+
+    const last = events[events.length - 1];
+    expect(last.status).toBe("done");
+    expect(last.tree).toHaveLength(3);
+    // 두 번 기각된 뒤 3라운드: 재계획 1회(총 4회 계획) 후 전략 없이 생성
+    expect(plans).toBe(4);
+    expect(strategiesSeen).toEqual(["targeted_repair", "targeted_repair", undefined]);
+    expect(last.tree[2].strategy).toBeUndefined();
+    expect(
+      last.provenance.some((p) => p.type === "round" && p.detail.includes("전략 없이 생성")),
+    ).toBe(true);
+  });
+
+  it("차단된 전략이라도 재계획에서 다른 전략을 내면 그 전략으로 생성한다", async () => {
+    const strategiesSeen: Array<string | undefined> = [];
+    let plans = 0;
+    let n = 0;
+    await createLoopRun<string>({
+      runId: "blocked-strategy-replan",
+      pack,
+      spec: makeSpec({ maxRounds: 3, feedbackMode: "recent_public_experiments_v1" }),
+      scorer: (artifact) => artifact === "c0" ? ok(10) : ok(5),
+      planStrategy: () => {
+        plans += 1;
+        return plans === 4
+          ? { key: "restructure", summary: "다른 전략" }
+          : { key: "targeted_repair", summary: "같은 전략" };
+      },
+      generate: (_champ, _rng, _feedback, strategy) => {
+        strategiesSeen.push(strategy?.key);
+        return `c${++n}`;
+      },
+      initial: () => "c0",
+      store: new MemoryCheckpointStore<string>(),
+      onEvent: () => {},
+    }).start();
+    expect(strategiesSeen).toEqual(["targeted_repair", "targeted_repair", "restructure"]);
+  });
+
+  it("생성 단계 오류도 회차를 소모하지 않고 일시정지로 저장한 뒤 재개할 수 있다", async () => {
+    const store = new MemoryCheckpointStore<number>();
+    let failOnce = true;
+    const opts: LoopRunOptions<number> = {
+      runId: "generate-error",
+      pack,
+      spec: makeSpec({ maxRounds: 2 }),
+      scorer: (artifact) => ok(artifact * 10),
+      generate: (champion) => {
+        if (failOnce) {
+          failOnce = false;
+          throw new Error("모델 호출 시간 초과 — 테스트");
+        }
+        return champion + 1;
+      },
+      initial: () => 0,
+      store,
+      onEvent: () => {},
+    };
+    await expect(createLoopRun(opts).start()).rejects.toThrow("모델 호출 시간 초과");
+    const paused = await store.load(opts.runId);
+    expect(paused?.status).toBe("paused");
+    expect(paused?.round).toBe(0);
+
+    await createLoopRun(opts).start();
+    const done = await store.load(opts.runId);
+    expect(done?.status).toBe("done");
+    expect(done?.round).toBe(2);
+    expect(done?.curve).toEqual([0, 10, 20]);
   });
 });
 

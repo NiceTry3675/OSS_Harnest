@@ -988,6 +988,88 @@ describe("추론 정책 — 모든 호출에 추론, 깊이는 effort", () => {
     });
   });
 
+  it("스트림이 절단·실패를 알리면 잘린 산출물을 완성본으로 돌려주지 않는다", async () => {
+    const sse = (...lines: string[]) =>
+      new Response(lines.map((line) => `data: ${line}\n\n`).join("") + "data: [DONE]\n\n", {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      });
+
+    // OpenAI: 일부 텍스트 뒤 max_output_tokens 절단
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        sse(
+          '{"type":"response.output_text.delta","delta":"앞부분"}',
+          '{"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"}}}',
+        ),
+      ),
+    );
+    const openai = createOpenAIClient("sk-test", "gpt-5.6-sol") as StreamingLlmClient;
+    await expect(openai.completeStream("생성", { effort: "high" }, () => {})).rejects.toThrow(
+      "출력 토큰 한도",
+    );
+
+    // Claude: message_delta의 stop_reason=max_tokens
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        sse(
+          '{"type":"content_block_delta","delta":{"type":"text_delta","text":"앞부분"}}',
+          '{"type":"message_delta","delta":{"stop_reason":"max_tokens"}}',
+        ),
+      ),
+    );
+    const claude = createAnthropicClient("sk-ant-test", "claude-opus-5") as StreamingLlmClient;
+    await expect(claude.completeStream("생성", { effort: "high" }, () => {})).rejects.toThrow(
+      "출력 토큰 한도",
+    );
+
+    // Gemini: finishReason=MAX_TOKENS
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        sse(
+          '{"candidates":[{"content":{"parts":[{"text":"앞부분"}]}}]}',
+          '{"candidates":[{"content":{"parts":[]},"finishReason":"MAX_TOKENS"}]}',
+        ),
+      ),
+    );
+    const gemini = createGeminiClient("AIzaTest", "gemini-3.8-flash") as StreamingLlmClient;
+    await expect(gemini.completeStream("생성", { effort: "high" }, () => {})).rejects.toThrow(
+      "출력 토큰 한도",
+    );
+
+    // 정상 종료(STOP)는 실패가 아니다
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        sse('{"candidates":[{"content":{"parts":[{"text":"완성"}]},"finishReason":"STOP"}]}'),
+      ),
+    );
+    await expect(gemini.completeStream("생성", { effort: "high" }, () => {})).resolves.toBe("완성");
+  });
+
+  it("Vertex 토큰 발급이 멈추면 스트림 시간 한도로 함께 끊긴다", async () => {
+    const raw = await vertexCredential();
+    // 토큰 endpoint가 영원히 응답하지 않는 상황 — abort 신호가 오면 그때 거부한다
+    const fetchMock = vi.fn(
+      (_url: string, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = createVertexClient(raw, "gemini-3.8-flash", {
+      requestTimeoutMs: 30,
+      maxAttempts: 1,
+    }) as StreamingLlmClient;
+    await expect(client.completeStream("요청", { effort: "low" }, () => {})).rejects.toThrow(
+      /aborted|시간 초과/,
+    );
+    expect(fetchMock.mock.calls[0][0]).toBe("https://oauth2.googleapis.com/token");
+  });
+
   it("effort를 생략하면 medium이다", async () => {
     const fetchMock = vi.fn(async () => openAISuccessResponse("ok"));
     vi.stubGlobal("fetch", fetchMock);

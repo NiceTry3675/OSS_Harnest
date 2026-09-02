@@ -59,7 +59,10 @@ SQLite 파일은 컨테이너 재시작 때 사라지지 않도록 영구 디스
 | `HARNEST_CORS_ORIGINS` | `http://localhost:5173` | 쉼표로 구분한 허용 오리진 |
 | `SHARED_OPENAI_API_KEY` | — | 설정하면 `/proxy/openai`가 열려, 방문자가 자기 키 없이 OpenAI를 쓸 수 있습니다 |
 | `SHARED_GEMINI_API_KEY` | — | 설정하면 `/proxy/gemini/{model}`이 열려, 방문자가 자기 키 없이 Gemini를 쓸 수 있습니다 |
-| `HARNEST_PROXY_RATE_LIMIT` | `20` | `/proxy/*`의 IP당 시간당 요청 상한 |
+| `HARNEST_PROXY_RATE_LIMIT` | `20` | `/proxy/*`의 IP당 시간당 요청 상한 (프로세스 메모리 카운터 — 재시작·scale-to-zero 시 초기화) |
+| `SHARED_OPENAI_MODELS` | `gpt-5.6-sol` | `/proxy/openai`가 허용하는 모델 (쉼표 구분) |
+| `SHARED_GEMINI_MODELS` | `gemini-3.8-flash` | `/proxy/gemini/{model}`이 허용하는 모델 (쉼표 구분) |
+| `HARNEST_PROXY_MAX_OUTPUT_TOKENS` | `65536` | 프록시 요청 하나의 출력 토큰 상한 (요청값이 더 크면 잘라서 전달) |
 
 ## 공유 키 프록시 (선택)
 
@@ -71,7 +74,11 @@ localStorage에만 저장됩니다(SPEC §3 원칙 1). `SHARED_OPENAI_API_KEY` /
 
 **공유 키를 켤 때 반드시 할 일:**
 - 벤더 콘솔(OpenAI, Google Cloud)에 월 지출 한도를 걸어 두세요. `HARNEST_PROXY_RATE_LIMIT`는
-  최악의 시나리오를 줄일 뿐, 막아 주지 않습니다.
+  최악의 시나리오를 줄일 뿐, 막아 주지 않습니다. IP는 Fly 프록시가 붙이는 `Fly-Client-IP`(없으면
+  `X-Forwarded-For`의 마지막 값)로 판별하므로, 다른 플랫폼에 올릴 때는 그 플랫폼이 붙이는 헤더를
+  확인하세요.
+- 프록시는 허용 목록의 모델만 받고, 출력 토큰을 상한으로 자르며, 스트리밍 요청은 한 번에 받는
+  요청으로 바꿔 전달합니다.
 - `/config`는 어떤 벤더가 공유 키를 갖고 있는지(불리언만) 공개합니다. 키 자체는 절대
   응답에 담기지 않습니다.
 
@@ -82,12 +89,9 @@ localStorage에만 저장됩니다(SPEC §3 원칙 1). `SHARED_OPENAI_API_KEY` /
 | GET | `/health` | 상태 확인 → `{"status":"ok"}` |
 | POST | `/exports` | 버전형 봉투 원문 저장 → `201 {id, storedAt, contentSha256}` |
 | GET | `/exports/{id}` | 저장한 봉투의 정확한 JSON 바이트 반환 (없으면 404) |
-| POST | `/projects` | 본문 `{interview, pack, loopSpec}` 저장 → `{"id": uuid}` |
-| GET | `/projects/{id}` | 저장된 프로젝트를 그대로 반환 (없으면 404) |
-| POST | `/projects/{id}/results` | 본문 `{checkpoint}` 저장 → `{"ok": true}` (프로젝트 없으면 404) |
 | GET | `/config` | 공유 키 보유 여부 → `{"sharedProviders": {"openai": bool, "gemini": bool}}` |
-| POST | `/proxy/openai` | 본문을 그대로 OpenAI Responses API에 전달 (공유 키 미설정 시 404) |
-| POST | `/proxy/gemini/{model}` | 본문을 그대로 Gemini generateContent에 전달 (공유 키 미설정 시 404) |
+| POST | `/proxy/openai` | 본문을 OpenAI Responses API에 전달 (공유 키 미설정 시 404, 허용 목록 밖 모델은 400) |
+| POST | `/proxy/gemini/{model}` | 본문을 Gemini generateContent에 전달 (공유 키 미설정 시 404, 허용 목록 밖 모델은 400) |
 
 `POST /exports`는 `kind: "harnest.project-export"`, `envelopeVersion: 3`, `exportedAt`와
 `project.interview`·`project.evaluation`·`project.loopSpec`, `result.checkpoint`·`result.holdout`의
@@ -107,12 +111,13 @@ failed 기록을 가진 `measured`여야 합니다. 고정 계층의 알 수 없
 권위이며 서버가 중복해서 판정하지 않습니다. 응답의 `Location`은 저장된 봉투 경로이고, GET
 응답의 `X-Content-SHA256`은 원문 바이트의 SHA-256입니다.
 
-쓰기 요청은 `application/json`, 최대 1 MiB이며 브라우저 `Origin`은 `http://localhost:5173`만
-허용합니다. 이 제한은 다른 웹페이지가 로컬 API에 단순 요청으로 데이터를 밀어 넣는 경로를 막습니다.
+쓰기와 프록시 요청은 `application/json`, 최대 1 MiB이며 브라우저 `Origin`은 `HARNEST_CORS_ORIGINS`에
+있는 값만 허용합니다. 이 제한은 다른 웹페이지가 API에 단순 요청으로 데이터를 밀어 넣거나 공유 키를
+쓰는 경로를 막습니다.
 
 새 봉투는 `project_exports`에 단일 레코드로 원자적으로 저장합니다. `definitionDigest`, `templateId`,
-`runId`에는 인덱스가 있으며, 원문은 exact round-trip을 위해 BLOB으로 보존합니다. 레거시
-`/projects` 경로는 기존 클라이언트 호환용입니다.
+`runId`에는 인덱스가 있으며, 원문은 exact round-trip을 위해 BLOB으로 보존합니다. 구 `/projects`
+경로는 제거됐고, 그 시절의 `projects`·`results` 행은 마이그레이션이 지우지 않고 DB에 그대로 둡니다.
 
 CORS는 `HARNEST_CORS_ORIGINS`로 정합니다. 기본은 `http://localhost:5173`(웹 앱)만 허용합니다.
 

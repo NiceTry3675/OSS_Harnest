@@ -61,7 +61,9 @@ export interface RoundRecord {
 
 export type ProvenanceType =
   | "run_started" | "round" | "adopted" | "paused" | "resumed"
-  | "finished" | "plateau_stop" | "ceiling_stop";
+  | "finished" | "plateau_stop" | "ceiling_stop"
+  /** 라운드 도중 모델·형식 오류 — 그 라운드는 기록하지 않고 직전 라운드 경계에서 일시정지한다 */
+  | "error";
 
 /** 읽기는 자유·기록되지 않는다. 기록되는 것은 결과에 영향을 주는 사건뿐 (SPEC §3 원칙 7) */
 export interface ProvenanceEntry {

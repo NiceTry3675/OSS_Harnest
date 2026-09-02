@@ -36,6 +36,7 @@ const PROVENANCE_LABEL: Record<ProvenanceType, string> = {
   finished: "개선 완료",
   plateau_stop: "더 나아지지 않아 종료",
   ceiling_stop: "상한 도달 종료",
+  error: "오류로 일시정지",
 };
 
 function fmt(n: number): string {

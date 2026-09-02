@@ -24,7 +24,6 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 
 from ratelimit import build_rate_limiter
 
@@ -78,6 +77,19 @@ SHARED_OPENAI_API_KEY = os.environ.get("SHARED_OPENAI_API_KEY", "")
 SHARED_GEMINI_API_KEY = os.environ.get("SHARED_GEMINI_API_KEY", "")
 PROXY_RATE_LIMIT_PER_HOUR = int(os.environ.get("HARNEST_PROXY_RATE_LIMIT", "20"))
 _MODEL_NAME_RE = re.compile(r"^[a-zA-Z0-9._-]{1,100}$")
+
+
+def _model_allowlist(env_name: str, default: str) -> set:
+    """쉼표로 구분한 허용 모델 목록. 공유 키는 관리자 계정에서 과금되므로 방문자가 모델을 고르지 못하게 한다."""
+    raw = os.environ.get(env_name, default)
+    return {name.strip() for name in raw.split(",") if name.strip()}
+
+
+SHARED_OPENAI_MODELS = _model_allowlist("SHARED_OPENAI_MODELS", "gpt-5.6-sol")
+SHARED_GEMINI_MODELS = _model_allowlist("SHARED_GEMINI_MODELS", "gemini-3.8-flash")
+# 한 요청이 낼 수 있는 출력 토큰 상한 — 인수인계 최대 분량(2만 자) 생성에도 충분하고, 그 이상은 폭주다.
+PROXY_MAX_OUTPUT_TOKENS = int(os.environ.get("HARNEST_PROXY_MAX_OUTPUT_TOKENS", "65536"))
+PROXY_MAX_BODY_BYTES = MAX_EXPORT_BYTES
 
 
 @contextmanager
@@ -148,16 +160,6 @@ def init_db() -> None:
 
 
 init_db()
-
-
-class ProjectIn(BaseModel):
-    interview: Dict[str, Any]
-    pack: Dict[str, Any]
-    loopSpec: Dict[str, Any]
-
-
-class ResultIn(BaseModel):
-    checkpoint: Dict[str, Any]
 
 
 def now_iso() -> str:
@@ -432,6 +434,8 @@ def validate_checkpoint_shape(checkpoint: Dict[str, Any]) -> None:
             "resumed",
             "finished",
             "plateau_stop",
+            "ceiling_stop",
+            "error",
         }:
             raise HTTPException(status_code=422, detail=f"{item_path}.type이 올바르지 않습니다.")
         require_string(entry.get("detail"), f"{item_path}.detail")
@@ -460,11 +464,16 @@ def validate_holdout_evaluation(value: Dict[str, Any], path: str) -> None:
             raise HTTPException(status_code=422, detail=f"{item_path}.caseType이 올바르지 않습니다.")
 
 
-async def read_export_payload(request: Request) -> bytes:
-    # CORS 헤더는 응답 공개만 제어하고 단순 요청의 쓰기 자체를 막지 않는다.
+def require_allowed_origin(request: Request) -> None:
+    """모든 쓰기·프록시 경로의 공통 가드. CORS 헤더는 응답 공개만 제어하고 단순 요청의 쓰기
+    자체를 막지 않으므로, 브라우저가 붙이는 Origin을 직접 확인한다."""
     origin = request.headers.get("origin")
     if origin is not None and origin not in ALLOWED_ORIGINS:
         raise HTTPException(status_code=403, detail="허용하지 않는 Origin입니다.")
+
+
+async def read_export_payload(request: Request) -> bytes:
+    require_allowed_origin(request)
 
     media_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
     if media_type != "application/json":
@@ -838,56 +847,6 @@ def get_export(export_id: str) -> Response:
     )
 
 
-@app.post("/projects")
-def create_project(body: ProjectIn) -> Dict[str, str]:
-    project_id = str(uuid.uuid4())
-    with db() as conn:
-        conn.execute(
-            "INSERT INTO projects (id, interview, pack, loop_spec, created_at) VALUES (?, ?, ?, ?, ?)",
-            (
-                project_id,
-                json.dumps(body.interview, ensure_ascii=False),
-                json.dumps(body.pack, ensure_ascii=False),
-                json.dumps(body.loopSpec, ensure_ascii=False),
-                now_iso(),
-            ),
-        )
-    return {"id": project_id}
-
-
-@app.get("/projects/{project_id}")
-def get_project(project_id: str) -> Dict[str, Any]:
-    with db() as conn:
-        row = conn.execute(
-            "SELECT id, interview, pack, loop_spec, created_at FROM projects WHERE id = ?",
-            (project_id,),
-        ).fetchone()
-    if row is None:
-        raise HTTPException(status_code=404, detail="프로젝트가 없습니다.")
-    return {
-        "id": row[0],
-        "interview": json.loads(row[1]),
-        "pack": json.loads(row[2]),
-        "loopSpec": json.loads(row[3]),
-        "createdAt": row[4],
-    }
-
-
-@app.post("/projects/{project_id}/results")
-def upload_result(project_id: str, body: ResultIn) -> Dict[str, bool]:
-    with db() as conn:
-        exists = conn.execute(
-            "SELECT 1 FROM projects WHERE id = ?", (project_id,)
-        ).fetchone()
-        if exists is None:
-            raise HTTPException(status_code=404, detail="프로젝트가 없습니다.")
-        conn.execute(
-            "INSERT INTO results (project_id, checkpoint, created_at) VALUES (?, ?, ?)",
-            (project_id, json.dumps(body.checkpoint, ensure_ascii=False), now_iso()),
-        )
-    return {"ok": True}
-
-
 @app.get("/config")
 def get_config() -> Dict[str, Any]:
     return {
@@ -899,12 +858,42 @@ def get_config() -> Dict[str, Any]:
 
 
 def _client_ip(request: Request) -> str:
-    # 프록시(nginx, CDN 등) 뒤에서 돈다면 실제 방문자 IP는 X-Forwarded-For에 담긴다.
-    # 이게 없으면 request.client.host는 프록시 자신의 IP라 IP별 제한의 의미가 없어진다.
+    # Fly 프록시 뒤에서는 Fly-Client-IP가 실제 방문자 IP다. X-Forwarded-For는 클라이언트가
+    # 앞에 아무 값이나 덧붙일 수 있으므로 첫 값이 아니라 프록시가 마지막에 붙인 값을 쓴다.
+    # 첫 값을 믿으면 요청마다 새 IP를 꾸며 시간당 한도를 무한히 우회할 수 있다.
+    fly_client = request.headers.get("fly-client-ip", "").strip()
+    if fly_client:
+        return fly_client
     forwarded = request.headers.get("x-forwarded-for", "")
     if forwarded:
-        return forwarded.split(",")[0].strip()
+        return forwarded.split(",")[-1].strip()
     return request.client.host if request.client else "unknown"
+
+
+async def _read_proxy_body(request: Request) -> Dict[str, Any]:
+    """프록시 본문 — Origin·크기·형식을 확인한 뒤 JSON 객체로 돌려준다."""
+    require_allowed_origin(request)
+    media_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if media_type != "application/json":
+        raise HTTPException(status_code=415, detail="Content-Type은 application/json이어야 합니다.")
+    payload = bytearray()
+    async for chunk in request.stream():
+        payload.extend(chunk)
+        if len(payload) > PROXY_MAX_BODY_BYTES:
+            raise HTTPException(status_code=413, detail="요청 본문이 너무 큽니다.")
+    try:
+        body = json.loads(bytes(payload))
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail="요청 본문이 JSON이 아닙니다.") from error
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="요청 본문은 JSON 객체여야 합니다.")
+    return body
+
+
+def _clamp_tokens(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return PROXY_MAX_OUTPUT_TOKENS
+    return min(value, PROXY_MAX_OUTPUT_TOKENS)
 
 
 def _enforce_rate_limit(request: Request) -> None:
@@ -918,9 +907,15 @@ def _enforce_rate_limit(request: Request) -> None:
 
 
 @app.post("/proxy/openai")
-def proxy_openai(body: Dict[str, Any], request: Request) -> Response:
+async def proxy_openai(request: Request) -> Response:
     if not SHARED_OPENAI_API_KEY:
         raise HTTPException(status_code=404, detail="공유 키가 설정되지 않았습니다.")
+    body = await _read_proxy_body(request)
+    if body.get("model") not in SHARED_OPENAI_MODELS:
+        raise HTTPException(status_code=400, detail="공유 키로 쓸 수 없는 모델입니다.")
+    # 스트리밍은 그대로 전달하지 않는다 — 클라이언트는 공유 경로에서 한 번에 받는다.
+    body.pop("stream", None)
+    body["max_output_tokens"] = _clamp_tokens(body.get("max_output_tokens"))
     _enforce_rate_limit(request)
     try:
         upstream = httpx.post(
@@ -937,11 +932,19 @@ def proxy_openai(body: Dict[str, Any], request: Request) -> Response:
 
 
 @app.post("/proxy/gemini/{model}")
-def proxy_gemini(model: str, body: Dict[str, Any], request: Request) -> Response:
+async def proxy_gemini(model: str, request: Request) -> Response:
     if not SHARED_GEMINI_API_KEY:
         raise HTTPException(status_code=404, detail="공유 키가 설정되지 않았습니다.")
     if not _MODEL_NAME_RE.match(model):
         raise HTTPException(status_code=400, detail="잘못된 모델 이름입니다.")
+    if model not in SHARED_GEMINI_MODELS:
+        raise HTTPException(status_code=400, detail="공유 키로 쓸 수 없는 모델입니다.")
+    body = await _read_proxy_body(request)
+    generation = body.get("generationConfig")
+    if not isinstance(generation, dict):
+        generation = {}
+        body["generationConfig"] = generation
+    generation["maxOutputTokens"] = _clamp_tokens(generation.get("maxOutputTokens"))
     _enforce_rate_limit(request)
     try:
         upstream = httpx.post(

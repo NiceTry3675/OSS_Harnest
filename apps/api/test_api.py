@@ -71,68 +71,6 @@ def run() -> None:
     assert r.status_code == 200, r.text
     assert r.json() == {"status": "ok"}
 
-    # user_version=0 레거시 DB를 마이그레이션해도 기존 API 데이터는 그대로 읽힌다.
-    r = client.get(f"/projects/{_legacy_id}")
-    assert r.status_code == 200, r.text
-    assert r.json()["interview"] == _legacy_interview
-    assert r.json()["pack"] == _legacy_pack
-    assert r.json()["loopSpec"] == _legacy_loop_spec
-
-    # projects 왕복
-    payload = {
-        "interview": {
-            "schemaVersion": "skeleton-1",
-            "templateId": "timetable",
-            "answers": {"staff": "가온, 나래, 다솜", "period": 14, "maxConsecutive": 3},
-        },
-        "pack": {
-            "packVersion": "skeleton-1",
-            "templateId": "timetable",
-            "criteria": [],
-            "gates": [],
-            "judgeProcedure": {"kind": "deterministic_only"},
-            "holdoutPolicy": {"mode": "none", "note": ""},
-            "definitionDigest": "0" * 64,
-        },
-        "loopSpec": {
-            "maxRounds": 40,
-            "plateauRounds": 12,
-            "adoptionRule": "scalar_strict",
-            "seed": 1,
-        },
-    }
-    r = client.post("/projects", json=payload)
-    assert r.status_code == 200, r.text
-    project_id = r.json()["id"]
-    assert project_id
-
-    r = client.get(f"/projects/{project_id}")
-    assert r.status_code == 200, r.text
-    stored = r.json()
-    assert stored["id"] == project_id
-    assert stored["interview"] == payload["interview"]
-    assert stored["pack"] == payload["pack"]
-    assert stored["loopSpec"] == payload["loopSpec"]
-    assert stored["createdAt"]
-
-    # results 업로드
-    checkpoint = {
-        "runId": "run-1",
-        "packDigest": "0" * 64,
-        "status": "done",
-        "round": 3,
-        "champion": [[0, 1], [1, 2]],
-        "championScore": 87.5,
-        "championViolations": [],
-        "curve": [40.0, 60.0, 87.5],
-        "tree": [],
-        "provenance": [],
-        "rngState": 12345,
-    }
-    r = client.post(f"/projects/{project_id}/results", json={"checkpoint": checkpoint})
-    assert r.status_code == 200, r.text
-    assert r.json() == {"ok": True}
-
     # 버전형 봉투는 완전한 v2 골격을 가지며, 원문 UTF-8 바이트를 그대로 저장하고 돌려준다.
     pack_scope = {
         "packVersion": "skeleton-1",
@@ -267,11 +205,11 @@ def run() -> None:
 
         legacy_project_before = conn.execute(
             "SELECT interview, pack, loop_spec, created_at FROM projects WHERE id = ?",
-            (project_id,),
+            (_legacy_id,),
         ).fetchone()
         legacy_results_before = conn.execute(
             "SELECT checkpoint, created_at FROM results WHERE project_id = ? ORDER BY seq",
-            (project_id,),
+            (_legacy_id,),
         ).fetchall()
 
     # 마이그레이션 재실행은 멱등이고 레거시 행을 바꾸지 않는다.
@@ -279,11 +217,11 @@ def run() -> None:
     with sqlite3.connect(_tmp.name) as conn:
         assert conn.execute(
             "SELECT interview, pack, loop_spec, created_at FROM projects WHERE id = ?",
-            (project_id,),
+            (_legacy_id,),
         ).fetchone() == legacy_project_before
         assert conn.execute(
             "SELECT checkpoint, created_at FROM results WHERE project_id = ? ORDER BY seq",
-            (project_id,),
+            (_legacy_id,),
         ).fetchall() == legacy_results_before
 
     # case_answering 봉투도 승인 증거와 단계별 홀드아웃의 정식 구조로 왕복한다.
@@ -568,10 +506,8 @@ def run() -> None:
             == export_count_before
         )
 
-    # 404 검증
+    # 404 검증 — 구 /projects 경로는 제거됐고, 레거시 행은 DB에만 남는다
     r = client.get("/projects/no-such-id")
-    assert r.status_code == 404, r.text
-    r = client.post("/projects/no-such-id/results", json={"checkpoint": checkpoint})
     assert r.status_code == 404, r.text
     r = client.get("/exports/no-such-id")
     assert r.status_code == 404, r.text
@@ -588,6 +524,7 @@ def run() -> None:
     assert r.status_code == 404, r.text
 
     run_ratelimit_and_model_validation()
+    run_proxy_guards(client)
 
     print("모든 테스트 통과")
 
@@ -602,11 +539,94 @@ def run_ratelimit_and_model_validation() -> None:
     assert limiter.check("1.2.3.4", 3) is False, "한도를 넘으면 False여야 한다"
     assert limiter.check("5.6.7.8", 3) is True, "다른 키는 별도 카운터를 써야 한다"
 
-    from main import _MODEL_NAME_RE
+    from main import _MODEL_NAME_RE, _client_ip
 
     assert _MODEL_NAME_RE.match("gemini-3.8-flash")
     assert not _MODEL_NAME_RE.match("../etc/passwd")
     assert not _MODEL_NAME_RE.match("model?x=1")
+
+    # 방문자가 꾸민 X-Forwarded-For 첫 값이 아니라 프록시가 붙인 값(Fly-Client-IP 또는 마지막 항목)을 쓴다
+    from types import SimpleNamespace
+
+    def fake_request(headers: dict, host: str = "10.0.0.1"):
+        return SimpleNamespace(headers=headers, client=SimpleNamespace(host=host))
+
+    assert _client_ip(fake_request({"fly-client-ip": "203.0.113.9", "x-forwarded-for": "1.1.1.1"})) == "203.0.113.9"
+    assert _client_ip(fake_request({"x-forwarded-for": "1.1.1.1, 203.0.113.9"})) == "203.0.113.9"
+    assert _client_ip(fake_request({})) == "10.0.0.1"
+
+
+def run_proxy_guards(client: TestClient) -> None:
+    """공유 키 프록시의 비용 방어 — 벤더 호출은 가짜로 바꿔 네트워크 없이 확인한다."""
+    import main
+
+    sent = []
+
+    class FakeUpstream:
+        status_code = 200
+        content = b'{"ok": true}'
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        sent.append((url, json))
+        return FakeUpstream()
+
+    original_key, original_post = main.SHARED_OPENAI_API_KEY, main.httpx.post
+    original_gemini_key = main.SHARED_GEMINI_API_KEY
+    main.SHARED_OPENAI_API_KEY = "test-shared-key"
+    main.SHARED_GEMINI_API_KEY = "test-shared-gemini"
+    main.httpx.post = fake_post
+    try:
+        ok_headers = {"Origin": "http://localhost:5173", "Content-Type": "application/json"}
+
+        # 허용하지 않는 Origin은 키가 있어도 거부
+        r = client.post(
+            "/proxy/openai",
+            content=json.dumps({"model": "gpt-5.6-sol", "input": "hi"}),
+            headers={"Origin": "https://evil.example", "Content-Type": "application/json"},
+        )
+        assert r.status_code == 403, r.text
+
+        # 허용 목록 밖 모델은 거부 — 방문자가 비싼 모델을 고르지 못한다
+        r = client.post(
+            "/proxy/openai", content=json.dumps({"model": "gpt-99-max", "input": "hi"}), headers=ok_headers
+        )
+        assert r.status_code == 400, r.text
+
+        # 허용 모델은 전달하되 stream을 떼고 출력 토큰을 상한으로 자른다
+        r = client.post(
+            "/proxy/openai",
+            content=json.dumps({"model": "gpt-5.6-sol", "input": "hi", "stream": True, "max_output_tokens": 10_000_000}),
+            headers=ok_headers,
+        )
+        assert r.status_code == 200, r.text
+        url, forwarded = sent[-1]
+        assert url == "https://api.openai.com/v1/responses"
+        assert "stream" not in forwarded
+        assert forwarded["max_output_tokens"] == main.PROXY_MAX_OUTPUT_TOKENS
+
+        # 본문 크기 상한
+        r = client.post(
+            "/proxy/openai",
+            content=b'{"model": "gpt-5.6-sol", "input": "' + b"x" * (main.PROXY_MAX_BODY_BYTES + 1) + b'"}',
+            headers=ok_headers,
+        )
+        assert r.status_code == 413, r.text
+
+        # Gemini: 경로의 모델도 허용 목록을 따르고 maxOutputTokens를 자른다
+        r = client.post("/proxy/gemini/gemini-99-ultra", content=json.dumps({"contents": []}), headers=ok_headers)
+        assert r.status_code == 400, r.text
+        r = client.post(
+            "/proxy/gemini/gemini-3.8-flash",
+            content=json.dumps({"contents": [], "generationConfig": {"maxOutputTokens": 10_000_000}}),
+            headers=ok_headers,
+        )
+        assert r.status_code == 200, r.text
+        _, forwarded = sent[-1]
+        assert forwarded["generationConfig"]["maxOutputTokens"] == main.PROXY_MAX_OUTPUT_TOKENS
+    finally:
+        main.SHARED_OPENAI_API_KEY = original_key
+        main.SHARED_GEMINI_API_KEY = original_gemini_key
+        main.httpx.post = original_post
 
 
 if __name__ == "__main__":

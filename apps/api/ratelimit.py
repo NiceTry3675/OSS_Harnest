@@ -21,9 +21,17 @@ class InMemoryRateLimiter:
 
     def check(self, key: str, limit: int) -> bool:
         """이번 시간대 한도 안이면 True, 넘었으면 False."""
-        bucket = f"{key}#{int(time.time() // 3600)}"
+        hour = int(time.time() // 3600)
+        self._evict_before(hour)
+        bucket = f"{key}#{hour}"
         self._counts[bucket] = self._counts.get(bucket, 0) + 1
         return self._counts[bucket] <= limit
+
+    def _evict_before(self, hour: int) -> None:
+        # 지난 시간대 버킷은 다시 읽히지 않는다 — 두지 않으면 방문자 수만큼 무한히 쌓인다.
+        stale = [bucket for bucket in self._counts if int(bucket.rsplit("#", 1)[1]) < hour]
+        for bucket in stale:
+            del self._counts[bucket]
 
 
 def build_rate_limiter() -> InMemoryRateLimiter:

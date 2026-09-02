@@ -311,7 +311,8 @@ export function WizardPage() {
       entry?.needsModel
         ? { provider: judgeChoice, model: judgeModel.trim() || JUDGE_MODEL[judgeChoice] }
         : { provider: "mock" as const, model: "-" },
-    [entry, judgeChoice],
+    // judgeModel을 빠뜨리면 고른 모델 대신 공급자 기본 모델이 승인 팩에 동결된다
+    [entry, judgeChoice, judgeModel],
   );
 
   if (!entry) {

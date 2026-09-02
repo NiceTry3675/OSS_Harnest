@@ -356,7 +356,75 @@ interface StreamPlan {
   delta(payload: unknown): string | null;
   /** 같은 조각에서 추론 요약을 뽑는다. 이 벤더가 내주지 않으면 생략한다. */
   thought?(payload: unknown): string | null;
+  /** 조각이 실패·절단을 알리면 그 사유를 돌려준다. 잘린 산출물이 완성본으로 채점되지 않게
+   *  스트림을 오류로 끝내는 근거다. 정상 조각이면 null. */
+  failure?(payload: unknown): string | null;
 }
+
+const googleFailure = (payload: unknown): string | null => {
+  const message = field(field(payload, "error"), "message");
+  if (typeof message === "string") return `응답 실패: ${message}`;
+  const candidates = field(payload, "candidates");
+  const first = Array.isArray(candidates) ? candidates[0] : undefined;
+  const reason = field(first, "finishReason");
+  if (typeof reason === "string" && reason !== "STOP") {
+    return reason === "MAX_TOKENS"
+      ? "출력 토큰 한도에 도달해 산출물이 잘렸습니다"
+      : `응답이 정상 종료되지 않았습니다 (${reason})`;
+  }
+  return null;
+};
+
+const openAIStreamFailure = (payload: unknown): string | null => {
+  const kind = field(payload, "type");
+  if (kind === "error") {
+    const message = field(payload, "message");
+    return `응답 실패: ${typeof message === "string" ? message : "알 수 없는 오류"}`;
+  }
+  if (kind === "response.failed") {
+    const message = field(field(field(payload, "response"), "error"), "message");
+    return `응답 실패: ${typeof message === "string" ? message : "알 수 없는 오류"}`;
+  }
+  if (kind === "response.incomplete") {
+    const reason = field(field(field(payload, "response"), "incomplete_details"), "reason");
+    return reason === "max_output_tokens"
+      ? "출력 토큰 한도에 도달해 산출물이 잘렸습니다"
+      : `응답이 완료되지 않았습니다${typeof reason === "string" ? ` (${reason})` : ""}`;
+  }
+  return null;
+};
+
+const anthropicStreamFailure = (payload: unknown): string | null => {
+  const kind = field(payload, "type");
+  if (kind === "error") {
+    const message = field(field(payload, "error"), "message");
+    return `응답 실패: ${typeof message === "string" ? message : "알 수 없는 오류"}`;
+  }
+  if (kind === "message_delta") {
+    const stop = field(field(payload, "delta"), "stop_reason");
+    if (stop === "max_tokens") return "출력 토큰 한도에 도달해 산출물이 잘렸습니다";
+    if (stop === "refusal") return "모델이 요청을 거부했습니다 (refusal)";
+  }
+  return null;
+};
+
+const chatCompletionsFailure = (payload: unknown): string | null => {
+  const message = field(field(payload, "error"), "message");
+  if (typeof message === "string") return `응답 실패: ${message}`;
+  const choices = field(payload, "choices");
+  const first = Array.isArray(choices) ? choices[0] : undefined;
+  if (field(first, "finish_reason") === "length") return "출력 토큰 한도에 도달해 산출물이 잘렸습니다";
+  return null;
+};
+
+const ollamaFailure = (payload: unknown): string | null => {
+  const error = field(payload, "error");
+  if (typeof error === "string") return `응답 실패: ${error}`;
+  if (field(payload, "done") === true && field(payload, "done_reason") === "length") {
+    return "출력 토큰 한도에 도달해 산출물이 잘렸습니다";
+  }
+  return null;
+};
 
 function field(value: unknown, key: string): unknown {
   return typeof value === "object" && value !== null
@@ -413,6 +481,8 @@ function withStream(
     prompt: string,
     opts: LlmCallOptions | undefined,
     relaxed: boolean,
+    /** 계획 단계의 부수 요청(토큰 발급 등)도 같은 시간 한도에 묶는다 */
+    signal: AbortSignal,
   ) => StreamPlan | Promise<StreamPlan>,
 ): StreamingLlmClient {
   return {
@@ -429,7 +499,7 @@ function withStream(
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
       const attempt = async (relaxed: boolean): Promise<void> => {
-        const plan = await planFor(prompt, opts, relaxed);
+        const plan = await planFor(prompt, opts, relaxed, controller.signal);
         const res = await fetch(plan.url, {
           method: "POST",
           headers: { Accept: "text/event-stream", ...plan.headers },
@@ -459,6 +529,10 @@ function withStream(
           } catch {
             return;
           }
+          // 벤더가 실패·절단을 알린 조각은 정상 종료로 삼키지 않는다 — 잘린 산출물이
+          // 완성본으로 채점되면 평가 도구로서 가장 나쁜 실패다.
+          const failure = plan.failure?.(payload) ?? null;
+          if (failure !== null) throw new Error(`${label} ${failure}`);
           if (firstPieceAt === 0) firstPieceAt = Date.now();
           const thinking = plan.thought?.(payload) ?? null;
           if (thinking !== null && thinking !== "") {
@@ -667,6 +741,7 @@ export function createGeminiClient(
     mode: "sse",
     delta: googleDelta,
     thought: googleThought,
+    failure: googleFailure,
   }));
 }
 
@@ -861,10 +936,11 @@ export function createVertexClient(
     },
   };
 
-  return withStream(base, "Vertex AI", timeoutMs, async (prompt, opts) => {
+  return withStream(base, "Vertex AI", timeoutMs, async (prompt, opts, _relaxed, signal) => {
     const project = encodeURIComponent(credential.project_id);
     const modelId = encodeURIComponent(model);
-    const token = await issueAccessToken(new AbortController().signal);
+    // 토큰 발급이 멈추면 스트림 전체가 영원히 기다린다 — 바깥 시간 한도에 같이 묶는다
+    const token = await issueAccessToken(signal);
     return {
       url: `https://aiplatform.googleapis.com/v1/projects/${project}/locations/${VERTEX_LOCATION}/publishers/google/models/${modelId}:streamGenerateContent?alt=sse`,
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -875,6 +951,7 @@ export function createVertexClient(
       mode: "sse" as const,
       delta: googleDelta,
       thought: googleThought,
+      failure: googleFailure,
     };
   });
 }
@@ -1000,6 +1077,7 @@ export function createOpenAIClient(
         ? String(field(payload, "delta"))
         : null;
     },
+    failure: openAIStreamFailure,
   }));
 }
 
@@ -1106,6 +1184,7 @@ const ANTHROPIC_DELTAS = {
     typeof field(field(payload, "delta"), "thinking") === "string"
       ? String(field(field(payload, "delta"), "thinking"))
       : null,
+  failure: anthropicStreamFailure,
 };
 
 /** Claude Messages API 브라우저 직행 어댑터. 키는 Anthropic 이외의 호스트로 전송하지 않는다. */
@@ -1184,6 +1263,7 @@ export function createOpenRouterClient(
         const piece = field(field(first, "delta"), "reasoning");
         return typeof piece === "string" && piece !== "" ? piece : null;
       },
+      failure: chatCompletionsFailure,
     }),
   );
 }
@@ -1229,6 +1309,7 @@ export function createOllamaClient(
         const piece = field(field(payload, "message"), "thinking");
         return typeof piece === "string" && piece !== "" ? piece : null;
       },
+      failure: ollamaFailure,
     }),
   );
 }
