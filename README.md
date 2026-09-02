@@ -69,9 +69,11 @@ python3 -m uvicorn main:app --port 8000
 | 모의 모델 | 키 없이 전체 흐름 실행 · 결정적 회귀 테스트 |
 | OpenAI | `gpt-5.6-sol` 등 — Responses API, 스트리밍 |
 | Gemini · Vertex AI | `gemini-3.8-flash` — Vertex는 서비스 계정 JSON, 리전 `global` 고정 |
-| Claude (Anthropic) | API 키로 브라우저 직접 호출 |
+| Claude (Anthropic) | `claude-opus-5` 등 — API 키로 브라우저 직접 호출 |
 | OpenRouter | 한 키로 여러 회사 모델, 쓸 수 있는 모델 목록 불러오기 |
 | Ollama | 내 컴퓨터의 로컬 주소, 키 없음 |
+
+지원 범위는 현행 세대 모델(GPT-5 이후, Claude 4.6 이후, Gemini 3 이후)입니다. 모든 호출에 추론을 켜고, 결과물을 새로 쓰는 호출은 깊게, 채점 호출은 중간 깊이로 부릅니다. 이전 세대 모델의 요청 형식(고정 사고 예산, temperature)은 지원하지 않습니다.
 
 Vertex 경로에서는 private key로 브라우저 안에서 JWT를 서명하고, 서명된 assertion만 Google OAuth에 보내 단기 access token을 받습니다. CORS 정상·401 경로와 스모크 테스트 관측값은 [OpenAI BYO 실측 결과](experiments/byo-cors-openai/RESULT.md)에 있습니다.
 
@@ -87,7 +89,7 @@ Vertex 경로에서는 private key로 브라우저 안에서 JWT를 서명하고
 | 문서 파싱 | `pdfjs-dist` · `mammoth` (브라우저에서 PDF·DOCX 추출) |
 | 모델 연동 | 벤더 6종 SSE·NDJSON 스트리밍 직접 파싱 (SDK 미사용) |
 | 백엔드(선택) | FastAPI · Uvicorn · SQLite |
-| 테스트 | Vitest — 281개 (`fake-indexeddb`로 체크포인트 포함) |
+| 테스트 | Vitest — 285개 (`fake-indexeddb`로 체크포인트 포함) |
 | 배포 | GitHub Pages(웹) · Fly.io(API) — `main` push 시 자동 |
 
 npm workspaces 모노레포이며, 외부 상태 관리 라이브러리나 UI 프레임워크를 쓰지 않습니다.

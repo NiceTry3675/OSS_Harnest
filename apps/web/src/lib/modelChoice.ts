@@ -14,7 +14,7 @@ import type { AvailableModel } from "./llm";
 const CURRENT_FAMILY: RegExp[] = [
   /^gpt-[5-9]/, // OpenAI
   /^o[3-9](-|$)/, // OpenAI 추론 계열
-  /^claude-(opus|sonnet|haiku)-([4-9]-\d|[5-9])/, // Anthropic
+  /^claude-(opus|sonnet)-(4-[6-9]|[5-9])/, // Anthropic — adaptive thinking·effort를 받는 4.6 이후만
   /^gemini-[3-9][.-]/, // Google
   /^llama-?[3-9]/, // Meta · Ollama
   /^qwen[3-9]?/, // Alibaba

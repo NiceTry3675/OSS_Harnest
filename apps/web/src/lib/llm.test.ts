@@ -508,10 +508,13 @@ describe("Vertex 서비스 계정 어댑터", () => {
       Authorization: "Bearer vertex-token",
       "Content-Type": "application/json",
     });
-    expect(JSON.parse(String(vertexInit?.body))).toMatchObject({
+    const vertexBody = JSON.parse(String(vertexInit?.body));
+    expect(vertexBody).toMatchObject({
       contents: [{ role: "user", parts: [{ text: "요청 본문" }] }],
-      generationConfig: { temperature: 0, maxOutputTokens: 64 },
+      // 추론 토큰이 출력 한도를 나눠 쓰므로 64는 바닥(4096)으로 올라간다
+      generationConfig: { maxOutputTokens: 4096, thinkingConfig: { thinkingLevel: "MEDIUM" } },
     });
+    expect(vertexBody.generationConfig.temperature).toBeUndefined();
   });
 
   it("여러 텍스트 part를 합치고 공개된 thinking part는 답변에서 제외한다", async () => {
@@ -718,9 +721,8 @@ describe("OpenAI Responses API 어댑터", () => {
     expect(JSON.parse(String(init?.body))).toEqual({
       model: "gpt-5.6-sol",
       input: "요청 본문",
-      reasoning: { effort: "none" },
-      temperature: 0,
-      max_output_tokens: 64,
+      reasoning: { effort: "medium" },
+      max_output_tokens: 4096,
       store: false,
     });
   });
@@ -799,12 +801,11 @@ describe("승인 전 BYO 1콜 연결 테스트", () => {
     const [, init] = fetchMock.mock.calls[0];
     expect(JSON.parse(String(init?.body))).toMatchObject({
       model: "gpt-test",
-      temperature: 0,
-      max_output_tokens: 16,
+      reasoning: { effort: "low" },
     });
   });
 
-  it("Gemini 3.7 Vertex 연결 테스트는 low thinking과 충분한 출력 한도를 쓴다", async () => {
+  it("Vertex 연결 테스트는 low 추론과 추론 여유가 있는 출력 한도를 쓴다", async () => {
     const raw = await vertexCredential();
     const fetchMock = vi
       .fn()
@@ -819,8 +820,7 @@ describe("승인 전 BYO 1콜 연결 테스트", () => {
     const [, vertexInit] = fetchMock.mock.calls[1];
     expect(JSON.parse(String(vertexInit?.body))).toMatchObject({
       generationConfig: {
-        temperature: 1,
-        maxOutputTokens: 1024,
+        maxOutputTokens: 4096,
         thinkingConfig: { thinkingLevel: "LOW" },
       },
     });
@@ -879,29 +879,119 @@ describe("승인 전 BYO 1콜 연결 테스트", () => {
   });
 });
 
-describe("추론과 temperature", () => {
-  // 추론을 켠 호출에는 temperature를 보낼 수 없다. 전 호출에 붙이면 채점의
-  // temperature 0까지 사라져 같은 산출물이 매번 다른 점수를 받는다.
-  it("채점 호출(temperature 0)은 temperature를 지키고 추론을 붙이지 않는다", async () => {
-    const sent: Array<Record<string, unknown>> = [];
-    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
-      sent.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
-      return new Response(
-        'data: {"type":"response.output_text.delta","delta":"{\\"score\\":1}"}\n\ndata: [DONE]\n\n',
-        { status: 200, headers: { "Content-Type": "text/event-stream" } },
-      );
-    });
+describe("추론 정책 — 모든 호출에 추론, 깊이는 effort", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const sseOnce = (line: string) =>
+    vi.fn(async () =>
+      new Response(`data: ${line}\n\ndata: [DONE]\n\n`, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    );
+  const bodiesOf = (fetchMock: ReturnType<typeof vi.fn>) =>
+    fetchMock.mock.calls.map(([, init]) => JSON.parse(String((init as RequestInit).body)));
+
+  it("OpenAI: 채점(medium)과 생성(high) 모두 추론을 붙이고 temperature는 보내지 않는다", async () => {
+    const fetchMock = sseOnce('{"type":"response.output_text.delta","delta":"x"}');
     vi.stubGlobal("fetch", fetchMock);
 
     const llm = createOpenAIClient("sk-test", "gpt-5.6-sol") as StreamingLlmClient;
-    await llm.completeStream("채점", { temperature: 0 }, () => {});
-    await llm.completeStream("생성", { temperature: 0.7 }, () => {});
+    await llm.completeStream("채점", { temperature: 0, effort: "medium" }, () => {});
+    await llm.completeStream("생성", { temperature: 0.7, effort: "high" }, () => {});
 
-    expect(sent[0].temperature).toBe(0);
-    expect(sent[0].reasoning).toEqual({ effort: "none" });
-    expect(sent[1].temperature).toBeUndefined();
-    expect(sent[1].reasoning).toEqual({ effort: "low", summary: "detailed" });
+    const [grade, gen] = bodiesOf(fetchMock);
+    expect(grade.temperature).toBeUndefined();
+    expect(grade.reasoning).toEqual({ effort: "medium", summary: "detailed" });
+    expect(gen.temperature).toBeUndefined();
+    expect(gen.reasoning).toEqual({ effort: "high", summary: "detailed" });
+  });
 
-    vi.unstubAllGlobals();
+  it("Claude: adaptive thinking + output_config.effort, budget_tokens·temperature 없음", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ content: [{ type: "text", text: "ok" }] }))
+      .mockResolvedValueOnce(
+        new Response(
+          'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}\n\n',
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const llm = createAnthropicClient("sk-ant-test", "claude-opus-5") as StreamingLlmClient;
+    await llm.complete("채점", { temperature: 0, effort: "medium", maxOutputTokens: 512 });
+    await llm.completeStream("생성", { temperature: 0.7, effort: "high" }, () => {});
+
+    const [json, stream] = bodiesOf(fetchMock);
+    expect(json).toEqual({
+      model: "claude-opus-5",
+      messages: [{ role: "user", content: "채점" }],
+      max_tokens: 4096,
+      thinking: { type: "adaptive" },
+      output_config: { effort: "medium" },
+    });
+    expect(stream).toMatchObject({
+      thinking: { type: "adaptive", display: "summarized" },
+      output_config: { effort: "high" },
+      stream: true,
+    });
+    expect(stream.temperature).toBeUndefined();
+    expect(stream.budget_tokens).toBeUndefined();
+  });
+
+  it("Gemini: thinkingLevel로 깊이를 정하고 스트리밍에서만 요약을 요청한다", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(successResponse("ok"))
+      .mockResolvedValueOnce(
+        new Response(
+          'data: {"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}\n\n',
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const llm = createGeminiClient("AIzaTest", "gemini-3.8-flash") as StreamingLlmClient;
+    await llm.complete("채점", { temperature: 0, effort: "medium" });
+    await llm.completeStream("생성", { temperature: 0.7, effort: "high" }, () => {});
+
+    const [json, stream] = bodiesOf(fetchMock);
+    expect(json.generationConfig).toEqual({
+      maxOutputTokens: 8192,
+      thinkingConfig: { thinkingLevel: "MEDIUM" },
+    });
+    expect(stream.generationConfig).toEqual({
+      maxOutputTokens: 8192,
+      thinkingConfig: { thinkingLevel: "HIGH", includeThoughts: true },
+    });
+  });
+
+  it("OpenRouter: reasoning.effort를 붙이고 temperature는 보내지 않는다", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ choices: [{ message: { content: "ok" } }] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createOpenRouterClient("sk-or-v1-test", "openai/gpt-5.6-sol").complete("채점", {
+      temperature: 0,
+      effort: "low",
+    });
+    const [body] = bodiesOf(fetchMock);
+    expect(body).toEqual({
+      model: "openai/gpt-5.6-sol",
+      messages: [{ role: "user", content: "채점" }],
+      max_tokens: 8192,
+      reasoning: { effort: "low" },
+    });
+  });
+
+  it("effort를 생략하면 medium이다", async () => {
+    const fetchMock = vi.fn(async () => openAISuccessResponse("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    await createOpenAIClient("sk-test", "gpt-5.6-sol").complete("요청");
+    expect(bodiesOf(fetchMock)[0].reasoning).toEqual({ effort: "medium" });
   });
 });

@@ -34,10 +34,29 @@ import {
 } from "./prompts";
 
 /** LLM 클라이언트 계약 — 웹이 BYO 벤더 또는 모의 모델을 구현해 주입한다 */
+/** 호출에 붙일 추론 깊이. 벤더별 표기(effort·thinkingLevel 등)로의 변환은 클라이언트가 맡는다. */
+export type ReasoningEffort = "low" | "medium" | "high";
+
+export interface LlmCallOptions {
+  /** 추론 벤더(OpenAI·Claude·Gemini)는 무시한다 — 현행 세대는 temperature를 거부하거나 낮추면 품질이 떨어진다.
+   *  Ollama와 모의 모델만 쓴다. */
+  temperature?: number;
+  maxOutputTokens?: number;
+  /** 생략하면 클라이언트 기본값(medium)이다. */
+  effort?: ReasoningEffort;
+}
+
+/** 추론 정책 — 판정 절차의 동결은 절차의 동결이지 출력의 결정성 약속이 아니다. 채점 잡음은
+ *  시험관의 안정성 검사가 재고, 채택 규칙이 감당한다. 그래서 채점에서도 추론을 끄지 않고,
+ *  깊이만 목적에 따라 나눈다: 새로 쓰는 호출은 high, 채점·응답은 medium, 형식 재시도는 low. */
+export const GENERATION_EFFORT: ReasoningEffort = "high";
+export const GRADING_EFFORT: ReasoningEffort = "medium";
+export const RETRY_EFFORT: ReasoningEffort = "low";
+
 export interface LlmClient {
   readonly providerId: JudgeProvider;
   readonly model: string;
-  complete(prompt: string, opts?: { temperature?: number; maxOutputTokens?: number }): Promise<string>;
+  complete(prompt: string, opts?: LlmCallOptions): Promise<string>;
 }
 
 export interface CaseGrade {
@@ -157,7 +176,10 @@ export async function gradeResponse(
   expected: string,
   response: string,
 ): Promise<{ score: number; why: string }> {
-  const first = await llm.complete(graderPrompt(question, expected, response), { temperature: 0 });
+  const first = await llm.complete(graderPrompt(question, expected, response), {
+    temperature: 0,
+    effort: GRADING_EFFORT,
+  });
   try {
     return parseGrade(first);
   } catch (error) {
@@ -166,7 +188,7 @@ export async function gradeResponse(
 
   const retried = await llm.complete(
     graderRetryPrompt(question, expected, response, first),
-    { temperature: 0 },
+    { temperature: 0, effort: GRADING_EFFORT },
   );
   try {
     return parseGrade(retried);
@@ -243,13 +265,17 @@ async function completeBatch<T>(
   parseItem: (value: Record<string, unknown>) => T,
 ): Promise<Map<string, T>> {
   const maxOutputTokens = batchOutputTokensFor(ids.length);
-  const first = await llm.complete(prompt, { temperature: 0, maxOutputTokens });
+  const first = await llm.complete(prompt, { temperature: 0, maxOutputTokens, effort: GRADING_EFFORT });
   try {
     return parseBatch(first, label, ids, parseItem);
   } catch (error) {
     if (!(error instanceof GradeFormatError)) throw error;
   }
-  const retried = await llm.complete(retryPrompt(first), { temperature: 0, maxOutputTokens });
+  const retried = await llm.complete(retryPrompt(first), {
+    temperature: 0,
+    maxOutputTokens,
+    effort: GRADING_EFFORT,
+  });
   try {
     return parseBatch(retried, label, ids, parseItem);
   } catch (error) {
@@ -428,6 +454,7 @@ export function createInitial(problem: HandoverProblem, llm: LlmClient) {
     (
       await llm.complete(oneshotPrompt(problem), {
         temperature: 0.7,
+        effort: GENERATION_EFFORT,
         maxOutputTokens: maxOutputTokensFor(problem.lengthCap),
       })
     ).trim();
@@ -468,6 +495,7 @@ export function createStrategyPlanner(problem: HandoverProblem, llm: LlmClient) 
     const feedback: GeneratorFeedback = { ...incoming, blockedStrategyKeys: blocked };
     const first = await llm.complete(strategyPrompt(problem, champion, feedback), {
       temperature: 0.3,
+      effort: GENERATION_EFFORT,
       maxOutputTokens: 512,
     });
     try {
@@ -477,7 +505,7 @@ export function createStrategyPlanner(problem: HandoverProblem, llm: LlmClient) 
     }
     const retried = await llm.complete(
       strategyRetryPrompt(problem, champion, feedback, first),
-      { temperature: 0, maxOutputTokens: 512 },
+      { temperature: 0, maxOutputTokens: 512, effort: RETRY_EFFORT },
     );
     try {
       return parseStrategy(retried, blocked);
@@ -513,7 +541,11 @@ export function createGenerator(problem: HandoverProblem, llm: LlmClient) {
           strategy,
           feedback.recentPublicExperiments,
         ),
-        { temperature: 0.7, maxOutputTokens: maxOutputTokensFor(problem.lengthCap) },
+        {
+          temperature: 0.7,
+          maxOutputTokens: maxOutputTokensFor(problem.lengthCap),
+          effort: GENERATION_EFFORT,
+        },
       )
     ).trim();
 }

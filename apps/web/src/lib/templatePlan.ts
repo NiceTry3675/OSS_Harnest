@@ -255,7 +255,7 @@ export async function planTemplate(
     throw new TemplatePlanError("목표를 한 문장으로 적어 주세요.");
   }
   const prompt = planPrompt(trimmed, choices);
-  const first = await llm.complete(prompt, { temperature: 0.3, maxOutputTokens: 2048 });
+  const first = await llm.complete(prompt, { temperature: 0.3, maxOutputTokens: 2048, effort: "medium" });
   try {
     return parseTemplatePlan(first, choices);
   } catch (error) {
@@ -263,7 +263,7 @@ export async function planTemplate(
   }
   const retried = await llm.complete(
     [prompt, "", "이전 출력은 사용할 수 없었습니다:", first, "", "위 형식의 JSON 객체만 다시 출력하세요."].join(NL),
-    { temperature: 0, maxOutputTokens: 2048 },
+    { temperature: 0, maxOutputTokens: 2048, effort: "low" },
   );
   return parseTemplatePlan(retried, choices);
 }

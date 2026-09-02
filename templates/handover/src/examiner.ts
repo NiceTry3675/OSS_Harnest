@@ -30,6 +30,7 @@ import {
   createScorer,
   gradeResponse,
   maxOutputTokensFor,
+  GENERATION_EFFORT,
   type LlmClient,
 } from "./runtime";
 
@@ -67,6 +68,7 @@ export async function runExaminerBattery(
   let sampleDoc = (
     await llm.complete(oneshotPrompt(problem), {
       temperature: 0.7,
+      effort: GENERATION_EFFORT,
       maxOutputTokens: maxOutputTokensFor(problem.lengthCap),
     })
   ).trim();

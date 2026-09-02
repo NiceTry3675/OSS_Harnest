@@ -35,14 +35,14 @@ describe("preferredModels", () => {
 
   it("벤더 접두사가 붙은 OpenRouter 이름도 알아본다", () => {
     const kept = preferredModels(
-      models("openai/gpt-5.6-sol", "anthropic/claude-sonnet-4-5", "openai/gpt-3.5-turbo"),
+      models("openai/gpt-5.6-sol", "anthropic/claude-sonnet-5", "openai/gpt-3.5-turbo"),
     ).map((m) => m.id);
-    expect(kept).toEqual(["openai/gpt-5.6-sol", "anthropic/claude-sonnet-4-5"]);
+    expect(kept).toEqual(["openai/gpt-5.6-sol", "anthropic/claude-sonnet-5"]);
   });
 
   it("여섯 벤더의 현행 갈래를 모두 남긴다", () => {
     const kept = preferredModels(
-      models("gpt-5.6-sol", "claude-sonnet-4-5", "gemini-3.8-flash", "llama3.1", "qwen3", "o4-mini"),
+      models("gpt-5.6-sol", "claude-opus-5", "gemini-3.8-flash", "llama3.1", "qwen3", "o4-mini"),
     ).map((m) => m.id);
     expect(kept).toHaveLength(6);
   });

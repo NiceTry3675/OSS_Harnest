@@ -7,7 +7,9 @@ import type { CaseDef, JudgeProvider } from "@harnest/contracts";
 import {
   DRAFT_CASES_MARKER,
   type HandoverProblem,
+  type LlmCallOptions,
   type LlmClient,
+  type ReasoningEffort,
 } from "@harnest/template-handover";
 
 /** 기존 UI가 이미 직접 렌더링하는 공급자. 새 자동 판별 UI가 합쳐질 때 제거할 호환 별칭이다. */
@@ -36,7 +38,7 @@ export const DEFAULT_JUDGE_MODEL: Record<JudgeProvider, string> = {
   gemini: "gemini-3.8-flash",
   vertex: "gemini-3.8-flash",
   openai: "gpt-5.6-sol",
-  anthropic: "claude-sonnet-4-5",
+  anthropic: "claude-opus-5",
   openrouter: "openai/gpt-5.6-sol",
   ollama: "llama3.1",
 };
@@ -60,8 +62,6 @@ export interface LlmRequestOptions {
   requestTimeoutMs?: number;
   maxAttempts?: number;
   retryBaseMs?: number;
-  /** Gemini 3 연결 확인처럼 추론량을 제한해야 하는 호출에서만 지정한다. */
-  thinkingLevel?: "LOW" | "MEDIUM" | "HIGH";
 }
 
 export type GeminiClientOptions = LlmRequestOptions;
@@ -263,24 +263,81 @@ export type StreamKind = "output" | "thought" | "notice";
 
 const LINE_BREAK = String.fromCharCode(10);
 
-/** 이 호출에 추론을 붙일지 — 새로 쓰는 호출에만 붙인다.
+/** 추론 정책 — 모든 호출에 추론을 붙이고, 깊이(effort)는 호출 쪽이 목적에 따라 고른다
+ *  (템플릿의 GENERATION_EFFORT·GRADING_EFFORT). 벤더별 표기 변환만 여기서 맡는다.
  *
- *  추론을 켠 호출에는 temperature를 함께 보낼 수 없다(벤더가 거부한다). 그래서 전
- *  호출에 붙이면 채점의 temperature 0까지 사라지고, 같은 산출물을 두 번 재도 점수가
- *  달라진다 — 곡선이 실행마다 달라지고 채택·기각이 운에 좌우된다.
- *
- *  새로 쓰는 호출(생성·변이)만 temperature를 올려 부르고 채점·검증은 0으로 부르므로,
- *  temperature가 0이 아닌 호출에만 추론을 붙이면 채점의 결정성이 지켜진다.
- *  덤으로 추론 토큰(출력 토큰으로 과금)이 실행 1회 40여 회 중 9회 안팎으로 줄어든다. */
-function wantsThinking(opts: { temperature?: number } | undefined): boolean {
-  return (opts?.temperature ?? 0.7) > 0;
+ *  현행 세대(GPT-5+, Claude 4.6+, Gemini 3+)만 지원한다. 이들은 추론이 기본이고,
+ *  temperature를 거부하거나(OpenAI·Claude는 400) 낮추면 품질이 떨어지므로(Gemini 3 권장값
+ *  1.0) 추론 벤더에는 temperature를 보내지 않는다. 판정 절차의 동결은 절차의 동결이지 출력의
+ *  결정성 약속이 아니다 — 채점 잡음은 시험관의 안정성 검사가 재고 채택 규칙이 감당한다. */
+const DEFAULT_EFFORT: ReasoningEffort = "medium";
+function effortOf(opts: LlmCallOptions | undefined): ReasoningEffort {
+  return opts?.effort ?? DEFAULT_EFFORT;
+}
+/** 추론 토큰은 출력 한도 안에서 소비된다. 짧은 답을 기대한 호출이 추론만 하다 잘리지 않게 바닥을 둔다. */
+const REASONING_HEADROOM_TOKENS = 4096;
+function outputCapOf(opts: LlmCallOptions | undefined): number {
+  return Math.max(opts?.maxOutputTokens ?? 8192, REASONING_HEADROOM_TOKENS);
+}
+
+/** json = 한 번에 받는 호출, stream = 추론 요약까지 흘리는 호출, stream-relaxed = 요약을 못 내주는 계정용 */
+type BodyMode = "json" | "stream" | "stream-relaxed";
+
+function openAIResponsesBody(
+  model: string,
+  prompt: string,
+  opts: LlmCallOptions | undefined,
+  mode: BodyMode,
+): Record<string, unknown> {
+  const effort = effortOf(opts);
+  return {
+    model,
+    input: prompt,
+    // summary는 이미 한 생각을 얼마나 풀어 쓸지만 정한다 — 추론 토큰은 늘지 않는다.
+    reasoning: mode === "stream" ? { effort, summary: "detailed" } : { effort },
+    max_output_tokens: outputCapOf(opts),
+    store: false,
+    ...(mode === "json" ? {} : { stream: true }),
+  };
+}
+
+function anthropicMessagesBody(
+  model: string,
+  prompt: string,
+  opts: LlmCallOptions | undefined,
+  mode: BodyMode,
+): Record<string, unknown> {
+  return {
+    model,
+    messages: [{ role: "user", content: prompt }],
+    max_tokens: outputCapOf(opts),
+    // 4.7 이후·5 세대는 display 기본값이 omitted라 명시해야 요약이 흐른다.
+    thinking: mode === "stream" ? { type: "adaptive", display: "summarized" } : { type: "adaptive" },
+    output_config: { effort: effortOf(opts) },
+    ...(mode === "json" ? {} : { stream: true }),
+  };
+}
+
+function openRouterChatBody(
+  model: string,
+  prompt: string,
+  opts: LlmCallOptions | undefined,
+  mode: BodyMode,
+): Record<string, unknown> {
+  return {
+    model,
+    messages: [{ role: "user", content: prompt }],
+    max_tokens: outputCapOf(opts),
+    reasoning: { effort: effortOf(opts) },
+    ...(mode === "json" ? {} : { stream: true }),
+  };
 }
 export type StreamSink = (chunk: string, kind: StreamKind) => void;
 
 export interface StreamingLlmClient extends LlmClient {
   completeStream(
     prompt: string,
-    opts: { temperature?: number; maxOutputTokens?: number } | undefined,
+    opts: LlmCallOptions | undefined,
     onChunk: StreamSink,
   ): Promise<string>;
 }
@@ -354,7 +411,7 @@ function withStream(
   /** relaxed = 추론 요약 요청을 뺀 판. 계정·모델이 요약을 내주지 않을 때 쓴다. */
   planFor: (
     prompt: string,
-    opts: { temperature?: number; maxOutputTokens?: number } | undefined,
+    opts: LlmCallOptions | undefined,
     relaxed: boolean,
   ) => StreamPlan | Promise<StreamPlan>,
 ): StreamingLlmClient {
@@ -516,14 +573,15 @@ function geminiOutputText(data: GeminiResponse, label: string): string {
 }
 
 function geminiGenerationConfig(
-  temperature: number,
-  maxOutputTokens: number,
-  thinkingLevel?: LlmRequestOptions["thinkingLevel"],
+  opts: LlmCallOptions | undefined,
+  includeThoughts: boolean,
 ): Record<string, unknown> {
   return {
-    temperature,
-    maxOutputTokens,
-    ...(thinkingLevel ? { thinkingConfig: { thinkingLevel } } : {}),
+    maxOutputTokens: outputCapOf(opts),
+    thinkingConfig: {
+      thinkingLevel: effortOf(opts).toUpperCase(),
+      ...(includeThoughts ? { includeThoughts: true } : {}),
+    },
   };
 }
 
@@ -542,11 +600,7 @@ export function createGeminiClient(
     async complete(prompt, opts) {
       const body = JSON.stringify({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: geminiGenerationConfig(
-          opts?.temperature ?? 0.7,
-          opts?.maxOutputTokens ?? 8192,
-          options.thinkingLevel,
-        ),
+        generationConfig: geminiGenerationConfig(opts, false),
       });
       let lastError: Error = new Error("LLM 호출 실패");
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -608,17 +662,7 @@ export function createGeminiClient(
     headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
     body: {
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        ...geminiGenerationConfig(
-          opts?.temperature ?? 0.7,
-          opts?.maxOutputTokens ?? 8192,
-          options.thinkingLevel,
-        ),
-        thinkingConfig: {
-          ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
-          includeThoughts: true,
-        },
-      },
+      generationConfig: geminiGenerationConfig(opts, true),
     },
     mode: "sse",
     delta: googleDelta,
@@ -748,11 +792,7 @@ export function createVertexClient(
     async complete(prompt, opts) {
       const body = JSON.stringify({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: geminiGenerationConfig(
-          opts?.temperature ?? 0.7,
-          opts?.maxOutputTokens ?? 8192,
-          options.thinkingLevel,
-        ),
+        generationConfig: geminiGenerationConfig(opts, false),
       });
       const project = encodeURIComponent(credential.project_id);
       const modelId = encodeURIComponent(model);
@@ -830,17 +870,7 @@ export function createVertexClient(
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: {
         contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          ...geminiGenerationConfig(
-            opts?.temperature ?? 0.7,
-            opts?.maxOutputTokens ?? 8192,
-            options.thinkingLevel,
-          ),
-          thinkingConfig: {
-            ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
-            includeThoughts: true,
-          },
-        },
+        generationConfig: geminiGenerationConfig(opts, true),
       },
       mode: "sse" as const,
       delta: googleDelta,
@@ -882,14 +912,7 @@ export function createOpenAIClient(
     providerId: "openai",
     model,
     async complete(prompt, opts) {
-      const body = JSON.stringify({
-        model,
-        input: prompt,
-        reasoning: { effort: "none" },
-        temperature: opts?.temperature ?? 0.7,
-        max_output_tokens: opts?.maxOutputTokens ?? 8192,
-        store: false,
-      });
+      const body = JSON.stringify(openAIResponsesBody(model, prompt, opts, "json"));
       let lastError: Error = new Error("LLM 호출 실패");
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         const controller = new AbortController();
@@ -961,21 +984,8 @@ export function createOpenAIClient(
   return withStream(base, "OpenAI", timeoutMs, (prompt, opts, relaxed) => ({
     url: "https://api.openai.com/v1/responses",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: {
-      model,
-      input: prompt,
-      // 추론 요약을 받으려면 effort가 none이 아니어야 한다.
-      // 화면에 흐르는 "생각"은 여기서 나온다 — 지어낸 문구가 아니라 모델의 것이다.
-      //
-      // summary는 이미 한 생각을 얼마나 풀어 쓸지만 정한다. detailed로 올려도
-      // 추론 토큰은 늘지 않으므로, 화면에 흐르는 양만 늘리는 쪽을 택한다.
-      ...(wantsThinking(opts) && !relaxed
-        ? { reasoning: { effort: "low", summary: "detailed" } }
-        : { reasoning: { effort: "none" }, temperature: opts?.temperature ?? 0.7 }),
-      max_output_tokens: opts?.maxOutputTokens ?? 8192,
-      store: false,
-      stream: true,
-    },
+    // 화면에 흐르는 "생각"은 모델이 낸 추론 요약이다 — 지어낸 문구가 아니다.
+    body: openAIResponsesBody(model, prompt, opts, relaxed ? "stream-relaxed" : "stream"),
     mode: "sse",
     delta: (payload) =>
       field(payload, "type") === "response.output_text.delta" &&
@@ -1006,7 +1016,7 @@ function createDirectJsonClient(
   options: LlmRequestOptions,
   requestFor: (
     prompt: string,
-    completeOptions?: { temperature?: number; maxOutputTokens?: number },
+    completeOptions?: LlmCallOptions,
   ) => DirectJsonRequest,
   outputText: (data: unknown) => string | null,
   /** 같은 요청을 흘려받는 경로 — 없으면 스트리밍을 지원하지 않는 클라이언트가 된다 */
@@ -1117,12 +1127,7 @@ export function createAnthropicClient(
         "anthropic-version": "2023-06-01",
         "anthropic-dangerous-direct-browser-access": "true",
       },
-      body: {
-        model,
-        messages: [{ role: "user", content: prompt }],
-        temperature: completeOptions?.temperature ?? 0.7,
-        max_tokens: completeOptions?.maxOutputTokens ?? 8192,
-      },
+      body: anthropicMessagesBody(model, prompt, completeOptions, "json"),
     }),
     (data) => {
       const content = (data as { content?: Array<{ type?: string; text?: string }> }).content ?? [];
@@ -1132,26 +1137,14 @@ export function createAnthropicClient(
         .join("");
       return text || null;
     },
-    (request, relaxed) => {
-      const body = request.body as Record<string, unknown>;
-      const budget = 1024;
-      const asked = typeof body.max_tokens === "number" ? body.max_tokens : 8192;
-      const thinking =
-        !relaxed && wantsThinking({ temperature: body.temperature as number | undefined });
-      // 확장 사고를 켜면 temperature를 지정할 수 없고, max_tokens는 사고 예산보다 커야 한다
-      const { temperature: _dropped, ...rest } = body;
-      void _dropped;
-      if (!thinking) return { body: { ...body, stream: true }, ...ANTHROPIC_DELTAS };
-      return {
-        body: {
-          ...rest,
-          max_tokens: Math.max(asked, budget + 2048),
-          thinking: { type: "enabled", budget_tokens: budget },
-          stream: true,
-        },
-        ...ANTHROPIC_DELTAS,
-      };
-    },
+    (request, relaxed) => ({
+      body: {
+        ...(request.body as Record<string, unknown>),
+        thinking: relaxed ? { type: "adaptive" } : { type: "adaptive", display: "summarized" },
+        stream: true,
+      },
+      ...ANTHROPIC_DELTAS,
+    }),
   );
 }
 
@@ -1169,29 +1162,15 @@ export function createOpenRouterClient(
     (prompt, completeOptions) => ({
       url: "https://openrouter.ai/api/v1/chat/completions",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: {
-        model,
-        messages: [{ role: "user", content: prompt }],
-        temperature: completeOptions?.temperature ?? 0.7,
-        max_tokens: completeOptions?.maxOutputTokens ?? 8192,
-      },
+      body: openRouterChatBody(model, prompt, completeOptions, "json"),
     }),
     (data) => {
       const content = (data as { choices?: Array<{ message?: { content?: unknown } }> }).choices?.[0]
         ?.message?.content;
       return typeof content === "string" ? content : null;
     },
-    (request, relaxed) => ({
-      body: {
-        ...(request.body as Record<string, unknown>),
-        ...(!relaxed &&
-        wantsThinking({
-          temperature: (request.body as Record<string, unknown>).temperature as number | undefined,
-        })
-          ? { reasoning: { effort: "low" } }
-          : {}),
-        stream: true,
-      },
+    (request) => ({
+      body: { ...(request.body as Record<string, unknown>), stream: true },
       mode: "sse",
       delta: (payload) => {
         const choices = field(payload, "choices");
@@ -1314,14 +1293,7 @@ export function createSharedOpenAIClient(
     providerId: "openai",
     model,
     async complete(prompt, opts) {
-      const body = JSON.stringify({
-        model,
-        input: prompt,
-        reasoning: { effort: "none" },
-        temperature: opts?.temperature ?? 0.7,
-        max_output_tokens: opts?.maxOutputTokens ?? 8192,
-        store: false,
-      });
+      const body = JSON.stringify(openAIResponsesBody(model, prompt, opts, "json"));
       let lastError: Error = new Error("LLM 호출 실패");
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         const controller = new AbortController();
@@ -1403,11 +1375,7 @@ export function createSharedGeminiClient(
     async complete(prompt, opts) {
       const body = JSON.stringify({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: geminiGenerationConfig(
-          opts?.temperature ?? 0.7,
-          opts?.maxOutputTokens ?? 8192,
-          options.thinkingLevel,
-        ),
+        generationConfig: geminiGenerationConfig(opts, false),
       });
       let lastError: Error = new Error("LLM 호출 실패");
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -1779,20 +1747,15 @@ export async function testByoConnection(
   credential: string,
   model: string,
 ): Promise<void> {
-  const isGemini3 = provider !== "openai" && /^gemini-3(?:[.-]|$)/.test(model);
   const options: LlmRequestOptions = {
     requestTimeoutMs: CONNECTION_TEST_TIMEOUT_MS,
     maxAttempts: 1,
     retryBaseMs: 0,
-    ...(isGemini3 ? { thinkingLevel: "LOW" as const } : {}),
   };
   const client = createByoClient(provider, credential, model, options);
 
   try {
-    await client.complete(CONNECTION_TEST_PROMPT, {
-      temperature: isGemini3 ? 1 : 0,
-      maxOutputTokens: isGemini3 ? 1024 : 16,
-    });
+    await client.complete(CONNECTION_TEST_PROMPT, { temperature: 0, maxOutputTokens: 16, effort: "low" });
   } catch (error) {
     throw connectionTestError(provider, error);
   }
@@ -1866,13 +1829,11 @@ export async function testSharedConnection(
   model: string,
   apiBase?: string,
 ): Promise<void> {
-  const isGemini3 = provider === "gemini" && /^gemini-3(?:[.-]|$)/.test(model);
   const options: SharedProxyOptions = {
     requestTimeoutMs: CONNECTION_TEST_TIMEOUT_MS,
     maxAttempts: 1,
     retryBaseMs: 0,
     apiBase,
-    ...(isGemini3 ? { thinkingLevel: "LOW" as const } : {}),
   };
   const client =
     provider === "openai"
@@ -1880,10 +1841,7 @@ export async function testSharedConnection(
       : createSharedGeminiClient(model, options);
 
   try {
-    await client.complete(CONNECTION_TEST_PROMPT, {
-      temperature: isGemini3 ? 1 : 0,
-      maxOutputTokens: isGemini3 ? 1024 : 16,
-    });
+    await client.complete(CONNECTION_TEST_PROMPT, { temperature: 0, maxOutputTokens: 16, effort: "low" });
   } catch (error) {
     throw connectionTestError(provider, error);
   }

@@ -8,6 +8,8 @@ import {
   normalizeQuestion,
   withCallBudget,
   withoutCodeFence,
+  GRADING_EFFORT,
+  RETRY_EFFORT,
   type LlmClient,
 } from "./runtime";
 
@@ -106,7 +108,7 @@ export async function draftCases(
 
   const first = await budgeted.complete(
     draftCasesPrompt(material, existingQuestions, clamped, clampedHops, focus),
-    { temperature: 0.7, maxOutputTokens },
+    { temperature: 0.7, maxOutputTokens, effort: GRADING_EFFORT },
   );
   let drafted: DraftedCase[];
   try {
@@ -115,7 +117,7 @@ export async function draftCases(
     if (!(error instanceof DraftFormatError)) throw error;
     const retried = await budgeted.complete(
       draftCasesRetryPrompt(material, existingQuestions, clamped, first, clampedHops, focus),
-      { temperature: 0.7, maxOutputTokens },
+      { temperature: 0.7, maxOutputTokens, effort: RETRY_EFFORT },
     );
     try {
       drafted = parseDraftedCases(retried, clampedHops);
