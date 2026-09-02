@@ -33,8 +33,8 @@ export function formatModelLabel(provider: JudgeProvider, model: string): string
 /** 공급자별 기본 채점 모델 — 위저드와 빌더가 같은 값을 쓴다. */
 export const DEFAULT_JUDGE_MODEL: Record<JudgeProvider, string> = {
   mock: "모의 모델",
-  gemini: "gemini-3.7-flash",
-  vertex: "gemini-3.7-flash",
+  gemini: "gemini-3.8-flash",
+  vertex: "gemini-3.8-flash",
   openai: "gpt-5.6-sol",
   anthropic: "claude-sonnet-4-5",
   openrouter: "openai/gpt-5.6-sol",
@@ -529,7 +529,7 @@ function geminiGenerationConfig(
 
 export function createGeminiClient(
   apiKey: string,
-  model = "gemini-3.7-flash",
+  model = "gemini-3.8-flash",
   options: GeminiClientOptions = {},
 ): LlmClient {
   const timeoutMs = Math.max(1, options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
@@ -694,7 +694,7 @@ type VertexTokenResponse = {
  *  Google OAuth에는 서명된 assertion, Vertex에는 단기 access token만 전송한다. */
 export function createVertexClient(
   rawCredential: string | VertexServiceAccountCredential,
-  model = "gemini-3.7-flash",
+  model = "gemini-3.8-flash",
   options: VertexClientOptions = {},
 ): LlmClient {
   const credential =
@@ -1389,7 +1389,7 @@ export function createSharedOpenAIClient(
 }
 
 export function createSharedGeminiClient(
-  model = "gemini-3.7-flash",
+  model = "gemini-3.8-flash",
   options: SharedProxyOptions = {},
 ): LlmClient {
   const timeoutMs = Math.max(1, options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
@@ -1480,7 +1480,7 @@ export interface DetectedModelCatalog {
 }
 
 const VERTEX_MODEL_CATALOG: AvailableModel[] = [
-  { id: "gemini-3.7-flash", label: "Gemini 3.7 Flash", source: "catalog" },
+  { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash", source: "catalog" },
   { id: "gemini-3.6-flash", label: "Gemini 3.6 Flash", source: "catalog" },
   { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash", source: "catalog" },
   { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro Preview", source: "catalog" },

@@ -392,7 +392,7 @@ def run() -> None:
 
     # 새 BYO 공급자도 Pack·시험관 리포트의 동일 provider/model 결속을 유지해 저장한다.
     for provider, model in (
-        ("vertex", "gemini-3.7-flash"),
+        ("vertex", "gemini-3.8-flash"),
         ("anthropic", "claude-test"),
         ("openrouter", "anthropic/claude-test"),
         ("ollama", "qwen:test"),
@@ -584,7 +584,7 @@ def run() -> None:
     r = client.post("/proxy/openai", json={"model": "x", "input": "hi"})
     assert r.status_code == 404, r.text
 
-    r = client.post("/proxy/gemini/gemini-3.7-flash", json={"contents": []})
+    r = client.post("/proxy/gemini/gemini-3.8-flash", json={"contents": []})
     assert r.status_code == 404, r.text
 
     run_ratelimit_and_model_validation()
@@ -604,7 +604,7 @@ def run_ratelimit_and_model_validation() -> None:
 
     from main import _MODEL_NAME_RE
 
-    assert _MODEL_NAME_RE.match("gemini-3.7-flash")
+    assert _MODEL_NAME_RE.match("gemini-3.8-flash")
     assert not _MODEL_NAME_RE.match("../etc/passwd")
     assert not _MODEL_NAME_RE.match("model?x=1")
 

@@ -18,7 +18,7 @@ function makePack(
   digest: string = DIGEST_A,
   judge: { provider: JudgeProvider; model: string } = {
     provider: "gemini",
-    model: "gemini-3.7-flash",
+    model: "gemini-3.8-flash",
   },
 ): EvaluationPack {
   return {
@@ -43,7 +43,7 @@ function makeReport(overrides: Partial<ExaminerReport> = {}): ExaminerReport {
     checks: [],
     overall: "pass",
     forDigest: DIGEST_A,
-    judge: { provider: "gemini", model: "gemini-3.7-flash" },
+    judge: { provider: "gemini", model: "gemini-3.8-flash" },
     ranAt: "2026-08-23T00:00:00.000Z",
     ...overrides,
   };

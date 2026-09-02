@@ -42,7 +42,7 @@ describe("preferredModels", () => {
 
   it("여섯 벤더의 현행 갈래를 모두 남긴다", () => {
     const kept = preferredModels(
-      models("gpt-5.6-sol", "claude-sonnet-4-5", "gemini-3.7-flash", "llama3.1", "qwen3", "o4-mini"),
+      models("gpt-5.6-sol", "claude-sonnet-4-5", "gemini-3.8-flash", "llama3.1", "qwen3", "o4-mini"),
     ).map((m) => m.id);
     expect(kept).toHaveLength(6);
   });

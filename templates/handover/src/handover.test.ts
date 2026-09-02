@@ -292,7 +292,7 @@ describe("compile", () => {
     // 저지 모델 교체 = 다른 판정 절차 = 다른 다이제스트 (교체는 재승인)
     const b = await compile(makeSubmission(6), {
       judgeProvider: "gemini",
-      judgeModel: "gemini-3.7-flash",
+      judgeModel: "gemini-3.8-flash",
     });
     expect(b.pack.definitionDigest).not.toBe(a.pack.definitionDigest);
 
@@ -304,7 +304,7 @@ describe("compile", () => {
 
     const vertex = await compile(makeSubmission(6), {
       judgeProvider: "vertex",
-      judgeModel: "gemini-3.7-flash",
+      judgeModel: "gemini-3.8-flash",
     });
     expect(vertex.pack.definitionDigest).not.toBe(b.pack.definitionDigest);
   });

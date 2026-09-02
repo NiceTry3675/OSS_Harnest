@@ -82,7 +82,7 @@ experiments           동결된 프로토콜·측정 코드·결과
 |---|---|
 | 모의 모델 | 키 없이 전체 흐름 실행 · 결정적 회귀 테스트 |
 | OpenAI | `gpt-5.6-sol` 등 — Responses API, 스트리밍 |
-| Gemini · Vertex AI | `gemini-3.7-flash` — Vertex는 서비스 계정 JSON, `global` 고정 |
+| Gemini · Vertex AI | `gemini-3.8-flash` — Vertex는 서비스 계정 JSON, `global` 고정 |
 | Anthropic · OpenRouter · Ollama | 스트리밍 생성·채점 |
 
 Vertex 경로에서는 private key로 브라우저 안에서 JWT를 서명하고, 서명된 assertion만 Google OAuth에 보내 단기 access token을 받습니다. CORS 정상·401 경로와 스모크 테스트 관측값은 [OpenAI BYO 실측 결과](experiments/byo-cors-openai/RESULT.md)에 있습니다.

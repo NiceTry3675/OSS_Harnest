@@ -451,7 +451,7 @@ describe("Vertex 서비스 계정 어댑터", () => {
     expect(detection.status).toBe("detected");
     if (detection.status === "detected") expect(detection.value.provider).toBe("vertex");
     await expect(listAvailableModels("vertex", raw)).resolves.toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: "gemini-3.7-flash", source: "catalog" })]),
+      expect.arrayContaining([expect.objectContaining({ id: "gemini-3.8-flash", source: "catalog" })]),
     );
 
     expect(() => parseVertexServiceAccount("not-json")).toThrow("해석할 수 없습니다");
@@ -476,7 +476,7 @@ describe("Vertex 서비스 계정 어댑터", () => {
       .mockResolvedValueOnce(successResponse("Vertex 응답"))
       .mockResolvedValueOnce(successResponse("캐시 응답"));
     vi.stubGlobal("fetch", fetchMock);
-    const client = createVertexClient(raw, "gemini-3.7-flash", { retryBaseMs: 0 });
+    const client = createVertexClient(raw, "gemini-3.8-flash", { retryBaseMs: 0 });
 
     await expect(
       client.complete("요청 본문", { temperature: 0, maxOutputTokens: 64 }),
@@ -502,7 +502,7 @@ describe("Vertex 서비스 계정 어댑터", () => {
 
     const [vertexUrl, vertexInit] = fetchMock.mock.calls[1];
     expect(vertexUrl).toBe(
-      "https://aiplatform.googleapis.com/v1/projects/vertex-project/locations/global/publishers/google/models/gemini-3.7-flash:generateContent",
+      "https://aiplatform.googleapis.com/v1/projects/vertex-project/locations/global/publishers/google/models/gemini-3.8-flash:generateContent",
     );
     expect(vertexInit?.headers).toEqual({
       Authorization: "Bearer vertex-token",
@@ -540,7 +540,7 @@ describe("Vertex 서비스 계정 어댑터", () => {
       } as Response);
     vi.stubGlobal("fetch", fetchMock);
 
-    const client = createVertexClient(raw, "gemini-3.7-flash", { retryBaseMs: 0 });
+    const client = createVertexClient(raw, "gemini-3.8-flash", { retryBaseMs: 0 });
     await expect(client.complete("요청")).resolves.toBe("최종 응답");
   });
 
@@ -559,7 +559,7 @@ describe("Vertex 서비스 계정 어댑터", () => {
       } as Response);
     vi.stubGlobal("fetch", fetchMock);
 
-    const client = createVertexClient(raw, "gemini-3.7-flash", { retryBaseMs: 0 });
+    const client = createVertexClient(raw, "gemini-3.8-flash", { retryBaseMs: 0 });
     await expect(client.complete("요청")).rejects.toThrow(
       "출력 토큰 한도에 도달해 텍스트를 만들지 못했습니다 (thinking 16 tokens)",
     );
@@ -813,7 +813,7 @@ describe("승인 전 BYO 1콜 연결 테스트", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      testByoConnection("vertex", raw, "gemini-3.7-flash"),
+      testByoConnection("vertex", raw, "gemini-3.8-flash"),
     ).resolves.toBeUndefined();
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const [, vertexInit] = fetchMock.mock.calls[1];
