@@ -1,3 +1,5 @@
-fastapi
-uvicorn[standard]
-httpx
+# 배포는 main push마다 자동이므로, 테스트를 통과한 버전에 고정한다(갱신 시 apps/api에서 python3 test_api.py 재확인).
+fastapi==0.141.1
+starlette==1.6.0
+uvicorn[standard]==0.52.4
+httpx==0.28.1
