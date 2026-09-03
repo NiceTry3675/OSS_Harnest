@@ -62,6 +62,7 @@ for _name in (
     "HARNEST_CORS_ORIGINS",
     "HARNEST_TRUSTED_IP_HEADER",
     "HARNEST_PROXY_TIMEOUT",
+    "HARNEST_PROXY_MAX_TIMEOUT",
     "HARNEST_PROXY_RATE_LIMIT",
     "HARNEST_EXPORT_RATE_LIMIT",
     "HARNEST_DB_MAX_BYTES",
@@ -820,8 +821,10 @@ def run_proxy_guards(client: TestClient) -> None:
         assert forwarded["generationConfig"]["maxOutputTokens"] == main.PROXY_MAX_OUTPUT_TOKENS
 
         # 상류 읽기 한도는 요청의 출력 토큰 상한에 비례한다(토큰당 30ms, 바닥 300초) — 브라우저 클라이언트가
-        # 한 번에 받는 호출에 기다리는 산식과 같아서 긴 생성을 서버가 먼저 끊지 않는다
+        # 한 번에 받는 호출에 기다리는 산식과 같아서 긴 생성을 서버가 먼저 끊지 않는다. 다만 edge 유휴 한도
+        # (Fly 최댓값 900초) 아래에 머물도록 780초에서 멈춘다 — 브라우저 여유 60초를 더해도 840초다
         assert main.PROXY_UPSTREAM_TIMEOUT_SECONDS == 300.0
+        assert main.PROXY_UPSTREAM_TIMEOUT_CEILING_SECONDS == 780.0
         assert main.PROXY_SECONDS_PER_OUTPUT_TOKEN == 0.03
         r = client.post(
             "/proxy/openai",
@@ -833,19 +836,29 @@ def run_proxy_guards(client: TestClient) -> None:
         assert fake_client.timeouts[-1].connect == 10.0
         r = client.post(
             "/proxy/openai",
-            content=json.dumps({"model": "gpt-5.6-sol", "input": "hi", "max_output_tokens": 40_000}),
+            content=json.dumps({"model": "gpt-5.6-sol", "input": "hi", "max_output_tokens": 20_000}),
             headers=ok_headers,
         )
         assert r.status_code == 200, r.text
-        assert fake_client.timeouts[-1].read == 1200.0
-        # 상한으로 잘린 요청은 잘린 값 기준 — 잘라 놓고 원래 값만큼 기다리지 않는다
+        assert fake_client.timeouts[-1].read == 600.0
+        # 상한으로 잘린 요청은 잘린 값 기준 — 잘라 놓고 원래 값만큼 기다리지 않는다. 그 값(65,536토큰 →
+        # 약 1,966초)도 edge 한도를 넘으므로 읽기 한도 상한(780초)에서 멈춘다
         r = client.post(
             "/proxy/gemini/gemini-3.8-flash",
             content=json.dumps({"contents": [], "generationConfig": {"maxOutputTokens": 10_000_000}}),
             headers=ok_headers,
         )
         assert r.status_code == 200, r.text
-        assert fake_client.timeouts[-1].read == main.PROXY_MAX_OUTPUT_TOKENS * 0.03
+        assert main.PROXY_MAX_OUTPUT_TOKENS * 0.03 > main.PROXY_UPSTREAM_TIMEOUT_CEILING_SECONDS
+        assert fake_client.timeouts[-1].read == main.PROXY_UPSTREAM_TIMEOUT_CEILING_SECONDS
+        # 상한 안쪽(40,000토큰 → 1,200초)도 상한에서 멈춘다 — 잘리지 않은 요청이라도 edge보다 늦게 끊을 수는 없다
+        r = client.post(
+            "/proxy/openai",
+            content=json.dumps({"model": "gpt-5.6-sol", "input": "hi", "max_output_tokens": 40_000}),
+            headers=ok_headers,
+        )
+        assert r.status_code == 200, r.text
+        assert fake_client.timeouts[-1].read == 780.0
 
         # 상류 시간 초과는 504 — 끊긴 생성도 벤더 쪽에서는 과금되므로 클라이언트가 재시도하지 않도록 502와 구분한다
         import httpx

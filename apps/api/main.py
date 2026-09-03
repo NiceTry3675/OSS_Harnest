@@ -123,16 +123,22 @@ PROXY_MAX_BODY_BYTES = MAX_EXPORT_BYTES
 # 이쪽 타이머는 벤더에 쓴 뒤에 시작된다) 시간 초과는 이 서버의 504가 먼저 알린다. 서버가 끊어도 벤더 쪽
 # 생성·과금은 완주한다. 클라이언트는 504도, 자기 시간 초과도, 네트워크 단절도 재시도하지 않는다 —
 # 끊긴 생성도 벤더 쪽에서는 완주·과금되므로 다시 보내면 관리자 비용만 반복된다.
-# 배포 시 edge·리버스 프록시의 유휴 한도는 이 읽기 한도의 최댓값(출력 토큰 상한 × 30ms)에 브라우저
-# 여유 60초를 더한 값보다 커야 한다 — 이 서버는 상류 응답을 다 받은 뒤에야 첫 바이트를 보내므로,
-# 더 짧은 edge 한도가 먼저 연결을 끊는다(fly.toml의 idle_timeout).
+# 비례 한도에는 상한(HARNEST_PROXY_MAX_TIMEOUT)이 있다 — 이 서버는 상류 응답을 다 받은 뒤에야 첫
+# 바이트를 보내므로, 배포 edge·리버스 프록시의 유휴 한도(fly.toml의 idle_timeout, Fly 최댓값 900초)가
+# 브라우저 대기 시간(읽기 한도 + 60초)보다 짧으면 edge가 먼저 연결을 끊고 504가 사용자에게 닿지
+# 않는다. 그래서 읽기 한도는 edge 한도 − 60초(브라우저 여유) − 60초(edge 여유) = 780초에서 멈춘다.
+# 상한을 올리면 edge 한도도 그보다 60초 이상 크게 함께 올려야 한다. 브라우저 클라이언트도 같은
+# 상한을 안다(apps/web/src/lib/llm.ts).
 PROXY_UPSTREAM_TIMEOUT_SECONDS = float(os.environ.get("HARNEST_PROXY_TIMEOUT", "300"))
+PROXY_UPSTREAM_TIMEOUT_CEILING_SECONDS = float(os.environ.get("HARNEST_PROXY_MAX_TIMEOUT", "780"))
 PROXY_SECONDS_PER_OUTPUT_TOKEN = 0.03
 
 
 def _upstream_read_timeout(max_output_tokens: int) -> float:
-    """요청의 출력 토큰 상한에 비례한 읽기 한도 — 바닥은 HARNEST_PROXY_TIMEOUT."""
-    return max(PROXY_UPSTREAM_TIMEOUT_SECONDS, max_output_tokens * PROXY_SECONDS_PER_OUTPUT_TOKEN)
+    """요청의 출력 토큰 상한에 비례한 읽기 한도 — 바닥은 HARNEST_PROXY_TIMEOUT, 상한은
+    HARNEST_PROXY_MAX_TIMEOUT(edge 유휴 한도 아래). 상한이 바닥보다 작으면 상한이 이긴다."""
+    proportional = max(PROXY_UPSTREAM_TIMEOUT_SECONDS, max_output_tokens * PROXY_SECONDS_PER_OUTPUT_TOKEN)
+    return min(proportional, PROXY_UPSTREAM_TIMEOUT_CEILING_SECONDS)
 # 방문자 IP를 읽을 신뢰 헤더 이름(소문자). 미설정이면 접속 소켓 IP만 쓴다 — 리버스 프록시가 붙이는
 # 헤더라도 그 프록시 뒤에 있지 않은 배포에서는 클라이언트가 마음대로 꾸밀 수 있기 때문이다.
 TRUSTED_IP_HEADER = os.environ.get("HARNEST_TRUSTED_IP_HEADER", "").strip().lower()

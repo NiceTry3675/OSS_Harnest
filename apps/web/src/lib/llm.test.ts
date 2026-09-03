@@ -1596,6 +1596,30 @@ describe("공유 키 경로의 재시도", () => {
     expect(geminiFetch).toHaveBeenCalledTimes(1);
   });
 
+  it("기본 한도는 서버 읽기 한도 상한(780초) + 60초에서 멈춘다 — edge 유휴 한도(900초)보다 먼저 끊지 않고, 출력 상한이 커도 그 이상 기다리지 않는다", async () => {
+    vi.useFakeTimers();
+    const hanging = (init?: RequestInit) =>
+      new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener("abort", () =>
+          reject(new DOMException("The user aborted a request.", "AbortError")),
+        );
+      });
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => hanging(init));
+    vi.stubGlobal("fetch", fetchMock);
+    // 64,000토큰 × 30ms = 1,920초 — 상한 없이는 edge(900초)가 먼저 끊어 시간 초과 안내가 닿지 않는다
+    const assertion = expect(
+      createSharedOpenAIClient("gpt-5.6-sol", { apiBase: "http://api.test", retryBaseMs: 0 }).complete(
+        "생성",
+        { maxOutputTokens: 64_000 },
+      ),
+    ).rejects.toThrow("OpenAI(공유) 요청 시간 초과 (840000ms)");
+    await vi.advanceTimersByTimeAsync(839_999);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await assertion;
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("네트워크 단절도 재시도하지 않는다 — 서버가 받아 벤더에 쓴 뒤 edge가 끊은 경우와 구분할 수 없다", async () => {
     const fetchMock = vi
       .fn()

@@ -68,6 +68,10 @@ const CONNECTION_TEST_TIMEOUT_MS = 15_000;
 // 여유를 둔다. 클라이언트 타이머는 fetch 전에, 서버 타이머는 벤더에 쓴 뒤에 시작되므로 같은 값이면
 // 항상 클라이언트가 먼저 끊어 서버의 504 안내(재시도 금지·본인 키 권장)가 사용자에게 닿지 않는다.
 const SHARED_PROXY_TIMEOUT_MARGIN_MS = 60_000;
+// 서버의 읽기 한도 상한(apps/api HARNEST_PROXY_MAX_TIMEOUT 기본값) — 서버는 벤더 응답을 다 받은
+// 뒤에야 첫 바이트를 보내므로 배포 edge의 유휴 한도(Fly 최댓값 900초) 아래에 머물러야 한다. 클라이언트도
+// 같은 상한을 알아야 서버 504(상한 + 0초)와 edge 단절(900초)보다 늦게, 즉 상한 + 60초에 끊는다.
+const SHARED_PROXY_TIMEOUT_CEILING_MS = 780_000;
 
 export interface LlmRequestOptions {
   /** 비스트리밍 호출에는 절대 한도, 스트리밍 호출에는 유휴 한도(바이트가 도착할 때마다 리셋).
@@ -314,12 +318,12 @@ function requestTimeoutFor(options: LlmRequestOptions, opts: LlmCallOptions | un
     options.requestTimeoutMs ?? Math.max(DEFAULT_TIMEOUT_MS, outputCapOf(opts) * MS_PER_OUTPUT_TOKEN),
   );
 }
-/** 공유 키 경로의 절대 한도 — 명시하지 않았으면 서버 상류 한도에 여유를 더한 값. 명시했으면 그대로
- *  (연결 테스트의 fail-fast 상한 등). */
+/** 공유 키 경로의 절대 한도 — 명시하지 않았으면 서버 상류 한도(비례하되 상한 780초)에 여유를 더한 값.
+ *  명시했으면 그대로(연결 테스트의 fail-fast 상한 등). */
 function sharedRequestTimeoutFor(options: LlmRequestOptions, opts: LlmCallOptions | undefined): number {
   return options.requestTimeoutMs !== undefined
     ? requestTimeoutFor(options, opts)
-    : requestTimeoutFor(options, opts) + SHARED_PROXY_TIMEOUT_MARGIN_MS;
+    : Math.min(requestTimeoutFor(options, opts), SHARED_PROXY_TIMEOUT_CEILING_MS) + SHARED_PROXY_TIMEOUT_MARGIN_MS;
 }
 /** 스트리밍 유휴 한도 — 같은 옵션이지만 뜻이 다르다(바이트가 도착할 때마다 리셋). */
 function streamIdleFor(options: LlmRequestOptions): number {
