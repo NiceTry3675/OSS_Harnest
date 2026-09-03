@@ -35,6 +35,14 @@ export interface PublicExperimentFeedback {
 export interface CheckpointStore<A> {
   save(cp: LoopCheckpoint<A>): Promise<void>;
   load(runId: string): Promise<LoopCheckpoint<A> | null>;
+  /** 소유 프로젝트가 runId를 폐기할 때 — 고아 체크포인트를 남기지 않는다(선택) */
+  delete?(runId: string): Promise<void>;
+  /** 저장된 모든 runId(선택) — 정리 스윕용 */
+  keys?(): Promise<string[]>;
+  /** keepRunId를 제외한 모든 체크포인트 삭제(선택). null이면 전부 삭제한다.
+   *  재컴파일·초기화 뒤 남는 이전 실행분을 하이드레이션 시점에 한꺼번에 정리하는 용도다 —
+   *  진행 중 라운드의 지연 commit이 되살린 고아도 다음 로드에서 걷힌다. */
+  deleteExcept?(keepRunId: string | null): Promise<void>;
 }
 
 /** Generator에게 전달되는 피드백 — **가시 케이스 트레이스만** 담는다.
@@ -84,16 +92,25 @@ export interface LoopRunOptions<A> {
 }
 
 export interface LoopHandle {
-  /** 새 실행 시작(체크포인트가 있으면 이어서 재개) */
+  /** 새 실행 시작(체크포인트가 있으면 이어서 재개). 이미 진행 중이면 즉시 no-op으로 끝난다.
+   *  라운드 0 채점이 실패해 체크포인트 없이 reject되더라도 원샷 산출물은 이 핸들에 남아,
+   *  같은 핸들로 다시 start()하면 재생성 없이 그 산출물을 다시 채점한다. */
   start(): Promise<void>;
   pause(): void;
+  /** start()가 진행 중(원샷·라운드·커밋 어느 단계든)이면 true — 화면은 이 값으로
+   *  "살아 있는 running"과 탭 회수로 남은 저장본의 running을 구분한다 */
+  isActive(): boolean;
   getCheckpoint(): LoopCheckpoint<unknown> | null;
+  /** 채점·첫 커밋 실패로 아직 체크포인트가 없지만 원샷 산출물이 남아 있으면 true — 다음 start()는
+   *  재생성 없이 채점부터 잇는다. 원샷 생성 자체가 실패했으면 false(다시 만든다). */
+  hasPendingInitial(): boolean;
 }
 
 /** mulberry32 — 상태(uint32) 노출형 시드 RNG. 구현은 engine.ts */
 export { createRng } from "./engine";
 export {
   createLoopRun,
+  CheckpointSaveError,
   PUBLIC_EXPERIMENT_MEMORY_LIMIT,
   REPEATED_STRATEGY_FAILURE_LIMIT,
 } from "./engine";

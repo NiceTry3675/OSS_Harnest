@@ -47,6 +47,20 @@ export function createRng(seed: number): SeededRng {
   });
 }
 
+/** commit 단계의 store.save 실패 — 라운드 계산은 끝났지만 저장본에는 반영되지 않았다.
+ *  모델 오류와 구분해 화면이 "저장되었습니다"라고 오안내하지 않게 한다. 원 오류는 cause. */
+export class CheckpointSaveError extends Error {
+  override readonly cause: unknown;
+
+  constructor(cause: unknown) {
+    super(
+      `체크포인트 저장 실패 — ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
+    this.name = "CheckpointSaveError";
+    this.cause = cause;
+  }
+}
+
 export function createLoopRun<A>(opts: LoopRunOptions<A>): LoopHandle {
   const { runId, pack, spec, scorer, planStrategy, generate, initial, store, onEvent } = opts;
   const roundDelayMs = opts.roundDelayMs ?? 0;
@@ -54,6 +68,10 @@ export function createLoopRun<A>(opts: LoopRunOptions<A>): LoopHandle {
   let cp: LoopCheckpoint<A> | null = null;
   let pauseRequested = false;
   let active = false;
+  /** 라운드 0에서 원샷 생성은 끝났지만 채점·첫 커밋이 실패한 경우의 산출물.
+   *  체크포인트는 점수 없이 만들 수 없으므로(계약) 핸들 수명 동안만 보관하고,
+   *  같은 핸들의 다음 start()에서 재생성 없이 다시 채점한다. rngState는 원샷 직후 값. */
+  let pendingInitial: { artifact: A; rngState: number } | null = null;
 
   const note = (c: LoopCheckpoint<A>, type: ProvenanceType, detail: string): void => {
     c.provenance.push({ at: new Date().toISOString(), type, detail });
@@ -62,7 +80,11 @@ export function createLoopRun<A>(opts: LoopRunOptions<A>): LoopHandle {
   /** 저장 후 통지 — 매 라운드·상태 전이의 계약 순서. 스냅샷을 넘겨 이후 변이와 격리한다. */
   const commit = async (c: LoopCheckpoint<A>): Promise<void> => {
     const snapshot = structuredClone(c);
-    await store.save(snapshot);
+    try {
+      await store.save(snapshot);
+    } catch (error) {
+      throw new CheckpointSaveError(error);
+    }
     onEvent(snapshot);
   };
 
@@ -131,13 +153,23 @@ export function createLoopRun<A>(opts: LoopRunOptions<A>): LoopHandle {
           record.guardSafe ??= true;
         }
         cp = c;
+        pendingInitial = null;
         if (c.status === "done") return;
         rng.state = c.rngState;
         c.status = "running";
         note(c, "resumed", `체크포인트에서 재개 — 라운드 ${c.round} 이후부터 계속`);
         await commit(c);
       } else {
-        const champion = await initial(rng);
+        // 라운드 0: 원샷 생성 → 채점 → 첫 커밋. 채점이나 커밋이 실패하면 체크포인트는 남지 않지만
+        // 가장 비싼 호출인 원샷 산출물은 버리지 않는다 — 재시도 시 같은 산출물을 다시 채점한다.
+        let champion: A;
+        if (pendingInitial === null) {
+          champion = await initial(rng);
+          pendingInitial = { artifact: champion, rngState: rng.state };
+        } else {
+          champion = pendingInitial.artifact;
+          rng.state = pendingInitial.rngState; // 새 실행과 같은 수열 — 원샷이 소비한 만큼 이어간다
+        }
         const first = await scorer(champion);
         c = {
           runId,
@@ -157,6 +189,7 @@ export function createLoopRun<A>(opts: LoopRunOptions<A>): LoopHandle {
         cp = c;
         note(c, "run_started", `실행 시작 — 원샷 기준선 ${first.total}점 (라운드 0)`);
         await commit(c);
+        pendingInitial = null;
       }
 
       // 연속 미채택 수 — 체크포인트 스키마를 늘리지 않고 tree 꼬리에서 복원
@@ -241,7 +274,12 @@ export function createLoopRun<A>(opts: LoopRunOptions<A>): LoopHandle {
             "error",
             `라운드 ${round} 실패 — ${error instanceof Error ? error.message : String(error)}`,
           );
-          await commit(c);
+          try {
+            await commit(c);
+          } catch (saveError) {
+            // 사용자에게 먼저 필요한 것은 모델 오류다 — 저장 실패는 가리지 않도록 cause로 첨부한다
+            if (error instanceof Error && error.cause === undefined) error.cause = saveError;
+          }
           throw error;
         }
         const prevScore = c.championScore;
@@ -327,8 +365,14 @@ export function createLoopRun<A>(opts: LoopRunOptions<A>): LoopHandle {
       // 진행 중 라운드를 완료한 뒤 루프가 정지·저장·통지한다
       pauseRequested = true;
     },
+    isActive() {
+      return active;
+    },
     getCheckpoint() {
       return cp;
+    },
+    hasPendingInitial() {
+      return pendingInitial !== null;
     },
   };
 }
