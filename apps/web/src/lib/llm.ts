@@ -299,6 +299,14 @@ const REASONING_HEADROOM_TOKENS: Record<ReasoningEffort, number> = {
 function outputCapOf(opts: LlmCallOptions | undefined): number {
   return Math.max(opts?.maxOutputTokens ?? 8192, REASONING_HEADROOM_TOKENS[effortOf(opts)]);
 }
+/** 직접(BYO) 비스트리밍 호출의 시간 초과 — 재전송하지 않는다. 한도(기본 5분 이상)까지 응답이 없는
+ *  요청은 벤더가 이미 받아들여 생성 중일 가능성이 높고, 같은 본문을 다시 보내면 결과는 같고 과금만
+ *  겹친다(SPEC §8). 응답을 아예 받지 못한 네트워크 오류와 일시 거절(429·5xx)만 백오프 재시도한다. */
+function directTimeoutError(label: string, timeoutMs: number): Error {
+  return new Error(
+    `${label} 요청 시간 초과 (${timeoutMs}ms) — 벤더가 이미 받아들인 요청일 수 있어 다시 보내지 않습니다.`,
+  );
+}
 /** 비스트리밍 절대 한도 — 명시하지 않았으면 출력 상한에 비례한다(40,000토큰 → 20분). */
 function requestTimeoutFor(options: LlmRequestOptions, opts: LlmCallOptions | undefined): number {
   return Math.max(
@@ -397,6 +405,9 @@ interface StreamPlan {
   /** 조각이 실패·절단을 알리면 그 사유를 돌려준다. 잘린 산출물이 완성본으로 채점되지 않게
    *  스트림을 오류로 끝내는 근거다. 정상 조각이면 null. */
   failure?(payload: unknown): string | null;
+  /** 조각이 벤더의 정상 완료 신호인지. 중간 프록시가 연결을 조용히 닫으면 본문 읽기는 오류 없이
+   *  끝나므로, 이 신호 없이 끝난 스트림은 부분 산출물이다 — 완성본으로 돌려주지 않는다(SPEC §8). */
+  done(payload: unknown): boolean;
   /** relaxed 판이 실제로 요청 본문을 바꾸는 벤더(OpenAI summary·Claude display·Ollama think)만
    *  true — 본문이 같은 벤더의 HTTP 400을 다시 보내는 것은 동일 요청 중복일 뿐이다. */
   relaxable?: boolean;
@@ -421,6 +432,13 @@ class StreamHttpError extends Error {
     return this.status === 429 || (this.status >= 500 && this.status <= 599);
   }
 }
+
+/** Gemini·Vertex의 완료 신호 — 마지막 조각의 candidates[0].finishReason이 STOP이다 */
+const googleDone = (payload: unknown): boolean => {
+  const candidates = field(payload, "candidates");
+  const first = Array.isArray(candidates) ? candidates[0] : undefined;
+  return field(first, "finishReason") === "STOP";
+};
 
 const googleFailure = (payload: unknown): string | null => {
   const message = field(field(payload, "error"), "message");
@@ -468,11 +486,17 @@ const openAIStreamFailure = (payload: unknown): string | null => {
   return null;
 };
 
-/** Claude의 stop_reason — 비스트리밍 message 본문과 스트림 message_delta가 같은 값을 쓴다 */
+/** Claude의 stop_reason — 비스트리밍 message 본문과 스트림 message_delta가 같은 값을 쓴다.
+ *  허용 목록 방식이다: end_turn·stop_sequence만 정상이고, 그 밖의 종료 사유(max_tokens·refusal·
+ *  model_context_window_exceeded·pause_turn 등)는 텍스트가 있어도 완성본이 아니다. */
 const anthropicStopFailure = (stop: unknown): string | null => {
+  if (typeof stop !== "string" || stop === "end_turn" || stop === "stop_sequence") return null;
   if (stop === "max_tokens") return "출력 토큰 한도에 도달해 산출물이 잘렸습니다";
+  if (stop === "model_context_window_exceeded") {
+    return "컨텍스트 창 한도에 도달해 산출물이 잘렸습니다 (model_context_window_exceeded)";
+  }
   if (stop === "refusal") return "모델이 요청을 거부했습니다 (refusal)";
-  return null;
+  return `응답이 정상 종료되지 않았습니다 (${stop})`;
 };
 
 const anthropicStreamFailure = (payload: unknown): string | null => {
@@ -490,22 +514,34 @@ const anthropicMessageFailure = (data: unknown): string | null => {
   return anthropicStopFailure(field(data, "stop_reason"));
 };
 
+/** Chat Completions(OpenRouter)의 finish_reason — 허용 목록 방식이다. 도구 없는 호출이므로 stop만
+ *  정상이고, length·content_filter·error 등은 텍스트가 함께 와도 완성본이 아니다. 스트림 중간 조각은
+ *  null이라 판정하지 않는다. */
 const chatCompletionsFailure = (payload: unknown): string | null => {
   const message = field(field(payload, "error"), "message");
   if (typeof message === "string") return `응답 실패: ${message}`;
+  const finish = chatCompletionsFinishReason(payload);
+  if (typeof finish !== "string" || finish === "stop") return null;
+  return finish === "length"
+    ? "출력 토큰 한도에 도달해 산출물이 잘렸습니다"
+    : `응답이 정상 종료되지 않았습니다 (${finish})`;
+};
+const chatCompletionsFinishReason = (payload: unknown): unknown => {
   const choices = field(payload, "choices");
   const first = Array.isArray(choices) ? choices[0] : undefined;
-  if (field(first, "finish_reason") === "length") return "출력 토큰 한도에 도달해 산출물이 잘렸습니다";
-  return null;
+  return field(first, "finish_reason");
 };
 
+/** Ollama의 done_reason — done: true인 조각에서 stop만 정상이다 */
 const ollamaFailure = (payload: unknown): string | null => {
   const error = field(payload, "error");
   if (typeof error === "string") return `응답 실패: ${error}`;
-  if (field(payload, "done") === true && field(payload, "done_reason") === "length") {
-    return "출력 토큰 한도에 도달해 산출물이 잘렸습니다";
-  }
-  return null;
+  if (field(payload, "done") !== true) return null;
+  const reason = field(payload, "done_reason");
+  if (typeof reason !== "string" || reason === "stop") return null;
+  return reason === "length"
+    ? "출력 토큰 한도에 도달해 산출물이 잘렸습니다"
+    : `응답이 정상 종료되지 않았습니다 (${reason})`;
 };
 
 function field(value: unknown, key: string): unknown {
@@ -580,6 +616,8 @@ function withStream(
       let got = "";
       // 스트림이 열린(HTTP 2xx) 뒤의 실패는 벤더가 이미 받아들인 요청이다 — 재전송하면 이중 과금
       let streamOpened = false;
+      // 벤더의 정상 완료 신호를 받았는지 — 없이 끝난 스트림은 조용히 끊긴 부분 산출물이다
+      let completed = false;
       // 실제로 조각으로 흘러왔는지 재 둔다 — 한 번에 온 것과 구분이 안 되면
       // "왜 실시간이 아니냐"를 코드만 보고는 판정할 수 없다.
       const startedAt = Date.now();
@@ -647,6 +685,7 @@ function withStream(
             // 완성본으로 채점되면 평가 도구로서 가장 나쁜 실패다.
             const failure = plan.failure?.(payload) ?? null;
             if (failure !== null) throw new StreamReportedFailure(`${label} ${failure}`);
+            if (plan.done(payload)) completed = true;
             if (firstPieceAt === 0) firstPieceAt = Date.now();
             const thinking = plan.thought?.(payload) ?? null;
             if (thinking !== null && thinking !== "") {
@@ -708,6 +747,13 @@ function withStream(
         return whole;
       }
       settle();
+      // 완료 신호 없이 본문이 끝났으면 중간 어딘가에서 조용히 끊긴 것이다 — 부분 산출물을 완성본으로
+      // 채점하지 않는다. 벤더는 이미 받아들여 처리한 요청이라 다시 보내지도 않는다(SPEC §8).
+      if (!completed) {
+        throw new Error(
+          `${label} 스트림이 완료 신호 없이 끝났습니다 (${got.length}자 수신). 잘린 산출물은 채점하지 않으며, 벤더가 이미 받아들인 요청이라 다시 보내지 않습니다.`,
+        );
+      }
       // 정상 종료했는데 산출물이 없으면 오류다 — 벤더가 완주한 요청을 다시 보내면 비용만 겹친다.
       if (got === "") {
         throw new Error(
@@ -834,10 +880,9 @@ export function createGeminiClient(
             },
           );
         } catch (e) {
-          lastError = controller.signal.aborted
-            ? new Error(`Gemini 요청 시간 초과 (${timeoutMs}ms)`)
-            : new Error(`Gemini 네트워크 오류: ${e instanceof Error ? e.message : String(e)}`);
           clearTimeout(timeout);
+          if (controller.signal.aborted) throw directTimeoutError("Gemini", timeoutMs);
+          lastError = new Error(`Gemini 네트워크 오류: ${e instanceof Error ? e.message : String(e)}`);
           if (attempt + 1 >= maxAttempts) throw lastError;
           await wait(retryBaseMs * (attempt + 1));
           continue;
@@ -858,12 +903,7 @@ export function createGeminiClient(
           data = (await res.json()) as GeminiResponse;
         } catch {
           clearTimeout(timeout);
-          if (controller.signal.aborted) {
-            lastError = new Error(`Gemini 요청 시간 초과 (${timeoutMs}ms)`);
-            if (attempt + 1 >= maxAttempts) throw lastError;
-            await wait(retryBaseMs * (attempt + 1));
-            continue;
-          }
+          if (controller.signal.aborted) throw directTimeoutError("Gemini", timeoutMs);
           throw new Error("Gemini 응답 JSON을 해석할 수 없습니다.");
         }
         clearTimeout(timeout);
@@ -884,6 +924,7 @@ export function createGeminiClient(
     delta: googleDelta,
     thought: googleThought,
     failure: googleFailure,
+    done: googleDone,
   }));
 }
 
@@ -1033,9 +1074,9 @@ export function createVertexClient(
           });
         } catch (error) {
           clearTimeout(timeout);
-          lastError = controller.signal.aborted
-            ? new Error(`Vertex AI 요청 시간 초과 (${timeoutMs}ms)`)
-            : error instanceof Error && error.message.startsWith("Vertex")
+          if (controller.signal.aborted) throw directTimeoutError("Vertex AI", timeoutMs);
+          lastError =
+            error instanceof Error && error.message.startsWith("Vertex")
               ? error
               : new Error(
                   `Vertex AI 네트워크 오류: ${error instanceof Error ? error.message : String(error)}`,
@@ -1063,12 +1104,7 @@ export function createVertexClient(
           data = (await res.json()) as GeminiResponse;
         } catch {
           clearTimeout(timeout);
-          if (controller.signal.aborted) {
-            lastError = new Error(`Vertex AI 요청 시간 초과 (${timeoutMs}ms)`);
-            if (attempt + 1 >= maxAttempts) throw lastError;
-            await wait(retryBaseMs * (attempt + 1));
-            continue;
-          }
+          if (controller.signal.aborted) throw directTimeoutError("Vertex AI", timeoutMs);
           throw new Error("Vertex AI 응답 JSON을 해석할 수 없습니다.");
         }
         clearTimeout(timeout);
@@ -1094,6 +1130,7 @@ export function createVertexClient(
       delta: googleDelta,
       thought: googleThought,
       failure: googleFailure,
+      done: googleDone,
     };
   });
 }
@@ -1159,11 +1196,10 @@ export function createOpenAIClient(
           });
         } catch (e) {
           clearTimeout(timeout);
-          lastError = controller.signal.aborted
-            ? new Error(`OpenAI 요청 시간 초과 (${timeoutMs}ms)`)
-            : new Error(
-                `OpenAI 네트워크/CORS 또는 인증 오류: ${e instanceof Error ? e.message : String(e)}`,
-              );
+          if (controller.signal.aborted) throw directTimeoutError("OpenAI", timeoutMs);
+          lastError = new Error(
+            `OpenAI 네트워크/CORS 또는 인증 오류: ${e instanceof Error ? e.message : String(e)}`,
+          );
           if (attempt + 1 >= maxAttempts) throw lastError;
           await wait(retryBaseMs * (attempt + 1));
           continue;
@@ -1184,12 +1220,7 @@ export function createOpenAIClient(
           data = (await res.json()) as OpenAIResponse;
         } catch {
           clearTimeout(timeout);
-          if (controller.signal.aborted) {
-            lastError = new Error(`OpenAI 요청 시간 초과 (${timeoutMs}ms)`);
-            if (attempt + 1 >= maxAttempts) throw lastError;
-            await wait(retryBaseMs * (attempt + 1));
-            continue;
-          }
+          if (controller.signal.aborted) throw directTimeoutError("OpenAI", timeoutMs);
           throw new Error("OpenAI 응답 JSON을 해석할 수 없습니다.");
         }
         clearTimeout(timeout);
@@ -1220,6 +1251,7 @@ export function createOpenAIClient(
         : null;
     },
     failure: openAIStreamFailure,
+    done: (payload) => field(payload, "type") === "response.completed",
   }));
 }
 
@@ -1267,11 +1299,10 @@ function createDirectJsonClient(
           });
         } catch (error) {
           clearTimeout(timeout);
-          lastError = controller.signal.aborted
-            ? new Error(`${label} 요청 시간 초과 (${timeoutMs}ms)`)
-            : new Error(
-                `${label} 네트워크/CORS 오류: ${error instanceof Error ? error.message : String(error)}`,
-              );
+          if (controller.signal.aborted) throw directTimeoutError(label, timeoutMs);
+          lastError = new Error(
+            `${label} 네트워크/CORS 오류: ${error instanceof Error ? error.message : String(error)}`,
+          );
           if (attempt + 1 >= maxAttempts) throw lastError;
           await wait(retryBaseMs * (attempt + 1));
           continue;
@@ -1291,12 +1322,7 @@ function createDirectJsonClient(
           data = await response.json();
         } catch {
           clearTimeout(timeout);
-          if (controller.signal.aborted) {
-            lastError = new Error(`${label} 요청 시간 초과 (${timeoutMs}ms)`);
-            if (attempt + 1 >= maxAttempts) throw lastError;
-            await wait(retryBaseMs * (attempt + 1));
-            continue;
-          }
+          if (controller.signal.aborted) throw directTimeoutError(label, timeoutMs);
           throw new Error(`${label} 응답 JSON을 해석할 수 없습니다.`);
         }
         clearTimeout(timeout);
@@ -1332,6 +1358,7 @@ const ANTHROPIC_DELTAS = {
       ? String(field(field(payload, "delta"), "thinking"))
       : null,
   failure: anthropicStreamFailure,
+  done: (payload: unknown) => field(payload, "type") === "message_stop",
 };
 
 /** Claude Messages API 브라우저 직행 어댑터. 키는 Anthropic 이외의 호스트로 전송하지 않는다. */
@@ -1414,6 +1441,7 @@ export function createOpenRouterClient(
         return typeof piece === "string" && piece !== "" ? piece : null;
       },
       failure: chatCompletionsFailure,
+      done: (payload) => chatCompletionsFinishReason(payload) === "stop",
     }),
   );
 }
@@ -1467,6 +1495,7 @@ export function createOllamaClient(
         return typeof piece === "string" && piece !== "" ? piece : null;
       },
       failure: ollamaFailure,
+      done: (payload) => field(payload, "done") === true,
     }),
   );
 }
@@ -1494,6 +1523,15 @@ function isSharedProxyRetryable(status: number): boolean {
 function sharedTimeoutError(label: string, timeoutMs: number): Error {
   return new Error(
     `${label} 요청 시간 초과 (${timeoutMs}ms) — 같은 요청을 다시 보내면 관리자 비용만 반복되니 재시도하지 않습니다. 긴 생성은 본인 키로 실행해 주세요.`,
+  );
+}
+
+/** 공유 경로의 네트워크 단절 — 역시 재시도하지 않는다. 브라우저는 "연결조차 안 됐다"와 "서버가 받아
+ *  벤더에 쓴 뒤 edge가 끊었다"를 구분해 주지 않고(둘 다 Failed to fetch), 후자를 다시 보내면 관리자
+ *  키에 중복 과금된다. 관리자 비용이 걸린 경로라 fail-closed로 둔다. */
+function sharedNetworkError(label: string, cause: unknown): Error {
+  return new Error(
+    `${label} 네트워크 오류: ${cause instanceof Error ? cause.message : String(cause)} — 서버가 이미 받아 처리 중일 수 있어 자동으로 다시 보내지 않습니다. 잠시 뒤 직접 다시 시도해 주세요.`,
   );
 }
 
@@ -1589,14 +1627,10 @@ export function createSharedOpenAIClient(
           });
         } catch (e) {
           clearTimeout(timeout);
-          // 시간 초과는 재시도하지 않는다 — 서버 504와 같은 규칙(중복 과금 방지). 네트워크 오류만 백오프
+          // 시간 초과도 네트워크 단절도 재시도하지 않는다 — 서버 504와 같은 규칙(중복 과금 방지).
+          // 재시도는 벤더가 처리하지 않은 일시 거절(429·5xx, 504 제외)에만 건다
           if (controller.signal.aborted) throw sharedTimeoutError("OpenAI(공유)", timeoutMs);
-          lastError = new Error(
-            `OpenAI(공유) 네트워크 오류: ${e instanceof Error ? e.message : String(e)}`,
-          );
-          if (attempt + 1 >= maxAttempts) throw lastError;
-          await wait(retryBaseMs * (attempt + 1));
-          continue;
+          throw sharedNetworkError("OpenAI(공유)", e);
         }
 
         if (!res.ok) {
@@ -1658,14 +1692,9 @@ export function createSharedGeminiClient(
           });
         } catch (e) {
           clearTimeout(timeout);
-          // 시간 초과는 재시도하지 않는다 — OpenAI(공유)와 같은 규칙
+          // 시간 초과도 네트워크 단절도 재시도하지 않는다 — OpenAI(공유)와 같은 규칙
           if (controller.signal.aborted) throw sharedTimeoutError("Gemini(공유)", timeoutMs);
-          lastError = new Error(
-            `Gemini(공유) 네트워크 오류: ${e instanceof Error ? e.message : String(e)}`,
-          );
-          if (attempt + 1 >= maxAttempts) throw lastError;
-          await wait(retryBaseMs * (attempt + 1));
-          continue;
+          throw sharedNetworkError("Gemini(공유)", e);
         }
 
         if (!res.ok) {

@@ -892,9 +892,9 @@ describe("추론 정책 — 모든 호출에 추론, 깊이는 effort", () => {
     vi.unstubAllGlobals();
   });
 
-  const sseOnce = (line: string) =>
+  const sseOnce = (...lines: string[]) =>
     vi.fn(async () =>
-      new Response(`data: ${line}\n\ndata: [DONE]\n\n`, {
+      new Response(lines.map((line) => `data: ${line}\n\n`).join("") + "data: [DONE]\n\n", {
         status: 200,
         headers: { "Content-Type": "text/event-stream" },
       }),
@@ -903,7 +903,10 @@ describe("추론 정책 — 모든 호출에 추론, 깊이는 effort", () => {
     fetchMock.mock.calls.map(([, init]) => JSON.parse(String((init as RequestInit).body)));
 
   it("OpenAI: 채점(medium)과 생성(high) 모두 추론을 붙이고 temperature는 보내지 않는다", async () => {
-    const fetchMock = sseOnce('{"type":"response.output_text.delta","delta":"x"}');
+    const fetchMock = sseOnce(
+      '{"type":"response.output_text.delta","delta":"x"}',
+      '{"type":"response.completed"}',
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     const llm = createOpenAIClient("sk-test", "gpt-5.6-sol") as StreamingLlmClient;
@@ -923,7 +926,8 @@ describe("추론 정책 — 모든 호출에 추론, 깊이는 effort", () => {
       .mockResolvedValueOnce(jsonResponse({ content: [{ type: "text", text: "ok" }] }))
       .mockResolvedValueOnce(
         new Response(
-          'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}\n\n',
+          'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}\n\n' +
+            'data: {"type":"message_stop"}\n\n',
           { status: 200, headers: { "Content-Type": "text/event-stream" } },
         ),
       );
@@ -956,7 +960,7 @@ describe("추론 정책 — 모든 호출에 추론, 깊이는 effort", () => {
       .mockResolvedValueOnce(successResponse("ok"))
       .mockResolvedValueOnce(
         new Response(
-          'data: {"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}\n\n',
+          'data: {"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}]}\n\n',
           { status: 200, headers: { "Content-Type": "text/event-stream" } },
         ),
       );
@@ -1193,6 +1197,86 @@ describe("비스트리밍 응답도 절단·실패를 알리면 잘린 산출물
     await expect(openai.complete("생성")).rejects.toThrow("OpenAI 응답 실패: server_error");
   });
 
+  it("Claude: 컨텍스트 창 절단·알 수 없는 종료 사유도 텍스트가 있어도 오류다 (허용 목록: end_turn·stop_sequence)", async () => {
+    const claude = createAnthropicClient("sk-ant-test", "claude-opus-5", { retryBaseMs: 0 });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          content: [{ type: "text", text: "앞부분" }],
+          stop_reason: "model_context_window_exceeded",
+        }),
+      ),
+    );
+    await expect(claude.complete("생성", { effort: "high" })).rejects.toThrow(
+      "Claude 컨텍스트 창 한도에 도달해 산출물이 잘렸습니다 (model_context_window_exceeded)",
+    );
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({ content: [{ type: "text", text: "앞부분" }], stop_reason: "pause_turn" }),
+      ),
+    );
+    await expect(claude.complete("생성")).rejects.toThrow("응답이 정상 종료되지 않았습니다 (pause_turn)");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({ content: [{ type: "text", text: "완성" }], stop_reason: "stop_sequence" }),
+      ),
+    );
+    await expect(claude.complete("생성")).resolves.toBe("완성");
+
+    // 스트림의 message_delta도 같은 판정이다
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        sse(
+          '{"type":"content_block_delta","delta":{"type":"text_delta","text":"앞부분"}}',
+          '{"type":"message_delta","delta":{"stop_reason":"model_context_window_exceeded"}}',
+          '{"type":"message_stop"}',
+        ),
+      ),
+    );
+    await expect(
+      (claude as StreamingLlmClient).completeStream("생성", { effort: "high" }, () => {}),
+    ).rejects.toThrow("컨텍스트 창 한도에 도달해 산출물이 잘렸습니다");
+  });
+
+  it("OpenRouter: finish_reason이 content_filter·error면 텍스트가 있어도 오류, stop만 정상이다", async () => {
+    const openrouter = createOpenRouterClient("or-key", "openai/gpt-5.6-sol", { retryBaseMs: 0 });
+    for (const reason of ["content_filter", "error"]) {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+          jsonResponse({ choices: [{ message: { content: "앞부분" }, finish_reason: reason }] }),
+        ),
+      );
+      await expect(openrouter.complete("생성")).rejects.toThrow(
+        `OpenRouter 응답이 정상 종료되지 않았습니다 (${reason})`,
+      );
+    }
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({ choices: [{ message: { content: "완성" }, finish_reason: "stop" }] }),
+      ),
+    );
+    await expect(openrouter.complete("생성")).resolves.toBe("완성");
+
+    // Ollama의 done_reason도 stop만 정상이다
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({ message: { content: "앞부분" }, done: true, done_reason: "abort" }),
+      ),
+    );
+    await expect(
+      createOllamaClient("http://localhost:11434", "llama3.1", { retryBaseMs: 0 }).complete("생성"),
+    ).rejects.toThrow("Ollama 응답이 정상 종료되지 않았습니다 (abort)");
+  });
+
   it("Claude: stop_reason이 max_tokens·refusal이면 오류, end_turn은 정상이다", async () => {
     const claude = createAnthropicClient("sk-ant-test", "claude-opus-5", { retryBaseMs: 0 });
     vi.stubGlobal(
@@ -1307,6 +1391,157 @@ describe("비스트리밍 응답도 절단·실패를 알리면 잘린 산출물
   });
 });
 
+describe("직접(BYO) 비스트리밍 경로의 시간 초과 — 재전송하지 않는다", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  /** abort 신호가 오기 전까지 응답하지 않는 fetch */
+  const hanging = (init?: RequestInit) =>
+    new Promise<Response>((_, reject) => {
+      init?.signal?.addEventListener("abort", () =>
+        reject(new DOMException("The user aborted a request.", "AbortError")),
+      );
+    });
+  const timeoutOptions = { requestTimeoutMs: 10, maxAttempts: 3, retryBaseMs: 0 };
+
+  it.each([
+    ["OpenAI", () => createOpenAIClient("sk-test", "gpt-5.6-sol", timeoutOptions)],
+    ["Gemini", () => createGeminiClient("AIzaTest", "gemini-3.8-flash", timeoutOptions)],
+    ["Claude", () => createAnthropicClient("sk-ant-test", "claude-opus-5", timeoutOptions)],
+    ["OpenRouter", () => createOpenRouterClient("or-key", "openai/gpt-5.6-sol", timeoutOptions)],
+  ])("%s: 응답이 없어 시간 초과되면 maxAttempts가 남아도 fetch는 한 번뿐이다", async (label, make) => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => hanging(init));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(make().complete("생성", { effort: "low" })).rejects.toThrow(
+      `${label} 요청 시간 초과 (10ms) — 벤더가 이미 받아들인 요청일 수 있어 다시 보내지 않습니다.`,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("Vertex AI: 토큰 발급이 멈춰 시간 초과돼도 다시 보내지 않는다", async () => {
+    const raw = await vertexCredential();
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => hanging(init));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      createVertexClient(raw, "gemini-3.8-flash", timeoutOptions).complete("생성", { effort: "low" }),
+    ).rejects.toThrow("Vertex AI 요청 시간 초과 (10ms) — 벤더가 이미 받아들인 요청일 수 있어 다시 보내지 않습니다.");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("응답 본문(JSON)을 읽는 도중 시간 초과돼도 다시 보내지 않는다", async () => {
+    // HTTP 200은 왔지만 본문이 끝나지 않는 응답 — 벤더가 받아들여 생성 중인 요청이다
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const response = {
+        ok: true,
+        status: 200,
+        json: () =>
+          new Promise<never>((_, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("The user aborted a request.", "AbortError")),
+            );
+          }),
+      };
+      return response as unknown as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      createOpenAIClient("sk-test", "gpt-5.6-sol", timeoutOptions).complete("생성", { effort: "low" }),
+    ).rejects.toThrow("OpenAI 요청 시간 초과 (10ms) — 벤더가 이미 받아들인 요청일 수 있어 다시 보내지 않습니다.");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("네트워크 오류(응답 없음)는 여전히 백오프 재시도한다", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(openAISuccessResponse("복구됨"));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      createOpenAIClient("sk-test", "gpt-5.6-sol", { retryBaseMs: 0 }).complete("생성"),
+    ).resolves.toBe("복구됨");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("스트림 완료 신호 — 없이 끝난 스트림은 부분 산출물이다", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const ndjson = (...lines: string[]) =>
+    new Response(lines.join("\n") + "\n", {
+      status: 200,
+      headers: { "Content-Type": "application/x-ndjson" },
+    });
+
+  const cases: Array<{
+    label: string;
+    make: () => StreamingLlmClient;
+    stream: (...lines: string[]) => Response;
+    pieces: string[];
+    terminal: string;
+  }> = [
+    {
+      label: "OpenAI",
+      make: () => createOpenAIClient("sk-test", "gpt-5.6-sol", { retryBaseMs: 0 }) as StreamingLlmClient,
+      stream: sse,
+      pieces: ['{"type":"response.output_text.delta","delta":"앞부분"}'],
+      terminal: '{"type":"response.completed"}',
+    },
+    {
+      label: "Gemini",
+      make: () => createGeminiClient("AIzaTest", "gemini-3.8-flash", { retryBaseMs: 0 }) as StreamingLlmClient,
+      stream: sse,
+      pieces: ['{"candidates":[{"content":{"parts":[{"text":"앞부분"}]}}]}'],
+      terminal: '{"candidates":[{"content":{"parts":[{"text":""}]},"finishReason":"STOP"}]}',
+    },
+    {
+      label: "Claude",
+      make: () =>
+        createAnthropicClient("sk-ant-test", "claude-opus-5", { retryBaseMs: 0 }) as StreamingLlmClient,
+      stream: sse,
+      pieces: [
+        '{"type":"content_block_delta","delta":{"type":"text_delta","text":"앞부분"}}',
+        '{"type":"message_delta","delta":{"stop_reason":"end_turn"}}',
+      ],
+      terminal: '{"type":"message_stop"}',
+    },
+    {
+      label: "OpenRouter",
+      make: () =>
+        createOpenRouterClient("or-key", "openai/gpt-5.6-sol", { retryBaseMs: 0 }) as StreamingLlmClient,
+      stream: sse,
+      pieces: ['{"choices":[{"delta":{"content":"앞부분"},"finish_reason":null}]}'],
+      terminal: '{"choices":[{"delta":{},"finish_reason":"stop"}]}',
+    },
+    {
+      label: "Ollama",
+      make: () =>
+        createOllamaClient("http://localhost:11434", "llama3.1", { retryBaseMs: 0 }) as StreamingLlmClient,
+      stream: ndjson,
+      pieces: ['{"message":{"role":"assistant","content":"앞부분"},"done":false}'],
+      terminal: '{"message":{"role":"assistant","content":""},"done":true,"done_reason":"stop"}',
+    },
+  ];
+
+  it.each(cases)(
+    "$label: 완료 신호 없이 본문이 닫히면 오류이며 비스트리밍으로 다시 보내지 않는다",
+    async ({ make, stream, pieces }) => {
+      const fetchMock = vi.fn(async () => stream(...pieces));
+      vi.stubGlobal("fetch", fetchMock);
+      const notices: string[] = [];
+      await expect(
+        make().completeStream("생성", { effort: "high" }, (chunk, kind) => {
+          if (kind === "notice") notices.push(chunk);
+        }),
+      ).rejects.toThrow("스트림이 완료 신호 없이 끝났습니다 (3자 수신)");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(notices.some((n) => n.includes("한 번에"))).toBe(false);
+    },
+  );
+
+  it.each(cases)("$label: 완료 신호가 있으면 정상 산출물이다", async ({ make, stream, pieces, terminal }) => {
+    vi.stubGlobal("fetch", vi.fn(async () => stream(...pieces, terminal)));
+    await expect(make().completeStream("생성", { effort: "high" }, () => {})).resolves.toBe("앞부분");
+  });
+});
+
 describe("공유 키 경로의 재시도", () => {
   afterEach(() => vi.unstubAllGlobals());
 
@@ -1361,7 +1596,7 @@ describe("공유 키 경로의 재시도", () => {
     expect(geminiFetch).toHaveBeenCalledTimes(1);
   });
 
-  it("네트워크 오류(연결 자체 실패)는 여전히 백오프 재시도한다", async () => {
+  it("네트워크 단절도 재시도하지 않는다 — 서버가 받아 벤더에 쓴 뒤 edge가 끊은 경우와 구분할 수 없다", async () => {
     const fetchMock = vi
       .fn()
       .mockRejectedValueOnce(new TypeError("Failed to fetch"))
@@ -1371,8 +1606,17 @@ describe("공유 키 경로의 재시도", () => {
       createSharedOpenAIClient("gpt-5.6-sol", { apiBase: "http://api.test", retryBaseMs: 0 }).complete(
         "생성",
       ),
-    ).resolves.toBe("복구됨");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    ).rejects.toThrow("OpenAI(공유) 네트워크 오류: Failed to fetch — 서버가 이미 받아 처리 중일 수 있어 자동으로 다시 보내지 않습니다");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const geminiFetch = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", geminiFetch);
+    await expect(
+      createSharedGeminiClient("gemini-3.8-flash", { apiBase: "http://api.test", retryBaseMs: 0 }).complete(
+        "생성",
+      ),
+    ).rejects.toThrow("Gemini(공유) 네트워크 오류");
+    expect(geminiFetch).toHaveBeenCalledTimes(1);
   });
 
   it("그 밖의 5xx·429는 여전히 재시도한다", async () => {
@@ -1480,7 +1724,9 @@ describe("스트림 실패 시 폴백 규칙", () => {
   });
 
   it("정상 종료했지만 산출물이 없는 스트림은 오류이며 재전송하지 않는다", async () => {
-    const fetchMock = vi.fn(async () => sse('{"type":"response.created"}'));
+    const fetchMock = vi.fn(async () =>
+      sse('{"type":"response.created"}', '{"type":"response.completed"}'),
+    );
     vi.stubGlobal("fetch", fetchMock);
     const openai = createOpenAIClient("sk-test", "gpt-5.6-sol", { retryBaseMs: 0 }) as StreamingLlmClient;
     const { notices, onChunk } = collect();
@@ -1509,7 +1755,9 @@ describe("스트림 실패 시 폴백 규칙", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(errorResponse(400, "reasoning.summary not supported"))
-      .mockResolvedValueOnce(sse('{"type":"response.output_text.delta","delta":"완성"}'));
+      .mockResolvedValueOnce(
+        sse('{"type":"response.output_text.delta","delta":"완성"}', '{"type":"response.completed"}'),
+      );
     vi.stubGlobal("fetch", fetchMock);
     const openai = createOpenAIClient("sk-test", "gpt-5.6-sol") as StreamingLlmClient;
     const { notices, onChunk } = collect();
@@ -1665,8 +1913,12 @@ describe("시간 한도 — 스트리밍은 유휴, 비스트리밍은 출력 �
           // 의미 없는 ping 줄도 바이트다 — 조각이 아니라 바이트로 유휴를 잰다
           const line = sent % 2 === 0 ? ": ping\n\n" : 'data: {"type":"response.output_text.delta","delta":"x"}\n\n';
           ctrl.enqueue(encoder.encode(line));
-          if (sent < 20) setTimeout(tick, 60);
-          else ctrl.close();
+          if (sent < 20) {
+            setTimeout(tick, 60);
+          } else {
+            ctrl.enqueue(encoder.encode('data: {"type":"response.completed"}\n\n'));
+            ctrl.close();
+          }
         };
         setTimeout(tick, 60);
       }),
@@ -1703,7 +1955,9 @@ describe("시간 한도 — 스트리밍은 유휴, 비스트리밍은 출력 �
     await vi.advanceTimersByTimeAsync(300_000);
     expect(settled).toBe(false); // 예전 5분 절대 한도에서는 여기서 끊겼다
     await vi.advanceTimersByTimeAsync(900_000);
-    await expect(call).resolves.toBe("OpenAI 요청 시간 초과 (1200000ms)");
+    await expect(call).resolves.toBe(
+      "OpenAI 요청 시간 초과 (1200000ms) — 벤더가 이미 받아들인 요청일 수 있어 다시 보내지 않습니다.",
+    );
   });
 
   it("짧은 본문 예산은 5분 바닥을 유지하고, 명시한 requestTimeoutMs는 그대로 쓴다", async () => {
