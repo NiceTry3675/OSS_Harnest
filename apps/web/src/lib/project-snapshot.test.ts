@@ -13,7 +13,9 @@ import {
   IndexedDbProjectStore,
   markUnavailableRestoredHoldout,
   PROJECT_SNAPSHOT_VERSION,
+  projectRestoredCheckpoint,
   restoreProjectSnapshot,
+  SnapshotConflictError,
   type ProjectSnapshot,
   type StoredProjectSnapshot,
 } from "./project-snapshot";
@@ -94,7 +96,8 @@ describe("IndexedDbProjectStore", () => {
     await store.save(snapshot);
 
     const loaded = await store.load();
-    expect(loaded).toEqual(snapshot);
+    // 판 번호는 저장소가 붙인다 — 호출자가 넘긴 내용은 그대로다
+    expect(loaded).toEqual({ ...snapshot, revision: 1 });
     expect(JSON.stringify(loaded)).not.toContain("apiKey");
     const restoredMatch = restoreProjectSnapshot(loaded!)!;
     expect(restoredMatch.approvedAt).toBe(snapshot.approvedAt);
@@ -111,6 +114,37 @@ describe("IndexedDbProjectStore", () => {
       final: null,
       errors: { baseline: null, final: null },
     });
+  });
+
+  it("잠금 없는 환경 방어: 다른 인스턴스(탭)가 먼저 저장하면 오래된 판의 저장은 거부되고 저장소는 그대로다", async () => {
+    globalThis.indexedDB = fakeIndexedDB;
+    const name = "harnest-project-revision-cas";
+    const tabA = new IndexedDbProjectStore(name);
+    const tabB = new IndexedDbProjectStore(name);
+    // 읽지 않은 인스턴스의 첫 저장은 저장소의 현재 판을 잇는다(0 → 1)
+    await tabA.save(makeSnapshot({ approvedAt: null, approvedDigest: null, runId: null }));
+    await tabB.load(); // B는 1판을 읽었다
+    // A가 승인·runId를 기록해 2판을 만든다
+    await tabA.save(makeSnapshot());
+    // B의 오래된 상태(승인 전)는 2판을 덮어쓰지 못한다
+    await expect(
+      tabB.save(makeSnapshot({ approvedAt: null, approvedDigest: null, runId: null })),
+    ).rejects.toBeInstanceOf(SnapshotConflictError);
+    const stored = await tabA.load();
+    expect(stored?.approvedAt).toBe(makeSnapshot().approvedAt);
+    expect(stored?.runId).toBe(makeSnapshot().runId);
+    expect(stored?.revision).toBe(2);
+    // 거부된 뒤에도 B는 계속 거부된다 — 다시 읽어야(새로고침) 이어서 저장할 수 있다
+    await expect(tabB.save(makeSnapshot())).rejects.toBeInstanceOf(SnapshotConflictError);
+    await tabB.load();
+    // 내용이 같은 저장은 판을 올리지 않는다 — 갓 연 유휴 탭이 실행 중인 탭을 밀어내지 않게
+    await expect(tabB.save(makeSnapshot())).resolves.toBeUndefined();
+    expect((await tabA.load())?.revision).toBe(2);
+    // 내용이 다르면 다음 판으로 기록된다
+    await expect(
+      tabB.save(makeSnapshot({ approvedAt: null, approvedDigest: null, runId: null })),
+    ).resolves.toBeUndefined();
+    expect((await tabA.load())?.revision).toBe(3);
   });
 
   it("v1 스냅샷은 검사 4종 리포트를 2종으로 줄이고 overall을 다시 계산해 마이그레이션한다", () => {
@@ -184,6 +218,46 @@ describe("IndexedDbProjectStore", () => {
     expect(settled.errors?.baseline).toContain("복원할 수 없습니다");
     expect(settled.errors?.final).toBeNull();
     expect(settled.final).toBeNull();
+  });
+
+  it("복원 시 running 저장본은 paused로 투영하고, 잠금을 쥔 탭에서만 탭 회수 runId를 기록한다", () => {
+    const running: LoopCheckpoint<unknown> = {
+      runId: "closed-mid-round",
+      packDigest: pack.definitionDigest,
+      status: "running",
+      round: 2,
+      champion: "라운드 2",
+      championScore: 2,
+      championViolations: [],
+      championGuardScore: null,
+      curve: [1, 1.5, 2],
+      guardCurve: [null, null, null],
+      tree: [],
+      provenance: [],
+      rngState: 1,
+    };
+    // 탭이 닫혀 남은 running — 진행 중이던 3회차는 저장되지 않았다는 안내의 근거
+    const owned = projectRestoredCheckpoint(running, pack.definitionDigest, true);
+    expect(owned.checkpoint?.status).toBe("paused");
+    expect(owned.checkpoint?.round).toBe(2);
+    expect(owned.interruptedRunId).toBe("closed-mid-round");
+    // 읽기 전용 탭의 running 저장본은 다른 탭이 지금 돌리고 있는 것 — 탭 회수가 아니다
+    const readOnly = projectRestoredCheckpoint(running, pack.definitionDigest, false);
+    expect(readOnly.checkpoint?.status).toBe("paused");
+    expect(readOnly.interruptedRunId).toBeNull();
+    // paused·done 저장본은 그대로이고 안내도 없다
+    const paused = projectRestoredCheckpoint({ ...running, status: "paused" }, pack.definitionDigest, true);
+    expect(paused.checkpoint?.status).toBe("paused");
+    expect(paused.interruptedRunId).toBeNull();
+    // 현재 팩에 결속되지 않은 저장본은 버린다
+    expect(projectRestoredCheckpoint(running, "b".repeat(64), true)).toEqual({
+      checkpoint: null,
+      interruptedRunId: null,
+    });
+    expect(projectRestoredCheckpoint(null, pack.definitionDigest, true)).toEqual({
+      checkpoint: null,
+      interruptedRunId: null,
+    });
   });
 
   it("복원된 runId로 IndexedDB 체크포인트를 이어서 완료한다", async () => {

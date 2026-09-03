@@ -34,6 +34,10 @@ export type ExportSaveErrorCode =
   | "post_timeout"
   | "post_network"
   | "post_rejected"
+  /** HTTP 429 — IP별 시간당 기록 횟수 제한. 잠시 뒤 같은 본문을 다시 보내도 된다. */
+  | "post_rate_limited"
+  /** HTTP 507 — 서버 저장 공간 상한. 재시도해도 소용없으니 JSON 내보내기로 보관한다. */
+  | "post_storage_full"
   | "invalid_receipt"
   | "receipt_hash_mismatch"
   | "verification_timeout"
@@ -103,6 +107,84 @@ function savedExportResponse(value: unknown, location: string | null): SavedExpo
 
 export function savedExportUrl(record: SavedExport): string {
   return `${API_BASE}${record.location}`;
+}
+
+/** JSON이 아닌 거부 본문의 발췌 상한 — 프록시·게이트웨이의 HTML 오류 페이지 등 */
+export const REJECTION_EXCERPT_MAX_CHARS = 200;
+
+/** 마크업 본문에서 사람이 읽을 글만 — script·style·주석 내용은 버리고 태그를 걷어낸 뒤 공백을 접어
+ *  maxChars 이내로 자른다(넘치면 말줄임). 남는 글이 없으면 null. 사용자 문구에 `<html>` 같은 태그
+ *  원문이 실리지 않게 하기 위한 것이지, HTML 해석기가 아니다. */
+export function plainTextExcerpt(raw: string, maxChars: number): string | null {
+  const text = raw
+    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&amp;/gi, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return null;
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
+}
+
+/** 거부 응답의 사유 — FastAPI는 `{ "detail": "..." }`로 준다. 본문이 없거나 읽지 못하면 null.
+ *  JSON이 아닌 본문(프록시·게이트웨이의 HTML 오류 페이지 등)은 태그를 걷어낸 글만 200자 이내로 싣고,
+ *  걷어내고 남는 글이 없으면 null — 그때는 상태 코드 기반 일반 문구가 대신한다(describeRejection). */
+async function rejectionDetail(response: Response): Promise<string | null> {
+  let text: string;
+  try {
+    text = (await response.text()).trim();
+  } catch {
+    return null;
+  }
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (parsed !== null && typeof parsed === "object" && "detail" in parsed) {
+      const detail = (parsed as { detail: unknown }).detail;
+      const flat = typeof detail === "string" ? detail : JSON.stringify(detail);
+      return flat.trim().slice(0, 500) || null;
+    }
+  } catch {
+    // JSON이 아니다 — 아래에서 태그를 걷어낸 발췌만 싣는다
+  }
+  return plainTextExcerpt(text, REJECTION_EXCERPT_MAX_CHARS);
+}
+
+/** 거부 상태별 사용자 문구. 서버 detail이 있으면 그대로 싣는다 — 사유 없는 "HTTP 422"만으로는
+ *  사용자가 무엇을 고쳐야 하는지 알 수 없다. */
+export function describeRejection(status: number, detail: string | null): {
+  message: string;
+  code: ExportSaveErrorCode;
+} {
+  if (status === 429) {
+    return {
+      code: "post_rate_limited",
+      message: detail
+        ? `${detail} (HTTP 429)`
+        : "서버 기록 요청이 너무 잦아 잠시 제한되었습니다 (HTTP 429). 잠시 후 다시 시도하거나 JSON 내보내기로 보관해 주세요.",
+    };
+  }
+  if (status === 507) {
+    return {
+      code: "post_storage_full",
+      message: detail
+        ? `${detail} (HTTP 507)`
+        : "서버 저장 공간이 가득 차 기록할 수 없습니다 (HTTP 507). 관리자에게 알리고, 지금은 JSON 내보내기로 보관해 주세요.",
+    };
+  }
+  return {
+    code: "post_rejected",
+    message: detail
+      ? `서버가 기록을 거부했습니다(HTTP ${status}): ${detail}`
+      : `서버가 기록을 거부했습니다(HTTP ${status}).`,
+  };
 }
 
 function timeoutMs(options: SaveExportOptions): number {
@@ -190,9 +272,12 @@ export async function saveExport(
         body: serialized,
         signal,
       });
-      if (response.status !== 201) return { response, receipt: null as unknown };
+      if (response.status !== 201) {
+        // 거부 사유는 본문에 있다 — 시간 제한 안에서 함께 읽어 둔다
+        return { response, receipt: null as unknown, detail: await rejectionDetail(response) };
+      }
       try {
-        return { response, receipt: (await response.json()) as unknown };
+        return { response, receipt: (await response.json()) as unknown, detail: null };
       } catch (error) {
         throw new ExportSaveError(
           "서버가 저장 영수증을 올바른 JSON으로 반환하지 않았습니다. 서버에는 이미 저장되었을 수 있습니다.",
@@ -207,12 +292,8 @@ export async function saveExport(
   );
 
   if (post.response.status !== 201) {
-    throw new ExportSaveError(
-      `서버가 기록을 거부했습니다(HTTP ${post.response.status}).`,
-      "post_rejected",
-      "post",
-      false,
-    );
+    const rejection = describeRejection(post.response.status, post.detail);
+    throw new ExportSaveError(rejection.message, rejection.code, "post", false);
   }
   const saved = savedExportResponse(post.receipt, post.response.headers.get("Location"));
   if (saved === null) {

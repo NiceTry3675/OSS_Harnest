@@ -2,6 +2,9 @@
  *  llm_judge 포함 루프는 시험관 검증 배터리(안정성·꼼수 내성)가 승인 전 요건이다
  *  (SPEC §3 원칙 2·§5.1). 배터리는 이 화면이 자동 실행한다 — 기준이 수정되면(다이제스트 변경)
  *  이전 리포트가 forDigest 불일치로 무효화되고, 새 다이제스트에 대한 검증이 다시 자동으로 돈다.
+ *  자동 실행은 다이제스트당 1회다(SPEC §5.2): 시도한 다이제스트·진행 상태는 화면이 아니라
+ *  프로젝트(examinerBattery)에 기록되므로, 화면을 떠났다 돌아와도 다시 시작하지 않고 진행 중이던
+ *  결과는 forDigest 일치로 그대로 받는다. 억제된 상태에서는 "점검 시작" 버튼으로 직접 시작한다.
  *
  *  실패의 의미론:
  *  - 검증 리포트 fail → 승인 차단(approvalBlockers). 기준을 수정하면 새 다이제스트로 재검증.
@@ -9,13 +12,16 @@
  *  결정적 전용 루프의 면제(SPEC §10)는 그대로 노출한다 — 정직 표기가 계약이다.
  *  pack만 보고 렌더하며 템플릿별 분기를 갖지 않는다(judgeProcedure union + 등록소 examiner로 분기). */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { ExaminerCheckId, ExaminerCheckResult, ExaminerVerdict } from "@harnest/contracts";
 import { ActivityConsole } from "../components/ActivityConsole";
 import { appendStream, clearStream, endStream, setStreamStatus, withActivityLog } from "../lib/activityLog";
 import { setFlowStep } from "../lib/flowStep";
+import { CHECK_ORDER, checkCardTexts, type CheckCardText } from "../lib/examinerCards";
+import { batteryErrorFor } from "../lib/examinerBattery";
 import { SealPanel } from "../components/SealPanel";
+import { ErrorNote } from "../components/ErrorNote";
 import { useProject } from "../state";
 import { getTemplate } from "../templates";
 import { countCaseProvenance } from "../lib/case-provenance";
@@ -36,46 +42,37 @@ const VERDICT_COLOR: Record<ExaminerVerdict, string> = {
   fail: "var(--bad)",
 };
 
-/** 시험 카드에 쓰는 짧은 이름과 설명. cue는 진행 메시지에서 현재 검사를 찾는 마커다. */
-const CHECK_CARD: Record<ExaminerCheckId, { name: string; desc: string; cue: string }> = {
-  stability: {
-    name: "재채점 결과가 안정적인가",
-    desc: "같은 문서의 점수 차이가 허용 범위 안인지",
-    cue: "안정성",
-  },
-  hack_resistance: {
-    name: "꾸며낸 답을 가려내는가",
-    desc: "사실을 꾸미거나 칭찬만 하는 답을 구분하는지",
-    cue: "날조",
-  },
-};
-
-const CHECK_ORDER: ExaminerCheckId[] = ["stability", "hack_resistance"];
-
 const VERDICT_CLASS: Record<ExaminerVerdict, string> = {
   pass: "is-pass",
   warn: "is-warn",
   fail: "is-fail",
 };
 
-/** 검증이 도는 동안 보여주는 카드 — 진행 메시지로 지금 어느 시험인지 표시한다 */
+/** 검증이 도는 동안 보여주는 카드 — 진행 메시지로 지금 어느 시험인지 표시한다.
+ *  카드 문구는 등록소가 넘긴 것(없으면 일반 문구)을 렌더만 한다 — 배터리가 무엇을 어떻게 재는지는
+ *  템플릿의 것이라 이 페이지에 적지 않는다. 진행 중 카드는 '결과가 아직 없는 첫 카드'로 정하며,
+ *  진행 메시지의 낱말(cue)로 찾지 않는다: 문구가 바뀌면 조용히 표시가 꺼졌던 결합이다. */
 function CheckCards({
+  cards,
   checks,
   progress,
 }: {
+  cards: Record<ExaminerCheckId, CheckCardText>;
   checks: ReadonlyArray<{ id: ExaminerCheckId; verdict: ExaminerVerdict; note: string }> | null;
   progress: string;
 }) {
+  // 배터리가 도는 동안(progress가 있음) 결과가 없는 첫 검사가 지금 도는 검사다
+  const current = progress === "" ? null : (CHECK_ORDER.find((id) => !checks?.some((c) => c.id === id)) ?? null);
   return (
     <div className="test-grid">
       {CHECK_ORDER.map((id) => {
         const done = checks?.find((c) => c.id === id) ?? null;
-        const running = !done && progress.includes(CHECK_CARD[id].cue);
+        const running = !done && current === id;
         const cls = done ? VERDICT_CLASS[done.verdict] : running ? "is-running" : "";
         return (
           <div key={id} className={`test ${cls}`} title={done ? done.note : undefined}>
-            <b>{CHECK_CARD[id].name}</b>
-            <p>{CHECK_CARD[id].desc}</p>
+            <b>{cards[id].name}</b>
+            <p>{cards[id].desc}</p>
             {done ? (
               <div className="hint" style={{ margin: "8px 0 0", fontSize: 12 }}>
                 {done.note}
@@ -157,19 +154,19 @@ export function ApprovalPage() {
     answers,
     examinerReport,
     setExaminerReport,
+    examinerBattery,
+    setExaminerBattery,
     blockers,
     approvedDigest,
     approvedAt,
     approve,
+    readOnly,
   } = useProject();
   const navigate = useNavigate();
   const entry = getTemplate(templateId);
+  // 검사 카드 문구 — 등록소가 넘긴 것으로 일반 문구를 덮는다. 페이지는 렌더만 한다
+  const checkCards = useMemo(() => checkCardTexts(entry?.examiner?.checkCards), [entry]);
 
-  const [running, setRunning] = useState(false);
-  const [progress, setProgress] = useState("");
-  // 검증이 도는 동안 하나씩 도착하는 검사 결과 — 카드가 즉시 색을 바꾼다
-  const [liveChecks, setLiveChecks] = useState<ExaminerCheckResult[]>([]);
-  const [batteryError, setBatteryError] = useState<string | null>(null);
   const [credentialInput, setCredentialInput] = useState(() => {
     const procedure = compiled?.pack.judgeProcedure;
     if (
@@ -192,21 +189,16 @@ export function ApprovalPage() {
     () => (entry ? countCaseProvenance(entry.questions, answers) : null),
     [entry, answers],
   );
-  // 재컴파일 뒤 늦게 도착한 배터리 결과를 버리기 위한 최신 다이제스트 참조(레이스 가드)
-  const packDigestRef = useRef<string | null>(null);
-  packDigestRef.current = pack?.definitionDigest ?? null;
-  const approvedRef = useRef(false);
-  const activeRef = useRef(false);
-  // 자동 검증은 다이제스트당 한 번만 시도한다 — 오류 시 무한 재시도로 비용이 새지 않게
-  const autoRunDigestRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    activeRef.current = true;
-    return () => {
-      // 페이지를 떠난 동안 도착한 배터리 결과가 새 화면의 승인 증거를 바꾸지 못하게 한다.
-      activeRef.current = false;
-    };
-  }, []);
+  // 배터리 진행 상태는 프로젝트의 것이다 — 이 다이제스트의 배터리가 돌고 있을 때만 "진행 중"
+  const digest = pack?.definitionDigest ?? null;
+  const running = digest !== null && examinerBattery.inFlightDigest === digest;
+  const progress = running ? examinerBattery.progress : "";
+  // 검증이 도는 동안 하나씩 도착하는 검사 결과 — 카드가 즉시 색을 바꾼다
+  const liveChecks: ExaminerCheckResult[] = running ? examinerBattery.checks : [];
+  // 오류도 리포트처럼 다이제스트에 결속된다 — 재컴파일 전 다이제스트의 배터리가 늦게 실패해도 이 화면에
+  // 남지 않는다(늦은 결과는 Provider가 forDigest로 거르는 것과 같은 규칙)
+  const batteryError = batteryErrorFor(examinerBattery, digest);
+  const autoRunSuppressed = digest !== null && examinerBattery.autoRunDigest === digest;
 
   const validReport =
     examinerReport !== null && pack !== null && examinerReport.forDigest === pack.definitionDigest;
@@ -219,57 +211,77 @@ export function ApprovalPage() {
   // pack 유무와 관계없이 같은 순서로 호출해 조기 반환 시에도 Hooks 규칙을 지킨다.
   useEffect(() => {
     setFlowStep({ kind: "approval" });
-    clearStream(); // 앞 화면에서 흐르던 글이 이어지지 않게 한다
+    // 앞 화면에서 흐르던 글이 이어지지 않게 한다 — 단, 돌고 있는 배터리의 출력은 지우지 않는다
+    if (!running) clearStream();
+    // eslint 미사용 — 마운트 시점의 running만 본다
   }, []);
-  approvedRef.current = approved;
 
   const runBattery = async (): Promise<void> => {
-    if (!entry?.examiner || !compiled || !pack || running || approved) return;
-    setBatteryError(null);
+    if (!entry?.examiner || !compiled || !pack || approved || readOnly) return;
     let llm;
     try {
       llm = entry.createLlm(compiled);
       if (llm) llm = withActivityLog(llm, "선택한 AI의 평가를 사전 점검하는 중");
     } catch (e) {
-      setBatteryError(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      setExaminerBattery((prev) => ({
+        ...prev,
+        error: { forDigest: pack.definitionDigest, message },
+      }));
       return;
     }
     if (!llm) return;
     const startedDigest = pack.definitionDigest;
-    setRunning(true);
+    // 배터리는 한 번에 하나만 — 같은 틱의 이중 클릭도 함수형 갱신 안에서 걸러진다
+    let claimed = false;
+    setExaminerBattery((prev) => {
+      if (prev.inFlightDigest !== null) return prev;
+      claimed = true;
+      return { ...prev, inFlightDigest: startedDigest, progress: "", checks: [], error: null };
+    });
+    if (!claimed) return;
+    const whileRunning = (
+      patch: (prev: typeof examinerBattery) => typeof examinerBattery,
+    ): void => setExaminerBattery((prev) => (prev.inFlightDigest === startedDigest ? patch(prev) : prev));
     try {
-      setLiveChecks([]);
       clearStream("선택한 AI의 평가를 사전 점검하는 중");
-      const report = await entry.examiner.runBattery(compiled, llm, setProgress, (c) =>
-        setLiveChecks((prev) => [...prev.filter((p) => p.id !== c.id), c]),
+      const report = await entry.examiner.runBattery(
+        compiled,
+        llm,
+        (message) => whileRunning((prev) => ({ ...prev, progress: message })),
+        (c) => whileRunning((prev) => ({ ...prev, checks: [...prev.checks.filter((p) => p.id !== c.id), c] })),
       );
-      // 실행 중 기준이 재컴파일·승인됐거나 화면을 떠났다면 이 결과는 현재 승인 증거가 아니다.
-      if (
-        !activeRef.current ||
-        approvedRef.current ||
-        packDigestRef.current !== startedDigest
-      ) return;
+      // 재컴파일·승인 뒤 도착한 결과는 Provider가 forDigest·승인 여부로 거른다 — 화면 이탈과는 무관
       setExaminerReport(report);
     } catch (e) {
-      if (!activeRef.current || packDigestRef.current !== startedDigest) return;
-      setBatteryError(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      // 시작한 다이제스트에 결속한다 — 그사이 기준이 바뀌었으면 새 화면은 이 오류를 싣지 않는다
+      whileRunning((prev) => ({ ...prev, error: { forDigest: startedDigest, message } }));
     } finally {
-      if (activeRef.current) {
-        setRunning(false);
-        setProgress("");
-      }
+      whileRunning((prev) => ({ ...prev, inFlightDigest: null, progress: "" }));
     }
   };
 
   // 수정→재검증 자동 왕복 — 유효한 리포트가 없으면 배터리를 자동으로 시작한다.
-  // 키 없음·전송 오류로 멈춘 경우는 아래 오류 상자에서 수동으로 다시 시작한다.
+  // 다이제스트당 한 번만이며(재마운트·오류 후 재진입 포함) 그 뒤는 사용자가 버튼으로 시작한다.
+  // 다른 다이제스트의 배터리가 아직 돌고 있으면 끝난 뒤에 시작한다(이중 비용·출력 뒤섞임 방지).
   useEffect(() => {
-    if (!entry?.examiner || pack === null || approved || running || validReport) return;
-    if (autoRunDigestRef.current === pack.definitionDigest) return;
-    autoRunDigestRef.current = pack.definitionDigest;
+    if (!entry?.examiner || pack === null || approved || readOnly || running || validReport) return;
+    if (examinerBattery.inFlightDigest !== null) return;
+    if (examinerBattery.autoRunDigest === pack.definitionDigest) return;
+    setExaminerBattery((prev) => ({ ...prev, autoRunDigest: pack.definitionDigest }));
     void runBattery();
     // eslint 미사용 — runBattery는 렌더마다 새로 만들어지므로 다이제스트 기준으로만 발화한다
-  }, [entry, pack?.definitionDigest, approved, running, validReport]);
+  }, [
+    entry,
+    pack?.definitionDigest,
+    approved,
+    readOnly,
+    running,
+    validReport,
+    examinerBattery.inFlightDigest,
+    examinerBattery.autoRunDigest,
+  ]);
 
   if (!compiled || !entry || !pack) {
     return (
@@ -307,20 +319,25 @@ export function ApprovalPage() {
           setCredentialInput("");
         }
       }
-      setBatteryError(null);
+      setExaminerBattery((prev) => ({ ...prev, error: null }));
       await runBattery();
     } catch (error) {
-      setBatteryError(error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      setExaminerBattery((prev) => ({
+        ...prev,
+        error: { forDigest: pack.definitionDigest, message },
+      }));
     } finally {
       setCredentialBusy(false);
     }
   };
 
-  const batteryErrorBox =
-    batteryError !== null && !running ? (
-      <div style={{ marginTop: 10 }}>
-        <p className="error" style={{ margin: "0 0 8px" }}>{batteryError}</p>
-        {jp.kind === "case_answering" && jp.judge.provider !== "mock" ? (
+  // 오류 문구는 항상 마운트된 alert 영역에 갈아 끼운다 — 조건부 삽입은 보조기기가 놓친다
+  const batteryErrorBox = (
+    <div style={{ marginTop: 10 }}>
+      <ErrorNote message={!running ? batteryError : null} live="assertive" style={{ margin: "0 0 8px" }} />
+      {batteryError !== null && !running ? (
+        jp.kind === "case_answering" && jp.judge.provider !== "mock" ? (
           <div style={{ display: "grid", gap: 8 }}>
             <ProviderCredentialInput
               provider={jp.judge.provider}
@@ -338,17 +355,23 @@ export function ApprovalPage() {
                 setCredentialInput("");
                 if (provider === "vertex") setStoredVertexCredential(null);
               }}
-              onError={setBatteryError}
+              onError={(message) =>
+                setExaminerBattery((prev) => ({
+                  ...prev,
+                  error: { forDigest: pack.definitionDigest, message },
+                }))
+              }
             />
-            <button disabled={credentialBusy} onClick={() => void saveCredentialAndRetry()}>
+            <button disabled={credentialBusy || readOnly} onClick={() => void saveCredentialAndRetry()}>
               {credentialBusy ? "연결 확인 중…" : "연결 확인 후 다시 점검"}
             </button>
           </div>
         ) : (
-          <button onClick={() => void runBattery()}>다시 점검</button>
-        )}
-      </div>
-    ) : null;
+          <button disabled={readOnly} onClick={() => void runBattery()}>다시 점검</button>
+        )
+      ) : null}
+    </div>
+  );
 
   // 승인된 뒤에는 이 화면이 통째로 봉인 장면이 된다. 기준 상세는 접어 두고,
   // 펼쳐야 볼 수 있게 한다 — 잠갔다는 사실이 먼저 읽혀야 한다.
@@ -449,7 +472,7 @@ export function ApprovalPage() {
                       {formatModelLabel(examinerReport!.judge.provider, examinerReport!.judge.model)}
                     </span>
                   </div>
-                  <CheckCards checks={examinerReport!.checks} progress="" />
+                  <CheckCards cards={checkCards} checks={examinerReport!.checks} progress="" />
                 </>
               ) : (
                 <p className="hint">현재 평가 구성의 점검 기록이 없습니다.</p>
@@ -545,20 +568,35 @@ export function ApprovalPage() {
           <>
             <h2>AI 평가 사전 점검</h2>
             <p style={{ fontSize: 14, margin: "0 0 10px" }}>
-              재채점 결과가 안정적인지, 꾸며낸 답을 가려내는지 확인합니다.
-              기준을 바꾸면 다시 점검합니다.
+              선택한 AI 모델의 채점이 안정적인지, 채점을 속이려는 답을 가려내는지 확인합니다. 무엇을
+              어떻게 재는지는 아래 카드에 있습니다. 기준을 바꾸면 다시 점검합니다.
             </p>
 
             {!validReport ? (
               <div>
                 {running ? (
                   <>
-                    <CheckCards checks={liveChecks} progress={progress} />
+                    <CheckCards cards={checkCards} checks={liveChecks} progress={progress} />
                     <p className="hint">{progress}</p>
                   </>
                 ) : (
-                  <CheckCards checks={null} progress={progress} />
+                  <CheckCards cards={checkCards} checks={null} progress={progress} />
                 )}
+                {/* 자동 실행은 다이제스트당 한 번뿐 — 억제된 상태에서 갇히지 않게 직접 시작할 수 있다 */}
+                {!running && batteryError === null && autoRunSuppressed ? (
+                  <div style={{ marginTop: 10 }}>
+                    <button disabled={readOnly} onClick={() => void runBattery()}>점검 시작</button>
+                    <span className="hint" style={{ marginLeft: 8 }}>
+                      이 평가 구성의 점검 기록이 없습니다. 점검은 자동으로 한 번만 시작되며, 그 뒤는 직접 시작합니다.
+                    </span>
+                  </div>
+                ) : null}
+                {readOnly ? (
+                  <p className="hint">
+                    다른 탭에서 이 프로젝트를 편집·실행 중이라 이 탭에서는 점검·승인할 수 없습니다. 그
+                    탭을 닫은 뒤 이 탭을 새로고침하면 이어서 작업할 수 있습니다.
+                  </p>
+                ) : null}
                 {batteryErrorBox}
               </div>
             ) : (
@@ -570,14 +608,14 @@ export function ApprovalPage() {
                     {formatModelLabel(examinerReport!.judge.provider, examinerReport!.judge.model)}
                   </span>
                 </div>
-                <CheckCards checks={examinerReport!.checks} progress="" />
+                <CheckCards cards={checkCards} checks={examinerReport!.checks} progress="" />
                 <div style={{ marginTop: 10 }}>
                   {reportFailed ? (
                     <p className="error" style={{ margin: "0 0 8px" }}>
                       사전 점검 실패 — 기준을 수정하면 다시 점검합니다.
                     </p>
                   ) : null}
-                  <button onClick={() => void runBattery()} disabled={running}>
+                  <button onClick={() => void runBattery()} disabled={running || readOnly}>
                     {running ? `점검 중… ${progress}` : "다시 점검"}
                   </button>
                   {batteryErrorBox}
@@ -600,7 +638,8 @@ export function ApprovalPage() {
               <button
                 className="primary"
                 onClick={approve}
-                disabled={running || blockers.length > 0}
+                disabled={running || blockers.length > 0 || readOnly}
+                title={readOnly ? "다른 탭에서 이 프로젝트를 편집·실행 중입니다" : undefined}
               >
                 평가 구성 승인
               </button>

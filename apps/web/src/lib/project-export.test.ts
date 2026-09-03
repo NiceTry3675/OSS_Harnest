@@ -9,6 +9,7 @@ import {
 import type { CompiledGeneric } from "../state";
 import {
   buildProjectExport,
+  holdoutPhaseToScore,
   isHoldoutPhasePending,
   isHoldoutSettled,
   needsRestoredHoldoutRecovery,
@@ -201,5 +202,68 @@ describe("결과 기록 내보내기", () => {
       mode: "measured",
       final: { status: "failed", error: "종료 채점 실패" },
     });
+  });
+});
+
+describe("홀드아웃 채점 시점(holdoutPhaseToScore)", () => {
+  const empty = { baseline: null, final: null, errors: { baseline: null, final: null } };
+  const scored = {
+    gateRejected: false as const,
+    score: 50,
+    perCase: [],
+    violations: [],
+  };
+
+  it("라운드 0 시작 통지(run_started)는 시작 단계만 낸다", () => {
+    expect(holdoutPhaseToScore({ round: 0, status: "running" }, empty)).toEqual(["baseline"]);
+  });
+
+  it("같은 라운드 0의 재개 통지라도 시작 결과가 이미 있으면 다시 채점하지 않는다", () => {
+    expect(
+      holdoutPhaseToScore({ round: 0, status: "running" }, { ...empty, baseline: scored }),
+    ).toEqual([]);
+  });
+
+  it("시작 실패 사유가 기록된 라운드 0도 재채점하지 않는다 — 실패는 확정된 단계다", () => {
+    expect(
+      holdoutPhaseToScore(
+        { round: 0, status: "running" },
+        { ...empty, errors: { baseline: "시작 채점 실패", final: null } },
+      ),
+    ).toEqual([]);
+  });
+
+  it("진행 중인 라운드에서는 어떤 단계도 채점하지 않는다(SPEC §3 원칙 7)", () => {
+    expect(holdoutPhaseToScore({ round: 3, status: "running" }, empty)).toEqual([]);
+    expect(holdoutPhaseToScore({ round: 3, status: "paused" }, empty)).toEqual([]);
+  });
+
+  it("완료 통지는 종료 단계를 낸다", () => {
+    expect(holdoutPhaseToScore({ round: 3, status: "done" }, empty)).toEqual(["final"]);
+  });
+
+  it("라운드 0에서 상한 종료되면 시작·종료를 함께 낸다 — 호출자가 같은 산출물임을 알고 한 번만 잰다", () => {
+    expect(holdoutPhaseToScore({ round: 0, status: "done" }, empty)).toEqual(["baseline", "final"]);
+  });
+
+  it("시작 단계가 복원 불가로 확정되면 라운드 0 완료본이라도 종료만 낸다 — 확정된 실패는 재채점하지 않는다", () => {
+    const restored = {
+      ...empty,
+      errors: { baseline: "저장된 기록에 시작할 때의 최종 확인 결과가 없어 복원할 수 없습니다.", final: null },
+    };
+    // 같은 입력에서 실패 확정만 지우면 시작·종료를 함께 낸다 — 차이를 만드는 것이 errors.baseline이다
+    expect(holdoutPhaseToScore({ round: 0, status: "done" }, restored)).toEqual(["final"]);
+    expect(
+      holdoutPhaseToScore({ round: 0, status: "done" }, { ...restored, errors: { baseline: null, final: null } }),
+    ).toEqual(["baseline", "final"]);
+    // 라운드가 지난 완료본은 애초에 시작 단계를 내지 않는다
+    expect(holdoutPhaseToScore({ round: 2, status: "done" }, restored)).toEqual(["final"]);
+  });
+
+  it("errors 필드가 없는 구버전 홀드아웃도 대기로 본다", () => {
+    expect(holdoutPhaseToScore({ round: 0, status: "done" }, { baseline: null, final: null })).toEqual([
+      "baseline",
+      "final",
+    ]);
   });
 });

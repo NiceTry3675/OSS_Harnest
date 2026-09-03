@@ -46,6 +46,22 @@ export function isHoldoutSettled(pack: EvaluationPack, holdout: HoldoutScores): 
   );
 }
 
+export type HoldoutPhase = "baseline" | "final";
+
+/** 이 체크포인트 통지에서 채점을 시작해야 하는 홀드아웃 단계 — 라운드 0이면 시작, 완료면 종료
+ *  (라운드 0에서 곧바로 완료되면 둘 다). 이미 결과나 실패 사유가 있는 단계는 돌려주지 않는다.
+ *  "같은 통지에 두 번 시작하지 않기"(started 플래그)는 호출자의 몫이다 — 여기서는 시점 규칙만
+ *  판단한다(SPEC §3 원칙 7: 홀드아웃은 라운드 0과 종료 시에만). */
+export function holdoutPhaseToScore(
+  checkpoint: Pick<LoopCheckpoint<unknown>, "round" | "status">,
+  holdout: HoldoutScores,
+): HoldoutPhase[] {
+  const phases: HoldoutPhase[] = [];
+  if (checkpoint.round === 0 && isHoldoutPhasePending(holdout, "baseline")) phases.push("baseline");
+  if (checkpoint.status === "done" && isHoldoutPhasePending(holdout, "final")) phases.push("final");
+  return phases;
+}
+
 /** 새로고침 뒤 완료 챔피언으로 다시 계산할 수 있는 홀드아웃 단계가 남았는지 판별한다. */
 export function needsRestoredHoldoutRecovery(
   pack: EvaluationPack,

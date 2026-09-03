@@ -352,6 +352,13 @@ p { margin: 0 0 var(--s-3); }
 .copy-lines { white-space: pre-line; }
 .muted { color: var(--ink-3); }
 .error { color: var(--bad); font-size: var(--t-sm); }
+/* 항상 마운트된 alert 영역 — 비어 있으면 자리도 차지하지 않는다(요소는 남겨 보조기기가 추적한다) */
+.error-note:empty { margin: 0; padding: 0; }
+[aria-invalid="true"] { border-color: var(--bad); box-shadow: 0 0 0 4px color-mix(in srgb, var(--bad) 18%, transparent); }
+.readonly-banner {
+  margin: 0 0 var(--s-4); padding: 10px 14px; border-radius: var(--radius-sm);
+  background: var(--lock-soft); border: 1px solid var(--lock); color: var(--ink); font-size: var(--t-sm);
+}
 .mono { font-family: var(--mono-font); font-size: var(--t-xs); letter-spacing: 0.02em; }
 
 .info-tip {

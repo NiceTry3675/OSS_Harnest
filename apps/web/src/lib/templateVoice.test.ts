@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { Question } from "@harnest/contracts";
-import { readVoice, voiceFlow, voiceQuestions } from "./templateVoice";
+import { pickVoice, readVoice, VOICE_KEYS, voiceFlow, voiceQuestions } from "./templateVoice";
 import type { TemplateFlow } from "./flowStep";
 
 const QUESTIONS: Question[] = [
@@ -123,5 +123,26 @@ describe("voiceFlow", () => {
 
   it("어휘가 없으면 원래 흐름 그대로다", () => {
     expect(voiceFlow(FLOW, null)).toBe(FLOW);
+  });
+});
+
+describe("pickVoice", () => {
+  // 제출 시 answers가 질문 id만으로 교체되면 승인 화면부터 단계 이름이 기본 문구로 돌아간다
+  it("제출 답변에 합쳐도 어휘가 살아남는다", () => {
+    const submitted: Record<string, unknown> = { material: "자료", cases: [], lengthCap: 4000, conciseness: true };
+    const merged = { ...pickVoice({ ...ANSWERS, questionFocus: ["마감"], material: "옛 자료" }), ...submitted };
+    expect(readVoice(merged)?.name).toBe("대학 시간표 템플릿");
+    expect(merged.questionFocus).toEqual(["마감"]);
+    expect(merged.material).toBe("자료");
+  });
+
+  it("어휘 키 밖의 옛 질문 키는 옮기지 않는다", () => {
+    const picked = pickVoice({ builtName: "무언가", material: "옛 자료", staff: "가, 나" });
+    expect(Object.keys(picked)).toEqual(["builtName"]);
+    expect(VOICE_KEYS).not.toContain("material");
+  });
+
+  it("어휘가 없으면 빈 객체다", () => {
+    expect(pickVoice({ lengthCap: 4000 })).toEqual({});
   });
 });

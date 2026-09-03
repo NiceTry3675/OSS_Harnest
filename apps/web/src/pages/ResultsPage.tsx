@@ -24,6 +24,7 @@ import {
 } from "../lib/project-export";
 import { setFlowStep } from "../lib/flowStep";
 import { CurveChart } from "../components/CurveChart";
+import { ErrorNote } from "../components/ErrorNote";
 import { InfoTip } from "../components/InfoTip";
 import { countCaseProvenance } from "../lib/case-provenance";
 
@@ -280,12 +281,6 @@ export function ResultsPage() {
               응답 기록 직접 확인
             </a>
           )}
-          {saved === "fail" && saveError !== null ? (
-            <span className="error result-action-message">서버 기록 실패: {saveError}</span>
-          ) : null}
-          {exported === "fail" ? (
-            <span className="error result-action-message">JSON 기록의 결속을 확인할 수 없습니다.</span>
-          ) : null}
           {!recordReady ? (
             <span className="result-action-message">최종 확인 채점이 끝난 뒤에 기록할 수 있습니다.</span>
           ) : null}
@@ -298,6 +293,21 @@ export function ResultsPage() {
             </p>
           </details>
         </div>
+        {/* 항상 마운트되는 alert 영역은 flex 컨테이너 밖에 둔다 — 빈 아이템이 전폭 행과 gap을 차지하지
+            않게. 기록·내보내기 오류는 한 영역에 이어 붙인다 */}
+        <ErrorNote
+          className="result-action-message"
+          live="assertive"
+          style={{ marginTop: 8, marginBottom: 0 }}
+          message={
+            [
+              saved === "fail" && saveError !== null ? `서버 기록 실패: ${saveError}` : null,
+              exported === "fail" ? "JSON 기록의 결속을 확인할 수 없습니다." : null,
+            ]
+              .filter((note): note is string => note !== null)
+              .join(" ") || null
+          }
+        />
       </div>
 
       {(checkpoint.championGuardScore ?? null) !== null && (
@@ -324,7 +334,12 @@ export function ResultsPage() {
           <div style={{ fontSize: 16, fontWeight: 600 }}>
             최종 확인 — 시작 {holdoutPhase(holdout.baseline, baselineHoldoutError)} → 종료{" "}
             {holdoutPhase(holdout.final, finalHoldoutError)}
-            {holdoutDelta !== null && (
+            {checkpoint.round === 0 ? (
+              // 라운드 0에서 끝난 실행은 시작·종료 산출물이 같다 — 같은 문서에 델타를 붙이면 오해를 부른다
+              <span className="hint" style={{ marginLeft: 8, fontWeight: 400 }}>
+                시작·종료 산출물이 같아 한 번만 채점했습니다
+              </span>
+            ) : holdoutDelta !== null && (
               <span
                 style={{
                   fontSize: 13,
@@ -345,13 +360,20 @@ export function ResultsPage() {
               text={"최종 확인용 질문은 개선에 사용하지 않고 시작과 종료 시에만 채점합니다.\n반복: 개선용 질문과 같은 질문\n신규: 개선용 질문에 없던 질문"}
             />
           </div>
-          {(baselineHoldoutError !== null || finalHoldoutError !== null) && (
-            <p className="error" style={{ marginBottom: 0 }}>
-              {baselineHoldoutError !== null ? `시작 채점 실패: ${baselineHoldoutError}` : ""}
-              {baselineHoldoutError !== null && finalHoldoutError !== null ? " · " : ""}
-              {finalHoldoutError !== null ? `종료 채점 실패: ${finalHoldoutError}` : ""}
-            </p>
-          )}
+          <ErrorNote
+            live="assertive"
+            style={{ marginBottom: 0 }}
+            message={
+              baselineHoldoutError !== null || finalHoldoutError !== null
+                ? [
+                    baselineHoldoutError !== null ? `시작 채점 실패: ${baselineHoldoutError}` : null,
+                    finalHoldoutError !== null ? `종료 채점 실패: ${finalHoldoutError}` : null,
+                  ]
+                    .filter((part): part is string => part !== null)
+                    .join(" · ")
+                : null
+            }
+          />
           {holdoutCaseIds.length > 0 ? (
             <>
               <table className="grid" style={{ marginTop: 12 }}>

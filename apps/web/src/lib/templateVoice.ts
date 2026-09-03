@@ -17,6 +17,20 @@ export interface TemplateVoice {
   stages: StageVoice[];
 }
 
+/** 0단계가 답변 맵에 얹는 어휘·확인 방향 키. compile은 이 키들을 읽지 않는다(다이제스트 무관).
+ *  위저드 제출은 질문 id만 다시 쓰므로, 이 네 키만 골라 옮겨야 승인·실행·결과 화면까지
+ *  같은 이름으로 이어진다. 답변 전체를 옮기면 지난 제출의 옛 질문 키가 되살아난다. */
+export const VOICE_KEYS = ["builtName", "builtGoal", "builtStages", "questionFocus"] as const;
+
+/** 답변 맵에서 어휘 키만 골라낸다 — 없는 키는 만들지 않는다. */
+export function pickVoice(answers: Record<string, unknown>): Record<string, unknown> {
+  const picked: Record<string, unknown> = {};
+  for (const key of VOICE_KEYS) {
+    if (answers[key] !== undefined) picked[key] = answers[key];
+  }
+  return picked;
+}
+
 function stageList(value: unknown): StageVoice[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is StageVoice => {

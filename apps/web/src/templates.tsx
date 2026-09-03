@@ -19,6 +19,7 @@ import type { CompiledGeneric, HoldoutEvaluation } from "./state";
 import type { LlmClient } from "@harnest/template-handover";
 import { DEV_SAMPLES } from "./lib/devSamples";
 import type { PlanTemplateChoice } from "./lib/templatePlan";
+import type { CheckCardOverrides } from "./lib/examinerCards";
 import { buildFlowSteps, type TemplateFlow } from "./lib/flowStep";
 import { TimetableGrid } from "./components/TimetableGrid";
 import { HandoverDocView } from "./components/HandoverDocView";
@@ -94,7 +95,15 @@ export interface TemplateEntry {
       /** 검사 하나가 끝날 때마다 — 화면이 결과를 기다리지 않고 바로 표시한다 */
       onCheck?: (check: ExaminerCheckResult) => void,
     ): Promise<ExaminerReport>;
+    /** 승인 화면 검사 카드의 이름·설명(선택). 각 검사가 실제로 무엇을 어떻게 재는지(임계 산식·
+     *  프로브 종류)는 배터리를 구현한 템플릿만 알므로 문구도 여기서 넘긴다 — 페이지는 이 문구를
+     *  렌더만 하고, 없으면 일반 문구(lib/examinerCards)를 쓴다. */
+    checkCards?: CheckCardOverrides;
   };
+  /** 제출된 케이스 쌍의 입력 순서(0부터)에 compile이 붙이는 id(선택). 위저드의 용도 배지가
+   *  holdoutPolicy의 id를 입력 순서로 되돌릴 때 쓴다 — 규약은 템플릿이 소유하고 웹은 이 함수만
+   *  본다. 없으면 배지를 표시하지 않는다. */
+  caseIdAt?: (index: number) => string;
   /** 인터뷰 단계 케이스 초안 보조(선택) — caseList 질문에서만 노출된다.
    *  클릭당 본 호출 1회 + 형식 재시도 1회로 템플릿 상수가 상한하며 실행 예산 밖이다(SPEC §5.2).
    *  초안은 사용자가 확인해야만 제출에 포함된다 — 강제는 위저드 검증·수집이 담당. */
@@ -220,6 +229,7 @@ const handoverEntry: TemplateEntry = {
   },
   compile: (submission, judge) =>
     handover.compile(submission, { judgeProvider: judge.provider, judgeModel: judge.model }),
+  caseIdAt: handover.caseIdAt,
   createLlm(compiled) {
     const jp = compiled.pack.judgeProcedure;
     if (jp.kind !== "case_answering") return null;
@@ -266,6 +276,12 @@ const handoverEntry: TemplateEntry = {
         onProgress,
         onCheck,
       ),
+    // 배터리가 실제로 재는 것(examiner.ts) — 안정성 임계는 표본 수에서 유도한 반 단계, 꼼수 내성은
+    // 날조·아첨·지시 주입 프로브 3종. 이 세부는 템플릿의 것이라 페이지가 아니라 여기서 말한다.
+    checkCards: {
+      stability: { desc: "같은 문서를 다시 채점한 차이가 표본 수 기준 반 단계 이내인지" },
+      hack_resistance: { desc: "꾸며낸 답·칭찬만 하는 답·채점자를 향한 지시문을 가려내는지" },
+    },
   },
   createRuntime(compiled, llm) {
     if (!llm) throw new Error("AI 모델이 준비되지 않았습니다 — 연결 정보를 입력하거나 모의 모델을 선택하세요.");

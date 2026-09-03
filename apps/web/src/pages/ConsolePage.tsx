@@ -1,26 +1,18 @@
 /** 관제실 — 사용자는 AI와 대화하지 않고 지켜보고 통제한다.
  *  템플릿 접점은 등록소(getTemplate) 인터페이스뿐 — 템플릿별 분기 코드를 두지 않는다.
- *  실행 인스턴스는 마운트당 1회 생성(StrictMode 이중 이펙트는 ref로 흡수),
+ *  실행 자체는 이 화면이 아니라 프로젝트의 run 컨트롤러가 소유한다: 라우트를 벗어나도 실행은
+ *  계속되고, 돌아오면 같은 세션에 다시 붙는다(같은 라운드를 두 번 돌리지 않는다). 이 화면은
+ *  구독·표시·버튼만 맡고, 이탈은 정지 요청이 아니므로 언마운트 시 pause()를 부르지 않는다.
  *  runId는 프로젝트 상태에 보존되어 재진입 시 체크포인트에서 재개된다.
- *  홀드아웃 채점은 라운드 0과 종료 시에만 — 결과는 표시 전용, 루프 제어에 절대 유입되지 않는다
- *  (SPEC §3 원칙 7). */
+ *  홀드아웃 채점은 라운드 0과 종료 시에만(컨트롤러) — 결과는 표시 전용, 루프 제어에 절대
+ *  유입되지 않는다(SPEC §3 원칙 7). */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  CallBudgetExceededError,
-  GradeFormatError,
-  type LoopCheckpoint,
-} from "@harnest/contracts";
-import {
-  createLoopRun,
-  IndexedDbCheckpointStore,
-  type CheckpointStore,
-  type LoopHandle,
-  type LoopRunOptions,
-} from "@harnest/loop-engine";
-import { useProject, type HoldoutEvaluation, type HoldoutScores } from "../state";
-import { getTemplate, type TemplateRuntime } from "../templates";
+import { CallBudgetExceededError, GradeFormatError } from "@harnest/contracts";
+import { CheckpointSaveError } from "@harnest/loop-engine";
+import { useProject, type HoldoutEvaluation } from "../state";
+import { getTemplate } from "../templates";
 import {
   getByoCredential,
   normalizeVertexServiceAccount,
@@ -28,13 +20,15 @@ import {
   testByoConnection,
 } from "../lib/llm";
 import { markUnavailableRestoredHoldout } from "../lib/project-snapshot";
-import { isHoldoutPhasePending, isHoldoutSettled } from "../lib/project-export";
+import { isHoldoutSettled } from "../lib/project-export";
+import { createCheckpointNarrator, narrateRuntime } from "../lib/runNarration";
 import { ActivityConsole } from "../components/ActivityConsole";
-import { appendStream, clearStream, endStream, setStreamStatus, withActivityLog } from "../lib/activityLog";
+import { clearStream, withActivityLog } from "../lib/activityLog";
 import { setFlowStep } from "../lib/flowStep";
 import { ScoreHero } from "../components/ScoreHero";
 import { CurveChart } from "../components/CurveChart";
 import { ExperimentTree } from "../components/ExperimentTree";
+import { ErrorNote } from "../components/ErrorNote";
 import { ProviderCredentialInput } from "../components/ProviderCredentialInput";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -48,12 +42,18 @@ function fmt(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(1);
 }
 
-/** 오류 종류는 계약 타입으로만 판별한다 — 템플릿이 만든 메시지 문자열 매칭 금지(경계 원칙). */
-function describeRunError(e: unknown): string {
+/** 오류 종류는 계약 타입으로만 판별한다 — 템플릿이 만든 메시지 문자열 매칭 금지(경계 원칙).
+ *  hasSavedRound: 저장된 회차가 하나라도 있는지 — 라운드 0 첫 커밋 실패면 '저장된 회차부터'가 성립하지
+ *  않으므로 재시도 안내는 아래 원샷 보유 힌트(pendingInitial)가 맡는다. */
+function describeRunError(e: unknown, hasSavedRound: boolean): string {
   if (e instanceof CallBudgetExceededError) {
     return `${e.message} 비용 보호를 위한 실행 한도이며, 정상 실행에서는 도달하지 않습니다.`;
   }
   if (e instanceof GradeFormatError) return e.message;
+  if (e instanceof CheckpointSaveError) {
+    const resume = hasSavedRound ? " 다시 시도하면 마지막으로 저장된 회차부터 이어집니다." : "";
+    return `이 회차 결과를 브라우저에 저장하지 못했습니다(저장 공간을 확인해 주세요).${resume} (${e.message})`;
+  }
   const message = e instanceof Error ? e.message : String(e);
   return `모델 호출 중 오류가 발생했습니다: ${message}`;
 }
@@ -65,11 +65,6 @@ function holdoutLabel(result: HoldoutEvaluation, phase: string): string {
 }
 
 export function ConsolePage() {
-  useEffect(() => {
-    setFlowStep({ kind: "run" });
-    clearStream(); // 승인 화면에서 흐르던 글이 이어지지 않게 한다
-  }, []);
-
   const {
     templateId,
     compiled,
@@ -79,14 +74,21 @@ export function ConsolePage() {
     setRunId,
     checkpoint,
     setCheckpoint,
+    interruptedRunId,
+    dismissInterruptedRun,
     holdout,
     setHoldout,
+    run,
+    checkpointStore,
+    readOnly,
   } = useProject();
   const navigate = useNavigate();
   const entry = getTemplate(templateId);
 
   /** 실행 준비(모델 구성) 실패 — 카드로 표시하고 키 저장 후 재시도할 수 있다 */
   const [setupError, setSetupError] = useState<string | null>(null);
+  /** 저장본 읽기 실패·판정 절차 불일치 — 실행 오류와 별개 */
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [credentialInput, setCredentialInput] = useState(() => {
     const procedure = compiled?.pack.judgeProcedure;
     if (
@@ -103,28 +105,17 @@ export function ConsolePage() {
     getByoCredential("vertex"),
   );
   const [retryTick, setRetryTick] = useState(0);
-  /** 실행 중 오류 — 체크포인트가 남아 있으므로 재시도는 start() 재호출로 이어서 진행 */
-  const [runError, setRunError] = useState<string | null>(null);
-  // 라운드 0(원샷)이 끝나야 첫 체크포인트가 나온다. 그때까지 상태가 "대기"로 남아
-  // 버튼이 계속 눌리고 화면도 그대로였다 — 누른 사실을 여기서 즉시 붙잡는다.
-  const [starting, setStarting] = useState(false);
-  const [callsPerRound, setCallsPerRound] = useState<number>(0);
-  const [maxCallsPerRun, setMaxCallsPerRun] = useState<number>(0);
 
-  const handleRef = useRef<LoopHandle | null>(null);
-  // 같은 회차를 두 번 기록하지 않게 한다 — 체크포인트는 여러 번 올 수 있다
-  const lastLoggedRound = useRef<number>(-1);
-  const storeRef = useRef<CheckpointStore<unknown> | null>(null);
-  if (storeRef.current === null) storeRef.current = new IndexedDbCheckpointStore();
   // 재진입이면 기존 runId로 재개, 최초 진입이면 새로 발급
   const runIdRef = useRef<string>(runId ?? crypto.randomUUID());
-  // 홀드아웃 진행 상태 — onEvent 클로저에서 최신값을 보기 위한 ref (표시 전용 데이터)
-  const holdoutRef = useRef<HoldoutScores>({
-    ...holdout,
-    errors: holdout.errors ?? { baseline: null, final: null },
-  });
-  const baselineStartedRef = useRef(false);
-  const finalStartedRef = useRef(false);
+  const digest = compiled?.pack.definitionDigest ?? null;
+  // 실행 세션 — 프로젝트 수명에 묶여 있고, 여기서는 구독만 한다
+  const session = useSyncExternalStore(run.subscribe, () =>
+    digest === null ? null : run.get(runIdRef.current, digest),
+  );
+  const active = session?.active ?? false;
+  const runError = session?.error ?? null;
+  const pendingInitial = session?.pendingInitial ?? false;
 
   const ready =
     entry !== null &&
@@ -132,292 +123,80 @@ export function ConsolePage() {
     approvedAt !== null &&
     approvedDigest === compiled.pack.definitionDigest;
 
-  // Provider의 비동기 복원값을 이벤트 클로저에도 반영한다. 특히 지나간 기준선의 명시적
-  // 복원 실패가 빈 초기 ref에 덮이지 않아야 한다.
   useEffect(() => {
-    holdoutRef.current = {
-      ...holdout,
-      errors: holdout.errors ?? { baseline: null, final: null },
-    };
-  }, [holdout]);
+    setFlowStep({ kind: "run" });
+    // 승인 화면에서 흐르던 글이 이어지지 않게 한다 — 단, 살아 있는 실행의 서술은 지우지 않는다
+    if (!active) clearStream();
+    // eslint 미사용 — 마운트 시점의 active만 본다
+  }, []);
 
   useEffect(() => {
     if (ready && runId === null) setRunId(runIdRef.current);
   }, [ready, runId, setRunId]);
 
+  // 저장본을 화면에 투영한다 — 살아 있는 세션이 없을 때만. 세션이 살아 있으면 Provider 상태가
+  // 엔진 통지로 이미 최신이고, 저장본의 running을 paused로 바꿔 보이면 안 된다(이중 재개 유도).
   useEffect(() => {
     if (!ready || runId === null || !compiled) return;
+    const packDigest = compiled.pack.definitionDigest;
+    if (run.get(runId, packDigest)?.active) return;
     let cancelled = false;
-    void storeRef.current!
+    void checkpointStore
       .load(runId)
       .then((saved) => {
-        if (cancelled || saved === null) return;
-        if (saved.packDigest !== compiled.pack.definitionDigest) {
-          setRunError(
+        if (cancelled || saved === null || run.get(runId, packDigest)?.active) return;
+        if (saved.packDigest !== packDigest) {
+          setLoadError(
             "저장된 진행 상태의 평가 구성이 현재 승인본과 다릅니다. 다시 승인해야 이어갈 수 있습니다.",
           );
           return;
         }
-        // 탭 회수로 남은 running 체크포인트는 화면에서 재개 가능한 상태로 투영한다.
+        // 탭 회수로 남은 running 체크포인트는 화면에서 재개 가능한 상태로 투영한다. '탭이 닫혀 …'
+        // 안내는 여기서 판단하지 않는다 — 세션 확보 effect가 같은 커밋에서 세션을 만들므로 이 시점의
+        // 세션 유무로는 탭 회수를 가릴 수 없다. 탭 회수인지는 Provider가 복원 시점에 기록한다
+        // (interruptedRunId). 세션이 남아 있는 running 저장본은 저장 실패·라운드 오류 뒤의 마지막 성공
+        // 커밋이고, 읽기 전용 탭의 running 저장본은 다른 탭이 지금 돌리고 있는 것이다.
         const restored = saved.status === "running" ? { ...saved, status: "paused" as const } : saved;
         setCheckpoint(restored);
         // 화면 이탈 중 라운드 0이 지나갔다면 원샷 산출물은 더 이상 복원할 수 없다.
         // 명시적 실패로 정리해 종료 홀드아웃까지 끝난 뒤 결과 기록이 영구 대기하지 않게 한다.
-        const restoredHoldout = markUnavailableRestoredHoldout(
-          holdoutRef.current,
-          restored,
-          compiled.pack.holdoutPolicy.mode !== "none",
+        setHoldout((prev) =>
+          markUnavailableRestoredHoldout(prev, restored, compiled.pack.holdoutPolicy.mode !== "none"),
         );
-        holdoutRef.current = restoredHoldout;
-        setHoldout(restoredHoldout);
       })
       .catch((error: unknown) => {
-        if (!cancelled) setRunError(error instanceof Error ? error.message : String(error));
+        if (!cancelled) setLoadError(error instanceof Error ? error.message : String(error));
       });
     return () => {
       cancelled = true;
     };
-  }, [ready, runId, compiled, setCheckpoint, setHoldout]);
+  }, [ready, runId, compiled, run, checkpointStore, setCheckpoint, setHoldout]);
 
+  // 세션 확보 — 같은 runId+packDigest에 이미 있으면 그대로 붙는다(StrictMode 이중 이펙트 포함).
+  // 승인·동결된 팩의 저지 선언과 실행 모델이 어긋나면 build가 throw — 재승인 원칙.
+  // 읽기 전용 탭은 세션을 만들지 않는다 — 세션 생성의 완료본 복구 경로가 홀드아웃 채점(모델 호출)을
+  // 내는데, 소유 탭이 같은 채점을 돌리고 있을 수 있고 이 탭의 결과는 저장되지 않는다. 표시는
+  // 위의 저장본 투영만으로 충분하다.
   useEffect(() => {
-    if (!ready || !entry || !compiled || handleRef.current !== null) return;
-
-    let active = true;
-    const effectRunId = runIdRef.current;
-    const effectPackDigest = compiled.pack.definitionDigest;
-    const ownsEvent = (cp: LoopCheckpoint<unknown>): boolean =>
-      active && cp.runId === effectRunId && cp.packDigest === effectPackDigest;
-
-    let runtime: TemplateRuntime;
+    if (!ready || !entry || !compiled || readOnly) return;
     try {
-      // 승인·동결된 팩의 저지 선언과 실행 모델이 어긋나면 여기서 throw — 재승인 원칙
-      const raw = entry.createLlm(compiled);
-      const llm = raw ? withActivityLog(raw, "결과물을 만들고 평가하는 중") : raw;
-      // 루프가 무엇을 보고 어떻게 고쳐 쓰는지를 화면으로 흘린다.
-      // 생성기는 "지금 산출물이 못 채운 것"을 받아 그것만 보강한다 — 그게 이 루프의 추론이다.
-      const base = entry.createRuntime(compiled, llm);
-      runtime = {
-        ...base,
-        ...(base.planStrategy === undefined
-          ? {}
-          : {
-              planStrategy: async (champion, rng, feedback) => {
-                const strategy = await base.planStrategy!(champion, rng, feedback);
-                // 케이스를 다 맞히면 남는 여지는 짧게 쓰는 쪽뿐이다 — 그 사정을 먼저 밝힌다
-                const why =
-                  feedback.championViolations.length === 0
-                    ? "공개 질문은 모두 답할 수 있습니다. 내용을 더해도 점수가 오르지 않으니, 짧게 만드는 쪽만 남았습니다."
-                    : `아직 못 채운 질문이 ${feedback.championViolations.length}개 있습니다.`;
-                appendStream(
-                  why + "\n\n" + strategy.summary,
-                  `${feedback.round}회차 — 이번엔 ${strategy.label ?? strategy.key}`,
-                );
-                return strategy;
-              },
-            }),
-        generate: async (champion, rng, feedback, strategy) => {
-          const misses = feedback.championViolations;
-          const body =
-            misses.length > 0
-              ? "지금 산출물이 못 채운 것" + "\n" +
-                misses.map((v) => "  · " + v).join("\n") + "\n" + "\n" +
-                "이 항목들을 보강해 다시 씁니다. 나머지는 건드리지 않습니다."
-              : "못 채운 질문이 없습니다. 답에 필요한 사실은 그대로 두고, 군더더기를 덜어 더 짧게 씁니다.";
-          appendStream(
-            body,
-            feedback.round + "회차 — 무엇을 고칠지 정합니다 (현재 " +
-              feedback.championScore.toFixed(1) + "점)",
-          );
-          return base.generate(champion, rng, feedback, strategy);
+      run.ensure({
+        runId: runIdRef.current,
+        pack: compiled.pack,
+        spec: compiled.loopSpec,
+        store: checkpointStore,
+        build: () => {
+          const raw = entry.createLlm(compiled);
+          const llm = raw ? withActivityLog(raw, "결과물을 만들고 평가하는 중") : raw;
+          return narrateRuntime(entry.createRuntime(compiled, llm), compiled.pack);
         },
-        scorer: async (artifact) => {
-          const r = await base.scorer(artifact);
-          // 점수만 있으면 "왜 이 숫자인지"를 알 수 없다. 승인된 기준의 이름과 가중치를
-          // 함께 붙여, 어떤 기준에 비추어 몇 점이고 합계가 어떻게 나왔는지 드러낸다.
-          const scored = Object.entries(r.parts).map(([id, value]) => {
-            const def = compiled.pack.criteria.find((c) => c.id === id);
-            const label = def?.label ?? id;
-            const weight = def?.weight ?? 0;
-            return {
-              line:
-                "기준「" + label + "」" +
-                (def ? " 가중치 " + Math.round(weight * 100) + "%" : "") +
-                " → " + value.toFixed(1) + "점",
-              math: value.toFixed(1) + "×" + weight.toFixed(2),
-            };
-          });
-          const gateNames = compiled.pack.gates.map((g) => "「" + g.label + "」").join(" ");
-          const lines = [
-            ...scored.map((x) => x.line),
-            ...(compiled.pack.gates.length > 0
-              ? [
-                  "필수 조건" + gateNames + " " +
-                    (r.gateRejected ? "위반 — 점수와 무관하게 탈락합니다" : "통과"),
-                ]
-              : []),
-            "합계 " + r.total.toFixed(1) + "점" +
-              (scored.length > 1 ? " = " + scored.map((x) => x.math).join(" + ") : ""),
-            ...(r.violations.length > 0
-              ? ["", "이 기준을 아직 채우지 못한 질문", ...r.violations.map((v) => "  · " + v)]
-              : ["", "기준에 비추어 지적할 것이 없습니다."]),
-          ];
-          appendStream(lines.join("\n"), "채점 결과");
-          return r;
-        },
-      };
+        narrate: createCheckpointNarrator(),
+      });
+      setSetupError(null);
     } catch (e) {
       setSetupError(e instanceof Error ? e.message : String(e));
-      return;
     }
-    setSetupError(null);
-    setCallsPerRound(runtime.callsPerRound);
-    setMaxCallsPerRun(runtime.maxCallsPerRun);
-
-    const scoreHoldout = runtime.scoreHoldout;
-    const updateHoldout = (next: HoldoutScores): void => {
-      if (!active) return;
-      holdoutRef.current = next;
-      setHoldout(next);
-    };
-    const onEvent = (cp: LoopCheckpoint<unknown>): void => {
-      if (!ownsEvent(cp)) return;
-      const last = cp.tree[cp.tree.length - 1];
-      if (last !== undefined && last.round !== lastLoggedRound.current) {
-        lastLoggedRound.current = last.round;
-        const why = last.adopted
-          ? "개선안 채택"
-          : last.gateRejected
-            ? "필수 조건 위반"
-            : !last.guardSafe
-              ? "중간 점검 점수 기준 미달"
-              : "점수 개선 없음";
-        // 왜 그렇게 판단했는지를 남긴다 — 점수만으로는 이유를 알 수 없다.
-        // 채택 조건은 셋을 모두 넘어야 한다: 필수 조건 · 중간 점검 비퇴보 · 엄격한 점수 개선.
-        const gap = last.candidateScore - last.championScore;
-        const guard =
-          last.candidateGuardScore === null
-            ? ""
-            : ` 중간 점검 점수는 ${last.candidateGuardScore.toFixed(1)}점으로 ${
-                last.guardSafe ? "허용 범위 안입니다" : "허용 범위보다 낮습니다"
-              }.`;
-        const detail = last.gateRejected
-          ? "새 개선안이 필수 조건을 지키지 않아 점수를 비교하지 않고 제외했습니다."
-          : !last.guardSafe
-            ? `새 개선안의 중간 점검 점수${
-                last.candidateGuardScore === null
-                  ? "가"
-                  : ` ${last.candidateGuardScore.toFixed(1)}점이`
-              } 허용 범위보다 낮아 현재 결과물을 유지했습니다.`
-            : last.adopted
-              ? `새 개선안의 종합 점수 ${last.candidateScore.toFixed(1)}점이 현재 결과물보다 ${gap.toFixed(1)}점 높아 채택했습니다.${guard}`
-              : `새 개선안의 종합 점수 ${last.candidateScore.toFixed(1)}점이 현재 결과물의 ${last.championScore.toFixed(1)}점보다 높지 않아 현재 결과물을 유지했습니다. 동점도 바꾸지 않습니다.${guard}`;
-        appendStream(detail, `${last.round}회차 채택 결정 — ${why}`);
-        setStreamStatus(`${last.round}회차 — ${why}`);
-      }
-      setCheckpoint(cp);
-      if (!scoreHoldout) return;
-      // 홀드아웃은 표시 전용 — 아래 어떤 결과도 루프 제어·Generator로 되돌아가지 않는다
-      if (
-        cp.round === 0 &&
-        isHoldoutPhasePending(holdoutRef.current, "baseline") &&
-        !baselineStartedRef.current
-      ) {
-        baselineStartedRef.current = true;
-        updateHoldout({
-          ...holdoutRef.current,
-          errors: { ...(holdoutRef.current.errors ?? { baseline: null, final: null }), baseline: null },
-        });
-        const champion = cp.champion; // 그 시점 챔피언을 지역 캡처(이후 라운드 변이와 격리)
-        void scoreHoldout(champion)
-          .then((result) => {
-            if (!active) return;
-            updateHoldout({
-              ...holdoutRef.current,
-              baseline: result,
-              errors: { ...(holdoutRef.current.errors ?? { baseline: null, final: null }), baseline: null },
-            });
-          })
-          .catch((e: unknown) => {
-            if (!active) return;
-            updateHoldout({
-              ...holdoutRef.current,
-              errors: {
-                ...(holdoutRef.current.errors ?? { baseline: null, final: null }),
-                baseline: e instanceof Error ? e.message : String(e),
-              },
-            });
-          });
-      }
-      if (
-        cp.status === "done" &&
-        isHoldoutPhasePending(holdoutRef.current, "final") &&
-        !finalStartedRef.current
-      ) {
-        finalStartedRef.current = true;
-        updateHoldout({
-          ...holdoutRef.current,
-          errors: { ...(holdoutRef.current.errors ?? { baseline: null, final: null }), final: null },
-        });
-        const champion = cp.champion;
-        void scoreHoldout(champion)
-          .then((result) => {
-            if (!active) return;
-            updateHoldout({
-              ...holdoutRef.current,
-              final: result,
-              errors: { ...(holdoutRef.current.errors ?? { baseline: null, final: null }), final: null },
-            });
-          })
-          .catch((e: unknown) => {
-            if (!active) return;
-            updateHoldout({
-              ...holdoutRef.current,
-              errors: {
-                ...(holdoutRef.current.errors ?? { baseline: null, final: null }),
-                final: e instanceof Error ? e.message : String(e),
-              },
-            });
-          });
-      }
-    };
-
-    const options: LoopRunOptions<unknown> = {
-      runId: effectRunId,
-      pack: compiled.pack,
-      spec: compiled.loopSpec,
-      scorer: runtime.scorer,
-      planStrategy: runtime.planStrategy,
-      generate: runtime.generate,
-      initial: runtime.initial,
-      store: storeRef.current!,
-      onEvent,
-      roundDelayMs: runtime.roundDelayMs,
-    };
-    const handle = createLoopRun(options);
-    handleRef.current = handle;
-    // 완료 직후 홀드아웃 채점 중 새로고침된 경우, 저장된 챔피언으로 복구 가능한 단계를 채점한다.
-    // round 0이면 시작·종료 산출물이 같아 둘 다 복구 가능하고, 이후 라운드는 종료만 복구한다.
-    void storeRef.current!
-      .load(effectRunId)
-      .then((saved) => {
-        if (active &&
-          saved?.status === "done" &&
-          saved.packDigest === effectPackDigest
-        ) {
-          onEvent(saved);
-        }
-      })
-      .catch((error: unknown) => {
-        if (active) setRunError(error instanceof Error ? error.message : String(error));
-      });
-    return () => {
-      active = false;
-      handle.pause();
-      if (handleRef.current === handle) handleRef.current = null;
-      baselineStartedRef.current = false;
-      finalStartedRef.current = false;
-    };
-  }, [ready, entry, compiled, retryTick, setCheckpoint, setHoldout]);
+  }, [ready, entry, compiled, readOnly, retryTick, run, checkpointStore]);
 
   const adopted = useMemo(
     () => new Set((checkpoint?.tree ?? []).filter((r) => r.adopted).map((r) => r.round)),
@@ -444,34 +223,28 @@ export function ConsolePage() {
     );
   }
 
-  const status = checkpoint?.status ?? "idle";
+  const savedStatus = checkpoint?.status ?? "idle";
+  // 살아 있는 세션이면 running, 아니면 저장본 그대로 — 단 저장본의 running은 죽은 흔적이므로 paused
+  const status = active ? "running" : savedStatus === "running" ? "paused" : savedStatus;
   // 아직 첫 채점이 끝나지 않은 구간 — 사용자에게는 이미 돌고 있는 상태로 보여야 한다
-  const preparing = starting && checkpoint === null;
+  const preparing = active && checkpoint === null;
   const baselineHoldoutError = holdout.errors?.baseline ?? null;
   const finalHoldoutError = holdout.errors?.final ?? null;
   const holdoutSettled = isHoldoutSettled(compiled.pack, holdout);
+  const saveFailed = runError instanceof CheckpointSaveError;
+  const callsPerRound = session?.callsPerRound ?? 0;
+  const maxCallsPerRun = session?.maxCallsPerRun ?? 0;
   const start = () => {
-    if (starting) return; // 두 번 눌려 실행이 겹치는 것을 막는다
-    setRunError(null);
-    setStarting(true);
+    if (active || readOnly) return; // 두 번 눌려 실행이 겹치는 것을 막는다
+    // 재개하면 '탭이 닫혀 …' 안내는 끝난 일이다 — 이후의 일시정지에 다시 붙지 않게 지운다
+    dismissInterruptedRun();
     // 새 실행은 항상 빈 화면에서 시작한다 — 지난 기록이 이어지면 읽을 수 없다
     clearStream(checkpoint === null ? "처음 산출물을 만드는 중" : "이어서 실행하는 중");
-    lastLoggedRound.current = -1;
-    const handle = handleRef.current;
-    if (handle === null) {
-      setStarting(false);
-      return;
-    }
-    void handle
-      .start()
-      .catch((e: unknown) => {
-        if (handleRef.current === handle) setRunError(describeRunError(e));
-      })
-      .finally(() => {
-        if (handleRef.current === handle) setStarting(false);
-      });
+    void run.start(runIdRef.current, compiled.pack.definitionDigest);
   };
+  const pause = () => run.pause(runIdRef.current, compiled.pack.definitionDigest);
   const retrySetup = async (): Promise<void> => {
+    if (readOnly) return; // 읽기 전용 탭은 연결 확인 호출도 내지 않는다(SPEC §4.2)
     const raw = credentialInput.trim();
     const jp = compiled.pack.judgeProcedure;
     setCredentialBusy(true);
@@ -504,9 +277,11 @@ export function ConsolePage() {
         <span className="mono digest">{compiled.pack.definitionDigest.slice(0, 16)}…</span>
       </p>
 
+      {/* 오류 문구는 항상 마운트된 alert 영역에 갈아 끼운다 — 조건부 카드 안에 두면 카드와 함께
+          삽입되어 보조기기가 첫 문구를 놓친다(ErrorNote의 전제). 카드에는 조치 UI만 남긴다 */}
+      <ErrorNote message={setupError} />
       {setupError !== null && (
         <div className="card" style={{ borderColor: "var(--bad)" }}>
-          <p className="error" style={{ marginTop: 0 }}>{setupError}</p>
           <div className="field">
             <label>AI 모델 연결 정보</label>
             {compiled.pack.judgeProcedure.kind === "case_answering" &&
@@ -534,7 +309,11 @@ export function ConsolePage() {
             ) : null}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <button className="primary" disabled={credentialBusy} onClick={() => void retrySetup()}>
+            <button
+              className="primary"
+              disabled={credentialBusy || readOnly}
+              onClick={() => void retrySetup()}
+            >
               {credentialBusy ? "연결 확인 중…" : "연결 확인 후 다시 시도"}
             </button>
             <button onClick={() => navigate("/wizard")}>평가 구성 다시 설정</button>
@@ -552,7 +331,7 @@ export function ConsolePage() {
         round={checkpoint?.round ?? 0}
         maxRounds={compiled.loopSpec.maxRounds}
         statusLabel={preparing ? "개선 준비 중…" : (STATUS_LABEL[status] ?? status)}
-        running={preparing || status === "running"}
+        running={active}
       />
 
       <div className="card">
@@ -592,18 +371,38 @@ export function ConsolePage() {
             {maxCallsPerRun > 0 ? ` · 실행 1회 AI 요청 한도 ${maxCallsPerRun}회` : ""}
           </p>
         )}
+        {/* 탭 회수 안내 — Provider가 복원 시점에 기록한 runId가 이 실행일 때만(읽기 전용 탭 제외) */}
+        {interruptedRunId !== null &&
+          interruptedRunId === runId &&
+          !readOnly &&
+          checkpoint !== null &&
+          status === "paused" && (
+          <p className="hint" style={{ marginBottom: 0 }}>
+            탭이 닫혀 진행 중이던 회차는 저장되지 않았습니다. 재개하면 {checkpoint.round + 1}회차를
+            다시 돕니다.
+          </p>
+        )}
+        {readOnly && (
+          <p className="hint" style={{ marginBottom: 0 }}>
+            다른 탭에서 이 프로젝트를 편집·실행 중이라 이 탭에서는 시작·재개할 수 없습니다. 그 탭을
+            닫은 뒤 이 탭을 새로고침하면 이어서 작업할 수 있습니다.
+          </p>
+        )}
         <div className="run-controls">
           <button
             className="primary"
             onClick={start}
-            disabled={starting || status !== "idle" || setupError !== null}
+            disabled={readOnly || active || status !== "idle" || setupError !== null}
           >
             {preparing ? "준비 중…" : "시작"}
           </button>
-          <button onClick={() => handleRef.current?.pause()} disabled={status !== "running"}>
+          <button onClick={pause} disabled={!active}>
             일시정지
           </button>
-          <button onClick={start} disabled={starting || status !== "paused" || setupError !== null}>
+          <button
+            onClick={start}
+            disabled={readOnly || active || status !== "paused" || setupError !== null}
+          >
             재개
           </button>
           {status === "done" && holdoutSettled && (
@@ -617,13 +416,31 @@ export function ConsolePage() {
         </div>
       </div>
 
-      {runError !== null && (
+      <ErrorNote message={loadError} />
+      <ErrorNote
+        message={runError !== null && !active ? describeRunError(runError, checkpoint !== null) : null}
+      />
+
+      {runError !== null && !active && (
         <div className="card" style={{ borderColor: "var(--bad)" }}>
-          <p className="error" style={{ marginTop: 0 }}>{runError}</p>
-          <p className="hint">
-            진행 상태가 저장되었습니다. 다시 시도하면 이어집니다.
-          </p>
-          <button onClick={start}>다시 시도</button>
+          {checkpoint !== null && !saveFailed && (
+            <p className="hint">진행 상태가 저장되었습니다. 다시 시도하면 이어집니다.</p>
+          )}
+          {/* 원샷 산출물은 핸들(이 세션) 안에만 남는다 — 채점·저장 단계 실패였고 새로고침 전이면
+              재생성 없이 채점부터, 원샷 생성 자체가 실패했으면 처음부터 다시 만든다. 라운드 0 첫 커밋
+              실패(saveFailed)도 같은 안내다 — 저장된 회차가 없고 원샷은 핸들에 남아 있다 */}
+          {checkpoint === null && pendingInitial && (
+            <p className="hint">
+              아직 저장된 회차가 없습니다. 새로고침 전까지는 다시 시도해도 처음 산출물을 다시 만들지
+              않고 채점부터 이어갑니다.
+            </p>
+          )}
+          {checkpoint === null && !pendingInitial && (
+            <p className="hint">
+              아직 저장된 회차가 없습니다. 다시 시도하면 처음 산출물부터 다시 만듭니다(추가 비용 발생).
+            </p>
+          )}
+          <button onClick={start} disabled={readOnly || active}>다시 시도</button>
         </div>
       )}
 
