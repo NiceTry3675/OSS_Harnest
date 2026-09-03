@@ -94,6 +94,19 @@ export class StrategyFormatError extends Error {
   }
 }
 
+/** 차단된 전략을 고른 경우 — 형식은 맞지만 이번 회차에 쓸 수 없는 key. 형식 오류와 같은 재시도
+ *  경로를 타되(StrategyFormatError 하위), 재시도 뒤에도 남으면 예외 대신 허용 전략으로
+ *  대체한다(createStrategyPlanner). 차단은 다양성 휴리스틱이지 불변식이 아니다. */
+export class BlockedStrategyError extends StrategyFormatError {
+  readonly key: string;
+
+  constructor(key: string) {
+    super(`반복 실패한 수정 전략(${key})은 다시 선택할 수 없습니다.`);
+    this.name = "BlockedStrategyError";
+    this.key = key;
+  }
+}
+
 /** 호출 예산 백스톱 — 예산을 소진하면 이후 호출을 CallBudgetExceededError로 차단한다.
  *  판정 의미에는 관여하지 않는 순수 계수 래퍼이며, 정상 실행에서는 절대 걸리지 않아야 한다. */
 export function withCallBudget(llm: LlmClient, budget: number): LlmClient {
@@ -134,7 +147,7 @@ export function parseStrategy(
     throw new StrategyFormatError("수정 전략 출력 형식 오류 — 지원하는 전략 key가 아닙니다.");
   }
   if (blockedStrategyKeys.includes(value.key)) {
-    throw new StrategyFormatError(`반복 실패한 수정 전략(${value.key})은 다시 선택할 수 없습니다.`);
+    throw new BlockedStrategyError(value.key);
   }
   if (
     typeof value.summary !== "string" ||
@@ -168,7 +181,7 @@ function parseGrade(raw: string): { score: number; why: string } {
   return { score: value.score, why: value.why.trim() };
 }
 
-/** grader 단독 호출 — 시험관 배터리의 오염 응답 프로브(날조·아첨)가 재사용한다.
+/** grader 단독 호출 — 시험관 배터리의 오염 응답 프로브(날조·아첨·지시 주입)가 재사용한다.
  *  채점 의미(프롬프트·파싱)는 이 파일 한 곳에만 존재해야 한다. */
 export async function gradeResponse(
   llm: LlmClient,
@@ -473,6 +486,23 @@ const NO_HEADROOM_BLOCKED = [
   "consistency_pass",
 ];
 
+/** 차단 키를 거듭 고를 때의 결정적 대체 — 차단되지 않은 첫 전략(HANDOVER_STRATEGIES 순서;
+ *  천장 차단이면 tighten). 엔진의 '전략 없이 생성' 폴백은 planStrategy가 차단 키를 *반환*할 때만
+ *  닿고 던져진 오류는 라운드 실패(일시정지)로 기록되며, 템플릿의 차단 집합(NO_HEADROOM_BLOCKED)은
+ *  엔진이 알 수 없으므로 대체는 여기서 결정한다. 사유는 summary에 남겨 라운드 기록에서 보인다. */
+function fallbackStrategy(blocked: readonly string[], rejectedKey: string): ExperimentStrategy {
+  const strategy =
+    HANDOVER_STRATEGIES.find((candidate) => !blocked.includes(candidate.key)) ??
+    HANDOVER_STRATEGIES[0];
+  return {
+    key: strategy.key,
+    label: strategy.label,
+    summary:
+      `차단된 전략(${rejectedKey})을 거듭 선택해 기본 전략(${strategy.key})으로 진행 — ` +
+      strategy.description,
+  };
+}
+
 export function createStrategyPlanner(problem: HandoverProblem, llm: LlmClient) {
   assertCurrentLengthPolicy(problem);
   return async (
@@ -510,6 +540,8 @@ export function createStrategyPlanner(problem: HandoverProblem, llm: LlmClient) 
     try {
       return parseStrategy(retried, blocked);
     } catch (error) {
+      // 재시도에서도 차단 키면 라운드를 멈추지 않고 허용 전략으로 내려간다(형식 오류만 던진다)
+      if (error instanceof BlockedStrategyError) return fallbackStrategy(blocked, error.key);
       if (error instanceof StrategyFormatError) {
         throw new StrategyFormatError(
           `수정 전략 출력 형식 오류 — 형식 수정 요청 1회 후에도 사용할 수 없습니다. ${error.message}`,

@@ -56,7 +56,7 @@ function ThemeToggle() {
 }
 
 export function App() {
-  const { hydrated } = useProject();
+  const { hydrated, readOnly } = useProject();
   const { pathname } = useLocation();
 
   return (
@@ -71,6 +71,13 @@ export function App() {
           <ThemeToggle />
         </div>
       </header>
+      {readOnly ? (
+        <div className="readonly-banner" role="status">
+          다른 탭에서 이 프로젝트를 편집·실행 중입니다. 이 탭에서는 보기만 할 수 있고,
+          저장·시작·재개·승인은 그 탭에서 해 주세요. 그 탭을 닫은 뒤 이 탭을 새로고침하면 이어서
+          작업할 수 있습니다.
+        </div>
+      ) : null}
       {/* key를 경로로 두면 화면이 바뀔 때마다 진입 애니메이션이 다시 돈다 */}
       <main key={pathname} className="route-swap">
         {hydrated ? (

@@ -177,7 +177,7 @@ Harnest를 관통하는 핵심은 특정 종류의 결과물을 만드는 일이
 | export artifact / 문서 내려받기 | **결과물 파일 저장** | 최종 결과물 하나를 사람이 여는 형식으로 저장 | 전체 실행 기록과 구분 |
 | project export / JSON 내보내기 | **전체 실행 기록 저장 (.json)** | 승인 내용, 진행, 점수를 JSON 파일로 저장 | 결과물 파일과 구분 |
 | persist / 서버에 기록 | **Harnest 서버에 저장** | 사용자가 명시적으로 프로젝트와 결과 저장을 선택 | 기본적으로 자동 저장된다고 표현하지 않음 |
-| optional backend | **선택형 저장 서버** | 서버 저장 기능을 제공하는 선택 구성 | 평가와 AI 요청을 대신 실행하지 않음 |
+| optional backend | **선택형 저장 서버** | 서버 저장 기능을 제공하는 선택 구성 | 평가를 대신 실행하지 않음. AI 요청 중계는 사용자가 키를 비워 두고 택한 관리자 공유 키 경로뿐 |
 
 ### 2.3 실제 문장에 적용할 수 있는 교체안
 
@@ -190,7 +190,7 @@ Harnest를 관통하는 핵심은 특정 종류의 결과물을 만드는 일이
 | 인수인계 템플릿 입력 | `AI 초안 N개 넣기` | **질문·답변 사례 칸에 AI 초안 N개 추가** | 생성 결과가 case list에 들어가며 사용자 확인 전에는 제출되지 않음 |
 | 인수인계 템플릿 입력 | `실제로 받았던 질문` | **문서 독자가 실제로 물었던 질문** | 인수인계 문서를 읽을 후임자의 질문 사례를 입력함 |
 | 인수인계 템플릿 입력 | `그때 당신이 한 답` | **담당자가 그 질문에 답한 내용** | 채점 시 참조 답으로 쓰이므로 답의 주체를 명시함 |
-| 인수인계 템플릿 입력 | `뒤에서 N개를 숨겨...` | **질문·답변 사례 중 N개는 개선 과정에 공개하지 않고 최종 확인에만 사용합니다.** | 숨김 대상은 결과물을 만드는 AI이며 사용자는 입력·승인 화면에서 내용을 볼 수 있음 |
+| 인수인계 템플릿 입력 | `최종 확인용 N개는 개선에 쓰지 않고 시작할 때와 끝날 때만 채점합니다.` | **질문·답변 사례 중 N개는 개선 과정에 공개하지 않고 최종 확인에만 사용합니다.** | 숨김 대상은 결과물을 만드는 AI이며 사용자는 입력·승인 화면에서 내용을 볼 수 있음. 어떤 질문이 어느 용도인지는 질문마다 배지(개선용·중간 점검용·최종 확인용)로 표시됨 |
 | 평가 미리보기 | `이렇게 채점됩니다` | **AI가 만든 결과물을 아래 방법으로 채점합니다.** | 채점 대상이 결과물임 |
 | 평가 미리보기 | `미충족 시 탈락` | **이 조건을 지키지 않은 새 개선안은 점수를 비교하지 않고 제외합니다.** | gate rejected 후보는 채택 비교에 들어가지 않음 |
 | 모델 선택 | `무엇으로 채점할까요?` | **사용할 AI 모델을 선택하세요.** | 선택한 하나의 모델이 현재 실행에서 결과물 생성과 평가를 모두 담당함 |
@@ -313,13 +313,13 @@ Harnest를 관통하는 핵심은 특정 종류의 결과물을 만드는 일이
 | 높음 | AI 초안 N개 넣기 | 어디에 추가되는지와 검토 책임이 생략됐다. | `질문·답변 사례 칸에 AI 초안 N개 추가` | [WizardPage.tsx](../apps/web/src/pages/WizardPage.tsx#L635) |
 | 중간 | 초안 설정 / 한 번에 만들 초안 | 무엇의 초안인지 제목에서 사라졌다. | `질문·답변 사례 초안 설정` / `만들 사례 수` | [WizardPage.tsx](../apps/web/src/pages/WizardPage.tsx#L679) |
 | 중간 | 실행 예산 / 호출 예산 | 돈, 시간, 횟수 중 무엇을 제한하는지 불명확하다. | `한 번 실행할 때 허용할 AI 요청 횟수` | [WizardPage.tsx](../apps/web/src/pages/WizardPage.tsx#L703) |
-| 높음 | 실제로 받았던 질문 / 그때 당신이 한 답 | 누가 질문했고 누구에게 받은 것인지, 답을 어디에 넣는지 제목 외에는 설명이 약하다. | `문서 독자가 실제로 물었던 질문` / `그 질문에 담당자가 답한 내용` | [WizardCaseList.tsx](../apps/web/src/components/WizardCaseList.tsx#L91) |
-| 높음 | 뒤에서 N개를 숨겨... | `뒤`가 목록 뒤인지 실행 뒤인지 모호하고 숨기는 주체도 없다. | `전체 사례 중 N개는 개선 과정에 보여주지 않고 마지막 확인에만 사용합니다.` | [WizardCaseList.tsx](../apps/web/src/components/WizardCaseList.tsx#L107) |
-| 높음 | 숨김 | 사용자에게도 보이지 않는다는 인상을 준다. | `최종 확인용` | [WizardCaseList.tsx](../apps/web/src/components/WizardCaseList.tsx#L131) |
-| 중간 | 확인 필요 | 무엇을 왜 확인해야 하는지 없다. | `자료와 일치하는지 사용자가 확인해야 함` | [WizardCaseList.tsx](../apps/web/src/components/WizardCaseList.tsx#L148) |
-| 중간 | AI 초안·수정 | AI가 만들기만 했는지 사용자가 수정했는지 상태가 합쳐져 있다. | `AI가 만든 초안`과 `사용자가 검토함`을 별도 상태로 표시 | [WizardCaseList.tsx](../apps/web/src/components/WizardCaseList.tsx#L151) |
-| 중간 | 근거 대목 | 근거가 어느 자료의 어느 부분인지 제목만으로는 약하다. | `참고 자료에서 답을 확인할 수 있는 부분` | [WizardCaseList.tsx](../apps/web/src/components/WizardCaseList.tsx#L191) |
-| 높음 | 자료와 그대로 일치하지 않음 | 오류인지 자연스러운 요약인지 구분되지 않아 사용자가 무엇을 해야 할지 모른다. | `원문 그대로의 인용이 아닙니다. 의미가 맞는지 확인하세요.` | [WizardCaseList.tsx](../apps/web/src/components/WizardCaseList.tsx#L223) |
+| 높음 | 실제로 받았던 질문 / 그때 당신이 한 답 | 누가 질문했고 누구에게 받은 것인지, 답을 어디에 넣는지 제목 외에는 설명이 약하다. | `문서 독자가 실제로 물었던 질문` / `그 질문에 담당자가 답한 내용` | [WizardCaseList.tsx](../apps/web/src/components/WizardCaseList.tsx#L112) |
+| 높음 | 최종 확인용 N개는 개선에 쓰지 않고 시작할 때와 끝날 때만 채점합니다. | `개선에 쓰지 않는다`가 결과물을 만드는 AI에게 보여주지 않는다는 뜻임이 드러나지 않아, 사용자에게도 숨긴다고 읽힐 수 있다. | `전체 사례 중 N개는 개선 과정에 보여주지 않고 마지막 확인에만 사용합니다.` | [WizardCaseList.tsx](../apps/web/src/components/WizardCaseList.tsx#L157) |
+| 높음 | 숨김 | 사용자에게도 보이지 않는다는 인상을 준다. | `최종 확인용` | [WizardCaseList.tsx](../apps/web/src/components/WizardCaseList.tsx#L180) |
+| 중간 | 확인 필요 | 무엇을 왜 확인해야 하는지 없다. | `자료와 일치하는지 사용자가 확인해야 함` | [WizardCaseList.tsx](../apps/web/src/components/WizardCaseList.tsx#L192) |
+| 중간 | AI 초안·수정 | AI가 만들기만 했는지 사용자가 수정했는지 상태가 합쳐져 있다. | `AI가 만든 초안`과 `사용자가 검토함`을 별도 상태로 표시 | [WizardCaseList.tsx](../apps/web/src/components/WizardCaseList.tsx#L196) |
+| 중간 | 근거 대목 | 근거가 어느 자료의 어느 부분인지 제목만으로는 약하다. | `참고 자료에서 답을 확인할 수 있는 부분` | [WizardCaseList.tsx](../apps/web/src/components/WizardCaseList.tsx#L252) |
+| 높음 | 자료와 그대로 일치하지 않음 | 오류인지 자연스러운 요약인지 구분되지 않아 사용자가 무엇을 해야 할지 모른다. | `원문 그대로의 인용이 아닙니다. 의미가 맞는지 확인하세요.` | [WizardCaseList.tsx](../apps/web/src/components/WizardCaseList.tsx#L272) |
 | 높음 | 이렇게 채점됩니다 | 채점 대상과 실행 주체가 없다. | `AI가 만든 결과물을 아래 방법으로 채점합니다.` | [WizardBlueprint.tsx](../apps/web/src/components/WizardBlueprint.tsx#L50) |
 | 중간 | 가중치 | 점수에서 차지하는 비율이라는 설명이 없다. | `전체 점수에서 차지하는 비율` | [WizardBlueprint.tsx](../apps/web/src/components/WizardBlueprint.tsx#L67) |
 | 높음 | 미충족 시 탈락 | 무엇이 탈락하며 다음 단계에 어떤 영향을 주는지 없다. | `이 조건을 지키지 않은 새 결과물은 채택하지 않음` | [WizardBlueprint.tsx](../apps/web/src/components/WizardBlueprint.tsx#L76) |

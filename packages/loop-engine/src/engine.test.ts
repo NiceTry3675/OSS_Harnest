@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { indexedDB as fakeIndexedDB } from "fake-indexeddb";
+import { IDBFactory, forceCloseDatabase, indexedDB as fakeIndexedDB } from "fake-indexeddb";
 import type { EvaluationPack, LoopCheckpoint, LoopSpec, ScoreResult } from "@harnest/contracts";
 import {
+  CheckpointSaveError,
   createLoopRun,
   createRng,
   IndexedDbCheckpointStore,
   MemoryCheckpointStore,
+  type CheckpointStore,
   type LoopHandle,
   type LoopRunOptions,
 } from "./index";
@@ -971,5 +973,459 @@ describe("IndexedDbCheckpointStore", () => {
     expect(final?.status).toBe("done");
     expect(final?.round).toBe(6);
     expect(final?.curve).toHaveLength(7);
+  });
+});
+
+describe("createLoopRun — 재개·동시 실행·저장 실패 경계", () => {
+  it("가드 필드가 없는 구버전 체크포인트를 정규화해 예외 없이 완주한다", async () => {
+    const store = new MemoryCheckpointStore<number>();
+    // 가드 도입 전 형태: championGuardScore·guardCurve·tree[].candidateGuardScore·guardSafe 없음
+    const legacy = {
+      runId: "legacy-cp",
+      packDigest: pack.definitionDigest,
+      status: "paused",
+      round: 2,
+      champion: 20,
+      championScore: 20,
+      championViolations: [],
+      curve: [10, 20, 20],
+      tree: [
+        { round: 1, candidateScore: 20, championScore: 20, adopted: true, gateRejected: false, violations: [] },
+        { round: 2, candidateScore: 15, championScore: 20, adopted: false, gateRejected: false, violations: [] },
+      ],
+      provenance: [],
+      rngState: createRng(42).state,
+    };
+    await store.save(legacy as unknown as LoopCheckpoint<number>);
+
+    await createLoopRun<number>({
+      runId: "legacy-cp",
+      pack,
+      spec: makeSpec({ maxRounds: 4 }),
+      scorer: (a) => ok(a),
+      generate: (champion) => champion + 1,
+      initial: () => {
+        throw new Error("체크포인트가 있으면 원샷을 만들지 않는다");
+      },
+      store,
+      onEvent: () => {},
+    }).start();
+
+    const final = await store.load("legacy-cp");
+    expect(final?.status).toBe("done");
+    expect(final?.round).toBe(4);
+    expect(final?.guardCurve).toHaveLength(final!.curve.length);
+    expect(final?.guardCurve.every((g) => g === null)).toBe(true);
+    expect(final?.championGuardScore).toBeNull();
+    // 기존 레코드는 가드 검사가 없던 시절 것이므로 guardSafe true·candidateGuardScore null로 승격
+    expect(final?.tree.slice(0, 2).map((r) => [r.guardSafe, r.candidateGuardScore])).toEqual([
+      [true, null],
+      [true, null],
+    ]);
+    expect(final?.tree).toHaveLength(4);
+  });
+
+  it("탭 회수로 남은 status running 체크포인트도 resumed 기록을 남기고 이어서 돈다", async () => {
+    const store = new MemoryCheckpointStore<number>();
+    const opts: LoopRunOptions<number> = {
+      runId: "stale-running",
+      pack,
+      spec: makeSpec({ maxRounds: 3 }),
+      scorer: (a) => ok(a),
+      generate: (champion) => champion + 1,
+      initial: () => 0,
+      store,
+      onEvent: () => {},
+    };
+    await createLoopRun(opts).start();
+    const done = (await store.load("stale-running"))!;
+    // 라운드 1 경계의 running 저장본을 손으로 재현(이후 라운드는 탭과 함께 사라진 상황)
+    await store.save({
+      ...done,
+      status: "running",
+      doneReason: undefined,
+      round: 1,
+      champion: 1,
+      championScore: 1,
+      curve: [0, 1],
+      guardCurve: [null, null],
+      tree: done.tree.slice(0, 1),
+      provenance: done.provenance.slice(0, 2),
+    });
+
+    await createLoopRun(opts).start();
+    const final = await store.load("stale-running");
+    expect(final?.status).toBe("done");
+    expect(final?.round).toBe(3);
+    expect(final?.provenance.some((p) => p.type === "resumed")).toBe(true);
+    expect(final?.curve).toEqual(done.curve);
+  });
+
+  it("같은 핸들의 동시 start()는 두 번째가 즉시 no-op으로 끝나고 라운드가 이중 실행되지 않는다", async () => {
+    const store = new MemoryCheckpointStore<number>();
+    let initialCalls = 0;
+    let generateCalls = 0;
+    const handle = createLoopRun<number>({
+      runId: "double-start",
+      pack,
+      spec: makeSpec({ maxRounds: 3 }),
+      scorer: (a) => ok(a),
+      generate: async (champion) => {
+        generateCalls += 1;
+        await new Promise((r) => setTimeout(r, 1));
+        return champion + 1;
+      },
+      initial: () => {
+        initialCalls += 1;
+        return 0;
+      },
+      store,
+      onEvent: () => {},
+    });
+
+    expect(handle.isActive()).toBe(false);
+    const first = handle.start();
+    expect(handle.isActive()).toBe(true);
+    const second = handle.start();
+    await second; // 첫 실행이 살아 있는 동안 두 번째는 아무 것도 하지 않고 즉시 끝난다
+    expect(handle.isActive()).toBe(true);
+    await first;
+    expect(handle.isActive()).toBe(false);
+
+    const final = await store.load("double-start");
+    expect(final?.status).toBe("done");
+    expect(final?.tree).toHaveLength(3);
+    expect(initialCalls).toBe(1);
+    expect(generateCalls).toBe(3);
+  });
+
+  it.each(["generate", "scorer"] as const)(
+    "%s 호출 도중 pause()하면 진행 중 라운드가 정확히 한 번 기록된 뒤 paused로 저장된다",
+    async (slot) => {
+      const store = new MemoryCheckpointStore<number>();
+      const events: LoopCheckpoint<number>[] = [];
+      let handle: LoopHandle;
+      const pauseAt = (round: number) => {
+        if (round === 2) handle.pause();
+      };
+      handle = createLoopRun<number>({
+        runId: `mid-round-pause-${slot}`,
+        pack,
+        spec: makeSpec({ maxRounds: 5 }),
+        scorer: async (a) => {
+          await Promise.resolve();
+          if (slot === "scorer" && a > 0) pauseAt(a);
+          return ok(a);
+        },
+        generate: async (champion, _rng, feedback) => {
+          await Promise.resolve();
+          if (slot === "generate") pauseAt(feedback.round);
+          return champion + 1;
+        },
+        initial: () => 0,
+        store,
+        onEvent: (cp) => events.push(cp),
+      });
+      await handle.start();
+
+      const final = await store.load(`mid-round-pause-${slot}`);
+      expect(final?.status).toBe("paused");
+      expect(final?.round).toBe(2);
+      expect(final?.tree.map((r) => r.round)).toEqual([1, 2]);
+      expect(final?.curve).toEqual([0, 1, 2]);
+      // 커밋 순서: r0 running → r1 running → r2 running → r2 paused
+      expect(events.map((cp) => [cp.round, cp.status])).toEqual([
+        [0, "running"],
+        [1, "running"],
+        [2, "running"],
+        [2, "paused"],
+      ]);
+      const types = final!.provenance.map((p) => p.type);
+      expect(types.lastIndexOf("round")).toBeLessThan(types.indexOf("paused"));
+    },
+  );
+
+  it("store.save 실패는 CheckpointSaveError로 전파되고 저장본·이벤트는 직전 라운드에 머문다", async () => {
+    const inner = new MemoryCheckpointStore<number>();
+    const diskFull = new Error("QuotaExceededError — 테스트");
+    let failing = true;
+    const store: CheckpointStore<number> = {
+      load: (runId) => inner.load(runId),
+      save: async (cp) => {
+        if (failing && cp.status === "running" && cp.round === 2) throw diskFull;
+        await inner.save(cp);
+      },
+    };
+    const events: LoopCheckpoint<number>[] = [];
+    const opts: LoopRunOptions<number> = {
+      runId: "save-fails",
+      pack,
+      spec: makeSpec({ maxRounds: 3 }),
+      scorer: (a) => ok(a),
+      generate: (champion) => champion + 1,
+      initial: () => 0,
+      store,
+      onEvent: (cp) => events.push(cp),
+    };
+
+    const error = await createLoopRun(opts).start().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(CheckpointSaveError);
+    expect((error as CheckpointSaveError).cause).toBe(diskFull);
+    expect((error as Error).message).toContain("QuotaExceededError");
+
+    // 라운드 2의 계산 결과는 저장본에도 이벤트에도 없다 — 재시도는 라운드 1에서 이어진다
+    const stored = await inner.load("save-fails");
+    expect(stored?.round).toBe(1);
+    expect(stored?.tree).toHaveLength(1);
+    expect(stored?.curve).toEqual([0, 1]);
+    expect(events[events.length - 1].round).toBe(1);
+
+    failing = false;
+    await createLoopRun(opts).start();
+    const final = await inner.load("save-fails");
+    expect(final?.status).toBe("done");
+    expect(final?.curve).toEqual([0, 1, 2, 3]);
+  });
+
+  it("라운드 오류 경로에서 저장까지 실패하면 원래 모델 오류가 우선하고 저장 실패는 cause로 남는다", async () => {
+    const inner = new MemoryCheckpointStore<number>();
+    const diskFull = new Error("저장공간 부족 — 테스트");
+    const store: CheckpointStore<number> = {
+      load: (runId) => inner.load(runId),
+      save: async (cp) => {
+        if (cp.status === "paused") throw diskFull;
+        await inner.save(cp);
+      },
+    };
+    const error = await createLoopRun<number>({
+      runId: "error-then-save-fails",
+      pack,
+      spec: makeSpec({ maxRounds: 2 }),
+      scorer: (a) => {
+        if (a === 1) throw new Error("채점 출력 형식 오류 — 테스트");
+        return ok(a);
+      },
+      generate: (champion) => champion + 1,
+      initial: () => 0,
+      store,
+      onEvent: () => {},
+    })
+      .start()
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("채점 출력 형식 오류");
+    expect((error as Error).cause).toBeInstanceOf(CheckpointSaveError);
+    expect(((error as Error).cause as CheckpointSaveError).cause).toBe(diskFull);
+    // 저장본은 라운드 0 running 그대로다(paused 커밋은 실패)
+    expect((await inner.load("error-then-save-fails"))?.status).toBe("running");
+  });
+
+  it("라운드 0 채점이 실패해도 원샷 산출물은 핸들에 남아 같은 핸들의 재시작에서 재생성하지 않는다", async () => {
+    const spec = makeSpec({ maxRounds: 4, seed: 9 });
+    const generate = (champion: number, rng: () => number) => champion + rng();
+    const scorer = (a: number) => ok(a);
+
+    // 기준: 실패 없이 끝까지
+    const storeA = new MemoryCheckpointStore<number>();
+    await createLoopRun<number>({
+      runId: "r0-retry",
+      pack,
+      spec,
+      scorer,
+      generate,
+      initial: (rng) => rng() * 10,
+      store: storeA,
+      onEvent: () => {},
+    }).start();
+    const finalA = await storeA.load("r0-retry");
+
+    // 라운드 0 채점이 한 번 실패한 뒤 같은 핸들로 재시작
+    const storeB = new MemoryCheckpointStore<number>();
+    let initialCalls = 0;
+    let failOnce = true;
+    const handle = createLoopRun<number>({
+      runId: "r0-retry",
+      pack,
+      spec,
+      scorer: (a) => {
+        if (failOnce) {
+          failOnce = false;
+          throw new Error("채점 출력 형식 오류 — 테스트");
+        }
+        return scorer(a);
+      },
+      generate,
+      initial: (rng) => {
+        initialCalls += 1;
+        return rng() * 10;
+      },
+      store: storeB,
+      onEvent: () => {},
+    });
+    await expect(handle.start()).rejects.toThrow("채점 출력 형식 오류");
+    // 점수 없는 체크포인트는 만들 수 없다 — 저장본·핸들 체크포인트 모두 없음
+    expect(await storeB.load("r0-retry")).toBeNull();
+    expect(handle.getCheckpoint()).toBeNull();
+    expect(handle.isActive()).toBe(false);
+    // 원샷은 핸들에 남아 있다 — 화면은 이 값으로 "채점부터 잇는다"를 안내한다
+    expect(handle.hasPendingInitial()).toBe(true);
+
+    await handle.start();
+    expect(initialCalls).toBe(1);
+    expect(handle.hasPendingInitial()).toBe(false);
+    const finalB = await storeB.load("r0-retry");
+    expect(finalB?.status).toBe("done");
+    // 원샷 직후의 rng 상태를 복원하므로 새 실행과 같은 수열·같은 곡선
+    expect(finalB?.curve).toEqual(finalA?.curve);
+    expect(finalB?.champion).toBe(finalA?.champion);
+  });
+
+  it("원샷 생성 자체가 실패하면 남는 산출물이 없어 다음 start()가 initial을 다시 부른다(호출 2회)", async () => {
+    const store = new MemoryCheckpointStore<number>();
+    let initialCalls = 0;
+    const handle = createLoopRun<number>({
+      runId: "r0-initial-fails",
+      pack,
+      spec: makeSpec({ maxRounds: 1 }),
+      scorer: (a) => ok(a),
+      generate: (champion) => champion + 1,
+      initial: () => {
+        initialCalls += 1;
+        if (initialCalls === 1) throw new Error("생성 호출 429 — 테스트");
+        return 5;
+      },
+      store,
+      onEvent: () => {},
+    });
+    await expect(handle.start()).rejects.toThrow("생성 호출 429");
+    expect(await store.load("r0-initial-fails")).toBeNull();
+    // 보관할 원샷이 없다 — 화면은 "처음 산출물부터 다시 만듭니다(추가 비용 발생)"를 안내한다
+    expect(handle.hasPendingInitial()).toBe(false);
+
+    await handle.start();
+    expect(initialCalls).toBe(2);
+    expect((await store.load("r0-initial-fails"))?.curve).toEqual([5, 6]);
+  });
+
+  it("라운드 0 첫 커밋이 실패해도 원샷 산출물은 재사용된다", async () => {
+    const inner = new MemoryCheckpointStore<number>();
+    let failOnce = true;
+    const store: CheckpointStore<number> = {
+      load: (runId) => inner.load(runId),
+      save: async (cp) => {
+        if (failOnce) {
+          failOnce = false;
+          throw new Error("저장공간 부족 — 테스트");
+        }
+        await inner.save(cp);
+      },
+    };
+    let initialCalls = 0;
+    const handle = createLoopRun<number>({
+      runId: "r0-commit-fails",
+      pack,
+      spec: makeSpec({ maxRounds: 1 }),
+      scorer: (a) => ok(a),
+      generate: (champion) => champion + 1,
+      initial: () => {
+        initialCalls += 1;
+        return 5;
+      },
+      store,
+      onEvent: () => {},
+    });
+    await expect(handle.start()).rejects.toBeInstanceOf(CheckpointSaveError);
+    expect(await inner.load("r0-commit-fails")).toBeNull();
+
+    await handle.start();
+    expect(initialCalls).toBe(1);
+    expect((await inner.load("r0-commit-fails"))?.curve).toEqual([5, 6]);
+  });
+});
+
+describe("체크포인트 저장소 정리 — keys·deleteExcept", () => {
+  const cpFor = (runId: string): LoopCheckpoint<number> => ({
+    runId,
+    packDigest: "d",
+    status: "paused",
+    round: 0,
+    champion: 1,
+    championScore: 1,
+    championViolations: [],
+    championGuardScore: null,
+    curve: [1],
+    guardCurve: [null],
+    tree: [],
+    provenance: [],
+    rngState: 1,
+  });
+
+  it("MemoryCheckpointStore: keepRunId만 남기고 지우며 null이면 전부 지운다", async () => {
+    const store = new MemoryCheckpointStore<number>();
+    for (const id of ["a", "b", "c"]) await store.save(cpFor(id));
+    expect((await store.keys()).sort()).toEqual(["a", "b", "c"]);
+
+    await store.deleteExcept("b");
+    expect(await store.keys()).toEqual(["b"]);
+    expect(await store.load("a")).toBeNull();
+    expect(await store.load("b")).not.toBeNull();
+
+    await store.deleteExcept(null);
+    expect(await store.keys()).toEqual([]);
+  });
+
+  it("IndexedDbCheckpointStore: keepRunId만 남기고 지우며 null이면 전부 지운다", async () => {
+    globalThis.indexedDB = new IDBFactory(); // 다른 테스트의 저장본과 격리
+    const store = new IndexedDbCheckpointStore<number>();
+    for (const id of ["a", "b", "c"]) await store.save(cpFor(id));
+    expect((await store.keys()).sort()).toEqual(["a", "b", "c"]);
+
+    await store.deleteExcept("b");
+    expect(await store.keys()).toEqual(["b"]);
+    expect(await store.load("a")).toBeNull();
+    expect(await store.load("b")).not.toBeNull();
+
+    await store.deleteExcept(null);
+    expect(await store.keys()).toEqual([]);
+    globalThis.indexedDB = fakeIndexedDB;
+  });
+
+  it("IndexedDbCheckpointStore: 열기 실패는 캐시되지 않고 다음 호출에서 다시 연다", async () => {
+    const failingFactory = {
+      open: () => {
+        const req = {
+          onupgradeneeded: null,
+          onsuccess: null,
+          onerror: null as null | (() => void),
+          error: new Error("IndexedDB 열기 실패 — 테스트"),
+        };
+        queueMicrotask(() => req.onerror?.());
+        return req;
+      },
+    };
+    globalThis.indexedDB = failingFactory as unknown as IDBFactory;
+    const store = new IndexedDbCheckpointStore<number>();
+    await expect(store.load("x")).rejects.toThrow("IndexedDB 열기 실패");
+    await expect(store.save(cpFor("x"))).rejects.toThrow("IndexedDB 열기 실패");
+
+    globalThis.indexedDB = new IDBFactory();
+    await store.save(cpFor("x"));
+    expect((await store.load("x"))?.runId).toBe("x");
+    globalThis.indexedDB = fakeIndexedDB;
+  });
+
+  it("IndexedDbCheckpointStore: 브라우저가 연결을 강제 종료해도 다음 호출에서 다시 연다", async () => {
+    globalThis.indexedDB = new IDBFactory();
+    const store = new IndexedDbCheckpointStore<number>();
+    await store.save(cpFor("y"));
+    const db = await (store as unknown as { open(): Promise<IDBDatabase> }).open();
+    // fake-indexeddb의 선언 파일이 인스턴스 대신 클래스 타입을 받도록 잘못 적혀 있어 캐스팅한다
+    forceCloseDatabase(db as unknown as Parameters<typeof forceCloseDatabase>[0]);
+
+    expect((await store.load("y"))?.runId).toBe("y");
+    await store.save(cpFor("z"));
+    expect((await store.keys()).sort()).toEqual(["y", "z"]);
+    globalThis.indexedDB = fakeIndexedDB;
   });
 });

@@ -57,6 +57,20 @@ with sqlite3.connect(_tmp.name) as _legacy_conn:
     )
 
 os.environ["HARNEST_DB"] = _tmp.name
+# 기본값 단언이 셸 환경에 좌우되지 않도록, 서버 설정 환경변수는 임포트 전에 모두 비운다.
+for _name in (
+    "HARNEST_CORS_ORIGINS",
+    "HARNEST_TRUSTED_IP_HEADER",
+    "HARNEST_PROXY_TIMEOUT",
+    "HARNEST_PROXY_RATE_LIMIT",
+    "HARNEST_EXPORT_RATE_LIMIT",
+    "HARNEST_DB_MAX_BYTES",
+    "SHARED_OPENAI_API_KEY",
+    "SHARED_GEMINI_API_KEY",
+    "SHARED_OPENAI_MODELS",
+    "SHARED_GEMINI_MODELS",
+):
+    os.environ.pop(_name, None)
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -328,6 +342,79 @@ def run() -> None:
     assert r.status_code == 200, r.text
     assert r.content == raw_llm_export
 
+    # 인수인계 템플릿이 실제로 내보내는 형태 — seeded_split·examinerReport에 더해 loopSpec.feedbackMode,
+    # tree 레코드의 strategy, 척도 상한 도달(ceiling) 종료까지 계약(packages/contracts/src/loop.ts)대로 저장한다.
+    handover_export = json.loads(raw_llm_export)
+    handover_export["project"]["loopSpec"]["feedbackMode"] = "recent_public_experiments_v1"
+    handover_checkpoint = handover_export["result"]["checkpoint"]
+    handover_checkpoint.update(
+        {
+            "runId": "run-handover-ceiling",
+            "doneReason": "ceiling",
+            "championScore": 100.0,
+            "curve": [50.0, 100.0],
+            "tree": [
+                {
+                    **handover_checkpoint["tree"][0],
+                    "candidateScore": 100.0,
+                    "championScore": 100.0,
+                    "strategy": {
+                        "key": "tighten-structure_v1",
+                        "summary": "인수인계 문서의 절 구조를 질문 순서에 맞춰 재배열한다.",
+                        "label": "구조 다듬기",
+                    },
+                }
+            ],
+            "provenance": [
+                {"at": "2026-08-24T00:05:00.000Z", "type": "run_started", "detail": "시작"},
+                {"at": "2026-08-24T00:05:30.000Z", "type": "adopted", "detail": "1라운드 채택"},
+                {"at": "2026-08-24T00:05:31.000Z", "type": "ceiling_stop", "detail": "척도 상한 100점 도달"},
+            ],
+        }
+    )
+    handover_export["result"]["holdout"]["final"] = {
+        "status": "scored",
+        "evaluation": {
+            "gateRejected": False,
+            "score": 100.0,
+            "perCase": [
+                {
+                    "caseId": "case-4",
+                    "question": "숨김 질문",
+                    "score": 1.0,
+                    "why": "정답",
+                    "caseType": "new",
+                }
+            ],
+            "violations": [],
+        },
+    }
+    raw_handover_export = (
+        json.dumps(handover_export, ensure_ascii=False, indent=2) + "\n"
+    ).encode("utf-8")
+    r = client.post(
+        "/exports", content=raw_handover_export, headers={"Content-Type": "application/json"}
+    )
+    assert r.status_code == 201, r.text
+    r = client.get(f"/exports/{r.json()['id']}")
+    assert r.status_code == 200, r.text
+    assert r.content == raw_handover_export
+
+    # label 없는 strategy, 다른 feedbackMode·doneReason 조합도 허용 목록 안이면 저장한다.
+    variant = json.loads(raw_handover_export)
+    variant["project"]["loopSpec"]["feedbackMode"] = "champion_only"
+    variant["result"]["checkpoint"]["runId"] = "run-handover-plateau"
+    variant["result"]["checkpoint"]["doneReason"] = "plateau"
+    variant["result"]["checkpoint"]["championScore"] = 90.0
+    variant["result"]["checkpoint"]["curve"] = [50.0, 90.0]
+    variant["result"]["checkpoint"]["tree"][0]["strategy"] = {"key": "a", "summary": "짧은 설명"}
+    r = client.post(
+        "/exports",
+        content=json.dumps(variant, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    assert r.status_code == 201, r.text
+
     # 새 BYO 공급자도 Pack·시험관 리포트의 동일 provider/model 결속을 유지해 저장한다.
     for provider, model in (
         ("vertex", "gemini-3.8-flash"),
@@ -431,8 +518,61 @@ def run() -> None:
         "holdoutCaseIds": ["case-1"],
         "guardTolerance": 4.2,
     }
+    unknown_feedback_mode = json.loads(raw_handover_export)
+    unknown_feedback_mode["project"]["loopSpec"]["feedbackMode"] = "everything"
+    unknown_done_reason = json.loads(raw_export)
+    unknown_done_reason["result"]["checkpoint"]["doneReason"] = "unknown"
+    ceiling_below_ceiling = json.loads(raw_handover_export)
+    ceiling_below_ceiling["result"]["checkpoint"]["championScore"] = 90.0
+    strategy_not_object = json.loads(raw_handover_export)
+    strategy_not_object["result"]["checkpoint"]["tree"][0]["strategy"] = "tighten"
+    strategy_bad_key = json.loads(raw_handover_export)
+    strategy_bad_key["result"]["checkpoint"]["tree"][0]["strategy"]["key"] = "Tighten Structure"
+    strategy_blank_summary = json.loads(raw_handover_export)
+    strategy_blank_summary["result"]["checkpoint"]["tree"][0]["strategy"]["summary"] = "   "
+    strategy_long_summary = json.loads(raw_handover_export)
+    strategy_long_summary["result"]["checkpoint"]["tree"][0]["strategy"]["summary"] = "가" * 501
+    strategy_missing_summary = json.loads(raw_handover_export)
+    strategy_missing_summary["result"]["checkpoint"]["tree"][0]["strategy"].pop("summary")
+    strategy_bad_label = json.loads(raw_handover_export)
+    strategy_bad_label["result"]["checkpoint"]["tree"][0]["strategy"]["label"] = 7
+    strategy_unknown_member = json.loads(raw_handover_export)
+    strategy_unknown_member["result"]["checkpoint"]["tree"][0]["strategy"]["score"] = 1
+
+    # 허용 목록 밖 값은 실제 값을 담은 정확한 사유로 거부한다 — 클라이언트가 그대로 사용자에게 보여 준다.
+    r = client.post(
+        "/exports",
+        content=export_bytes(unknown_done_reason),
+        headers={"Content-Type": "application/json"},
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == "doneReason 값이 허용 목록 밖입니다: unknown", r.text
+    r = client.post(
+        "/exports",
+        content=export_bytes(unknown_feedback_mode),
+        headers={"Content-Type": "application/json"},
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == "project.loopSpec.feedbackMode 값이 허용 목록 밖입니다: everything", r.text
+    r = client.post(
+        "/exports",
+        content=export_bytes(ceiling_below_ceiling),
+        headers={"Content-Type": "application/json"},
+    )
+    assert r.status_code == 422, r.text
+    assert "ceiling" in r.json()["detail"] and "100" in r.json()["detail"], r.text
 
     invalid_exports = [
+        export_bytes(unknown_feedback_mode),
+        export_bytes(unknown_done_reason),
+        export_bytes(ceiling_below_ceiling),
+        export_bytes(strategy_not_object),
+        export_bytes(strategy_bad_key),
+        export_bytes(strategy_blank_summary),
+        export_bytes(strategy_long_summary),
+        export_bytes(strategy_missing_summary),
+        export_bytes(strategy_bad_label),
+        export_bytes(strategy_unknown_member),
         b'{"kind":"harnest.project-export","kind":"harnest.project-export","envelopeVersion":3}',
         raw_export.replace(b'"envelopeVersion": 3', b'"envelopeVersion": 1', 1),
         export_bytes(missing_exported_at),
@@ -512,10 +652,18 @@ def run() -> None:
     r = client.get("/exports/no-such-id")
     assert r.status_code == 404, r.text
 
-    # 공유 키를 설정하지 않은 기본 상태 — /config는 둘 다 false, /proxy/*는 404
+    # 공유 키를 설정하지 않은 기본 상태 — /config는 둘 다 false·허용 모델 목록은 빈 배열, /proxy/*는 404
     r = client.get("/config")
     assert r.status_code == 200, r.text
-    assert r.json() == {"sharedProviders": {"openai": False, "gemini": False}}
+    assert r.json() == {
+        "sharedProviders": {"openai": False, "gemini": False},
+        "sharedModels": {"openai": [], "gemini": []},
+    }
+
+    # CORS 기본값은 README대로 로컬 웹 앱 하나뿐이다 — 배포 출처는 배포 설정(fly.toml [env])이 넣는다.
+    import main
+
+    assert main.ALLOWED_ORIGINS == {"http://localhost:5173"}, main.ALLOWED_ORIGINS
 
     r = client.post("/proxy/openai", json={"model": "x", "input": "hi"})
     assert r.status_code == 404, r.text
@@ -525,6 +673,8 @@ def run() -> None:
 
     run_ratelimit_and_model_validation()
     run_proxy_guards(client)
+    run_export_limits(client, raw_export)
+    run_event_loop_not_blocked()
 
     print("모든 테스트 통과")
 
@@ -545,15 +695,55 @@ def run_ratelimit_and_model_validation() -> None:
     assert not _MODEL_NAME_RE.match("../etc/passwd")
     assert not _MODEL_NAME_RE.match("model?x=1")
 
-    # 방문자가 꾸민 X-Forwarded-For 첫 값이 아니라 프록시가 붙인 값(Fly-Client-IP 또는 마지막 항목)을 쓴다
+    # 신뢰 헤더 변수가 없으면 Fly-Client-IP·X-Forwarded-For를 무시한다 — 프록시 없는 배포에서 헤더를
+    # 믿으면 요청마다 IP를 꾸며 한도를 무한히 우회할 수 있다.
+    import main
     from types import SimpleNamespace
 
     def fake_request(headers: dict, host: str = "10.0.0.1"):
         return SimpleNamespace(headers=headers, client=SimpleNamespace(host=host))
 
-    assert _client_ip(fake_request({"fly-client-ip": "203.0.113.9", "x-forwarded-for": "1.1.1.1"})) == "203.0.113.9"
-    assert _client_ip(fake_request({"x-forwarded-for": "1.1.1.1, 203.0.113.9"})) == "203.0.113.9"
+    assert main.TRUSTED_IP_HEADER == ""
+    assert _client_ip(fake_request({"fly-client-ip": "203.0.113.9", "x-forwarded-for": "1.1.1.1"})) == "10.0.0.1"
+    assert _client_ip(fake_request({"x-forwarded-for": "1.1.1.1, 203.0.113.9"})) == "10.0.0.1"
     assert _client_ip(fake_request({})) == "10.0.0.1"
+
+    original_header = main.TRUSTED_IP_HEADER
+    try:
+        # Fly: 단일 값 헤더. 다른 헤더는 여전히 무시하고, 값이 비어 있으면 소켓 IP로 돌아간다.
+        main.TRUSTED_IP_HEADER = "fly-client-ip"
+        assert _client_ip(fake_request({"fly-client-ip": "203.0.113.9", "x-forwarded-for": "1.1.1.1"})) == "203.0.113.9"
+        assert _client_ip(fake_request({"x-forwarded-for": "1.1.1.1"})) == "10.0.0.1"
+        assert _client_ip(fake_request({"fly-client-ip": "   "})) == "10.0.0.1"
+        # X-Forwarded-For: 방문자가 앞에 덧붙인 값이 아니라 프록시가 마지막에 붙인 값을 쓴다.
+        main.TRUSTED_IP_HEADER = "x-forwarded-for"
+        assert _client_ip(fake_request({"x-forwarded-for": "1.1.1.1, 203.0.113.9"})) == "203.0.113.9"
+        assert _client_ip(fake_request({"x-forwarded-for": "203.0.113.9"})) == "203.0.113.9"
+        assert _client_ip(fake_request({"fly-client-ip": "203.0.113.9"})) == "10.0.0.1"
+    finally:
+        main.TRUSTED_IP_HEADER = original_header
+
+
+class FakeUpstream:
+    status_code = 200
+    content = b'{"ok": true}'
+
+
+class FakeUpstreamClient:
+    """main._upstream_client()가 돌려주는 AsyncClient 대역 — post 코루틴만 흉내 낸다."""
+
+    def __init__(self, sent: list, fail_with: Exception | None = None):
+        self.sent = sent
+        self.fail_with = fail_with
+        # 요청마다 넘어온 httpx.Timeout — 읽기 한도가 출력 토큰 상한에 비례하는지 확인한다
+        self.timeouts: list = []
+
+    async def post(self, url, json=None, headers=None, timeout=None):
+        self.timeouts.append(timeout)
+        if self.fail_with is not None:
+            raise self.fail_with
+        self.sent.append((url, json))
+        return FakeUpstream()
 
 
 def run_proxy_guards(client: TestClient) -> None:
@@ -561,22 +751,27 @@ def run_proxy_guards(client: TestClient) -> None:
     import main
 
     sent = []
+    fake_client = FakeUpstreamClient(sent)
 
-    class FakeUpstream:
-        status_code = 200
-        content = b'{"ok": true}'
-
-    def fake_post(url, json=None, headers=None, timeout=None):
-        sent.append((url, json))
-        return FakeUpstream()
-
-    original_key, original_post = main.SHARED_OPENAI_API_KEY, main.httpx.post
+    original_key, original_client = main.SHARED_OPENAI_API_KEY, main._upstream_client
     original_gemini_key = main.SHARED_GEMINI_API_KEY
     main.SHARED_OPENAI_API_KEY = "test-shared-key"
     main.SHARED_GEMINI_API_KEY = "test-shared-gemini"
-    main.httpx.post = fake_post
+    main._upstream_client = lambda: fake_client
     try:
         ok_headers = {"Origin": "http://localhost:5173", "Content-Type": "application/json"}
+
+        # 키가 있으면 /config는 그 키로 쓸 수 있는 허용 모델 목록도 내려준다(키 자체는 없다)
+        r = client.get("/config")
+        assert r.status_code == 200, r.text
+        assert r.json() == {
+            "sharedProviders": {"openai": True, "gemini": True},
+            "sharedModels": {
+                "openai": sorted(main.SHARED_OPENAI_MODELS),
+                "gemini": sorted(main.SHARED_GEMINI_MODELS),
+            },
+        }, r.text
+        assert "test-shared" not in r.text
 
         # 허용하지 않는 Origin은 키가 있어도 거부
         r = client.post(
@@ -623,10 +818,185 @@ def run_proxy_guards(client: TestClient) -> None:
         assert r.status_code == 200, r.text
         _, forwarded = sent[-1]
         assert forwarded["generationConfig"]["maxOutputTokens"] == main.PROXY_MAX_OUTPUT_TOKENS
+
+        # 상류 읽기 한도는 요청의 출력 토큰 상한에 비례한다(토큰당 30ms, 바닥 300초) — 브라우저 클라이언트가
+        # 한 번에 받는 호출에 기다리는 산식과 같아서 긴 생성을 서버가 먼저 끊지 않는다
+        assert main.PROXY_UPSTREAM_TIMEOUT_SECONDS == 300.0
+        assert main.PROXY_SECONDS_PER_OUTPUT_TOKEN == 0.03
+        r = client.post(
+            "/proxy/openai",
+            content=json.dumps({"model": "gpt-5.6-sol", "input": "hi", "max_output_tokens": 1_000}),
+            headers=ok_headers,
+        )
+        assert r.status_code == 200, r.text
+        assert fake_client.timeouts[-1].read == 300.0
+        assert fake_client.timeouts[-1].connect == 10.0
+        r = client.post(
+            "/proxy/openai",
+            content=json.dumps({"model": "gpt-5.6-sol", "input": "hi", "max_output_tokens": 40_000}),
+            headers=ok_headers,
+        )
+        assert r.status_code == 200, r.text
+        assert fake_client.timeouts[-1].read == 1200.0
+        # 상한으로 잘린 요청은 잘린 값 기준 — 잘라 놓고 원래 값만큼 기다리지 않는다
+        r = client.post(
+            "/proxy/gemini/gemini-3.8-flash",
+            content=json.dumps({"contents": [], "generationConfig": {"maxOutputTokens": 10_000_000}}),
+            headers=ok_headers,
+        )
+        assert r.status_code == 200, r.text
+        assert fake_client.timeouts[-1].read == main.PROXY_MAX_OUTPUT_TOKENS * 0.03
+
+        # 상류 시간 초과는 504 — 끊긴 생성도 벤더 쪽에서는 과금되므로 클라이언트가 재시도하지 않도록 502와 구분한다
+        import httpx
+
+        main._upstream_client = lambda: FakeUpstreamClient(sent, httpx.ReadTimeout("read timed out"))
+        r = client.post(
+            "/proxy/openai", content=json.dumps({"model": "gpt-5.6-sol", "input": "hi"}), headers=ok_headers
+        )
+        assert r.status_code == 504, r.text
+        assert "재시도하지" in r.json()["detail"], r.text
+        r = client.post("/proxy/gemini/gemini-3.8-flash", content=json.dumps({"contents": []}), headers=ok_headers)
+        assert r.status_code == 504, r.text
+
+        # 그 외 연결 실패는 여전히 502
+        main._upstream_client = lambda: FakeUpstreamClient(sent, httpx.ConnectError("connection refused"))
+        r = client.post(
+            "/proxy/openai", content=json.dumps({"model": "gpt-5.6-sol", "input": "hi"}), headers=ok_headers
+        )
+        assert r.status_code == 502, r.text
+        # 응답을 읽는 도중 끊긴 것도 벤더는 처리 중이므로 504 — 재시도 금지
+        main._upstream_client = lambda: FakeUpstreamClient(sent, httpx.ReadError("connection reset"))
+        r = client.post(
+            "/proxy/openai", content=json.dumps({"model": "gpt-5.6-sol", "input": "hi"}), headers=ok_headers
+        )
+        assert r.status_code == 504, r.text
+        assert "재시도하지" in r.json()["detail"], r.text
+        # 연결 시간 초과는 벤더에 요청이 닿지 않은 것이라 504가 아니라 502 — 클라이언트가 안전하게 재시도한다
+        main._upstream_client = lambda: FakeUpstreamClient(sent, httpx.ConnectTimeout("connect timed out"))
+        r = client.post(
+            "/proxy/openai", content=json.dumps({"model": "gpt-5.6-sol", "input": "hi"}), headers=ok_headers
+        )
+        assert r.status_code == 502, r.text
+        assert "재시도하지" not in r.json()["detail"], r.text
     finally:
         main.SHARED_OPENAI_API_KEY = original_key
         main.SHARED_GEMINI_API_KEY = original_gemini_key
-        main.httpx.post = original_post
+        main._upstream_client = original_client
+
+
+def run_export_limits(client: TestClient, raw_export: bytes) -> None:
+    """POST /exports의 남용 방어 — IP별 저장 횟수 제한(프록시와 별도 버킷)과 DB 총량 상한."""
+    import main
+    from ratelimit import InMemoryRateLimiter
+
+    ok_headers = {"Origin": "http://localhost:5173", "Content-Type": "application/json"}
+    envelope = json.loads(raw_export)
+
+    def stamped(run_id: str, padding: int = 0) -> bytes:
+        value = json.loads(json.dumps(envelope, ensure_ascii=False))
+        value["result"]["checkpoint"]["runId"] = run_id
+        if padding:
+            value["project"]["interview"]["answers"]["padding"] = "x" * padding
+        return json.dumps(value, ensure_ascii=False).encode("utf-8")
+
+    assert main.EXPORT_RATE_LIMIT_PER_HOUR == 30
+    original_limiter, original_limit = main.rate_limiter, main.EXPORT_RATE_LIMIT_PER_HOUR
+    original_key, original_client = main.SHARED_OPENAI_API_KEY, main._upstream_client
+    original_db_max = main.DB_MAX_BYTES
+    main.rate_limiter = InMemoryRateLimiter()
+    main.EXPORT_RATE_LIMIT_PER_HOUR = 2
+    main.SHARED_OPENAI_API_KEY = "test-shared-key"
+    main._upstream_client = lambda: FakeUpstreamClient([])
+    try:
+        # 프록시 호출은 저장 버킷을 소모하지 않는다
+        r = client.post(
+            "/proxy/openai", content=json.dumps({"model": "gpt-5.6-sol", "input": "hi"}), headers=ok_headers
+        )
+        assert r.status_code == 200, r.text
+        # 형식 오류(422)도 저장 횟수를 깎지 않는다
+        r = client.post("/exports", content=b'{"kind": "nope"}', headers=ok_headers)
+        assert r.status_code == 422, r.text
+        for index in range(2):
+            r = client.post("/exports", content=stamped(f"run-limit-{index}"), headers=ok_headers)
+            assert r.status_code == 201, r.text
+        r = client.post("/exports", content=stamped("run-limit-over"), headers=ok_headers)
+        assert r.status_code == 429, r.text
+        assert "시간당 2회" in r.json()["detail"], r.text
+        # 저장 한도에 걸려도 프록시 버킷은 따로 센다
+        r = client.post(
+            "/proxy/openai", content=json.dumps({"model": "gpt-5.6-sol", "input": "hi"}), headers=ok_headers
+        )
+        assert r.status_code == 200, r.text
+
+        # DB 총량 상한 — 현재 크기로 고정되면 새 페이지가 필요한 저장은 500이 아니라 507로 거부한다
+        main.rate_limiter = InMemoryRateLimiter()
+        assert main.DB_MAX_BYTES == 800 * 1024 * 1024
+        main.DB_MAX_BYTES = 1
+        with sqlite3.connect(_tmp.name) as conn:
+            count_before = conn.execute("SELECT COUNT(*) FROM project_exports").fetchone()[0]
+        big_export = stamped("run-too-big", padding=200_000)
+        r = client.post("/exports", content=big_export, headers=ok_headers)
+        assert r.status_code == 507, r.text
+        assert "저장 공간" in r.json()["detail"], r.text
+        with sqlite3.connect(_tmp.name) as conn:
+            assert conn.execute("SELECT COUNT(*) FROM project_exports").fetchone()[0] == count_before
+        # 상한을 되돌리면 같은 봉투가 저장된다 — 거부 사유가 상한이었음을 확인
+        main.DB_MAX_BYTES = original_db_max
+        r = client.post("/exports", content=big_export, headers=ok_headers)
+        assert r.status_code == 201, r.text
+        r = client.get(f"/exports/{r.json()['id']}")
+        assert r.status_code == 200 and r.content == big_export
+    finally:
+        main.rate_limiter = original_limiter
+        main.EXPORT_RATE_LIMIT_PER_HOUR = original_limit
+        main.SHARED_OPENAI_API_KEY = original_key
+        main._upstream_client = original_client
+        main.DB_MAX_BYTES = original_db_max
+
+
+def run_event_loop_not_blocked() -> None:
+    """벤더 응답을 기다리는 동안 이벤트 루프가 멈추지 않는다 — 다른 사용자의 /health·/exports가 함께 대기하지 않는다."""
+    import asyncio
+    import threading
+    import time
+
+    import main
+
+    class SlowUpstreamClient:
+        async def post(self, url, json=None, headers=None, timeout=None):
+            await asyncio.sleep(1.5)
+            return FakeUpstream()
+
+    original_key, original_client = main.SHARED_OPENAI_API_KEY, main._upstream_client
+    main.SHARED_OPENAI_API_KEY = "test-shared-key"
+    main._upstream_client = lambda: SlowUpstreamClient()
+    ok_headers = {"Origin": "http://localhost:5173", "Content-Type": "application/json"}
+    try:
+        # 컨텍스트 매니저로 열어야 요청들이 하나의 이벤트 루프를 공유한다(아니면 요청마다 새 루프).
+        with TestClient(app) as shared:
+            outcome = {}
+
+            def slow_proxy():
+                outcome["status"] = shared.post(
+                    "/proxy/openai",
+                    content=json.dumps({"model": "gpt-5.6-sol", "input": "hi"}),
+                    headers=ok_headers,
+                ).status_code
+
+            worker = threading.Thread(target=slow_proxy)
+            worker.start()
+            time.sleep(0.3)  # 프록시 핸들러가 상류 대기에 들어갈 시간
+            started = time.monotonic()
+            r = shared.get("/health")
+            elapsed = time.monotonic() - started
+            worker.join()
+            assert r.status_code == 200, r.text
+            assert elapsed < 1.0, f"프록시 대기 중 /health가 {elapsed:.2f}초 걸렸다 — 이벤트 루프가 막혔다"
+            assert outcome["status"] == 200, outcome
+    finally:
+        main.SHARED_OPENAI_API_KEY = original_key
+        main._upstream_client = original_client
 
 
 if __name__ == "__main__":

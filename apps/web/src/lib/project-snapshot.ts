@@ -36,7 +36,23 @@ interface ProjectSnapshotV1 {
   holdout: HoldoutScores;
 }
 
-export type StoredProjectSnapshot = ProjectSnapshot | ProjectSnapshotV1;
+/** 저장소에 실제로 놓인 형태 — 판 번호(revision)는 저장소가 붙인다(호출자는 모른다).
+ *  구버전 저장본에는 없을 수 있으며 그때는 0판으로 본다. */
+export type StoredProjectSnapshot = (ProjectSnapshot | ProjectSnapshotV1) & { revision?: number };
+
+/** 저장 거부 — 이 인스턴스가 마지막으로 읽거나 쓴 뒤 다른 곳(다른 탭)이 먼저 저장했다.
+ *  Web Locks가 없는 환경(비보안 컨텍스트·구형 브라우저)에서 잠금 대신 덮어쓰기를 막는 최소 방어. */
+export class SnapshotConflictError extends Error {
+  constructor(
+    readonly expected: number,
+    readonly actual: number,
+  ) {
+    super(
+      `프로젝트 스냅샷 충돌 — 다른 탭이 먼저 저장했습니다 (이 탭 ${expected}판, 저장소 ${actual}판)`,
+    );
+    this.name = "SnapshotConflictError";
+  }
+}
 
 export interface RestoredProjectSnapshot {
   templateId: string | null;
@@ -78,6 +94,27 @@ export function markUnavailableRestoredHoldout(
     errors.baseline = "저장된 기록에 시작할 때의 최종 확인 결과가 없어 복원할 수 없습니다.";
   }
   return { ...normalized, errors };
+}
+
+/** 복원 시 저장된 체크포인트를 화면 상태로 투영하는 규칙. 현재 팩에 결속되지 않은 저장본은 버린다.
+ *  running 저장본은 탭 회수(새로고침·닫기)의 흔적이므로 사용자가 재개할 수 있게 paused로 투영하고,
+ *  진행 중이던 회차가 저장되지 않았다는 안내를 위해 그 runId를 interruptedRunId로 돌려준다 — 단
+ *  잠금을 쥔 탭(owned)만이다. 읽기 전용 탭의 running 저장본은 다른 탭이 지금 돌리고 있는 것이다.
+ *  관제실 화면은 이 판단을 스스로 하지 못한다: 세션 확보 effect가 같은 커밋에서 세션을 만들므로
+ *  저장본을 읽은 시점에는 세션 유무로 탭 회수를 가릴 수 없다. */
+export function projectRestoredCheckpoint(
+  saved: LoopCheckpoint<unknown> | null,
+  packDigest: string,
+  owned: boolean,
+): { checkpoint: LoopCheckpoint<unknown> | null; interruptedRunId: string | null } {
+  if (saved === null || saved.packDigest !== packDigest) {
+    return { checkpoint: null, interruptedRunId: null };
+  }
+  if (saved.status !== "running") return { checkpoint: saved, interruptedRunId: null };
+  return {
+    checkpoint: { ...saved, status: "paused" },
+    interruptedRunId: owned ? saved.runId : null,
+  };
 }
 
 /** v1 리포트는 검사 4종을 담고 있다 — 현재 배터리 2종(안정성·꼼수 내성)만 남기고
@@ -131,9 +168,39 @@ const DB_VERSION = 1;
 const STORE_NAME = "snapshots";
 const CURRENT_KEY = "current";
 
+const revisionOf = (stored: unknown): number => {
+  const revision = (stored as { revision?: unknown } | undefined)?.revision;
+  return typeof revision === "number" && Number.isFinite(revision) ? revision : 0;
+};
+
+/** 키 순서에 무관한 직렬화 — 저장본과 새 스냅샷의 내용이 같은지 비교하는 데만 쓴다 */
+const stableJson = (value: unknown): string =>
+  JSON.stringify(value, (_key, v: unknown) =>
+    v !== null && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(
+          Object.keys(v as Record<string, unknown>)
+            .sort()
+            .map((k) => [k, (v as Record<string, unknown>)[k]]),
+        )
+      : v,
+  );
+
+/** 저장본(판 번호 제외)과 내용이 같은가 */
+const sameSnapshot = (stored: unknown, value: ProjectSnapshot): boolean => {
+  if (stored === null || typeof stored !== "object") return false;
+  const { revision: _revision, ...rest } = stored as StoredProjectSnapshot;
+  return stableJson(rest) === stableJson(value);
+};
+
+/** 단일 키('current') 스냅샷 저장소. 저장은 "읽은 판 그대로인지 확인 → 다음 판으로 기록"을 한
+ *  readwrite 트랜잭션 안에서 수행한다(IndexedDB 트랜잭션은 원자적이다). 이 인스턴스가 마지막으로
+ *  읽거나 쓴 판과 저장소의 판이 다르면 SnapshotConflictError로 거부한다 — 다른 탭이 먼저 저장한
+ *  것이므로 오래된 상태로 덮어쓰지 않는다. */
 export class IndexedDbProjectStore {
   private dbPromise: Promise<IDBDatabase> | null = null;
   private writeChain: Promise<void> = Promise.resolve();
+  /** 마지막으로 읽거나 쓴 판 — null이면 아직 읽지 않았다(첫 저장은 저장소의 현재 판을 잇는다) */
+  private revision: number | null = null;
 
   constructor(private readonly dbName: string = DB_NAME) {}
 
@@ -164,9 +231,35 @@ export class IndexedDbProjectStore {
         const db = await this.open();
         await new Promise<void>((resolve, reject) => {
           const tx = db.transaction(STORE_NAME, "readwrite");
-          tx.objectStore(STORE_NAME).put(value, CURRENT_KEY);
-          tx.oncomplete = () => resolve();
-          tx.onerror = () => reject(tx.error ?? new Error("프로젝트 스냅샷 저장 실패"));
+          const store = tx.objectStore(STORE_NAME);
+          const current = store.get(CURRENT_KEY);
+          let conflict: SnapshotConflictError | null = null;
+          let next = 0;
+          current.onsuccess = () => {
+            const actual = revisionOf(current.result);
+            const expected = this.revision ?? actual;
+            if (actual !== expected) {
+              conflict = new SnapshotConflictError(expected, actual);
+              tx.abort();
+              return;
+            }
+            if (sameSnapshot(current.result, value)) {
+              // 내용이 같으면 판을 올리지 않는다 — 잠금 없는 환경에서 갓 열린 유휴 탭의 하이드레이션
+              // 직후 저장이 실행 중인 탭을 읽기 전용으로 밀어내는 일이 없게
+              next = actual;
+              return;
+            }
+            next = actual + 1;
+            store.put({ ...value, revision: next }, CURRENT_KEY);
+          };
+          tx.oncomplete = () => {
+            this.revision = next;
+            resolve();
+          };
+          const fail = (): void =>
+            reject(conflict ?? tx.error ?? new Error("프로젝트 스냅샷 저장 실패"));
+          tx.onabort = fail;
+          tx.onerror = fail;
         });
       });
     return this.writeChain;
@@ -177,7 +270,11 @@ export class IndexedDbProjectStore {
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, "readonly");
       const req = tx.objectStore(STORE_NAME).get(CURRENT_KEY);
-      req.onsuccess = () => resolve((req.result as StoredProjectSnapshot | undefined) ?? null);
+      req.onsuccess = () => {
+        const stored = (req.result as StoredProjectSnapshot | undefined) ?? null;
+        this.revision = revisionOf(stored);
+        resolve(stored);
+      };
       req.onerror = () => reject(req.error ?? new Error("프로젝트 스냅샷 읽기 실패"));
     });
   }

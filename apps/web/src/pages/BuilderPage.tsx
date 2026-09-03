@@ -16,6 +16,7 @@ import { setFlowStep } from "../lib/flowStep";
 import { appendStream, clearStream, endStream, withActivityLog } from "../lib/activityLog";
 import { ActivityConsole } from "../components/ActivityConsole";
 import { ProviderCredentialInput } from "../components/ProviderCredentialInput";
+import { ErrorNote } from "../components/ErrorNote";
 import {
   createByoClient,
   getByoCredential,
@@ -43,7 +44,7 @@ const EXAMPLES = [
 const NEWLINE = String.fromCharCode(10);
 
 export function BuilderPage() {
-  const { reset, setTemplateId, setAnswers } = useProject();
+  const { reset, setTemplateId, setAnswers, readOnly } = useProject();
   const navigate = useNavigate();
   const [goal, setGoal] = useState("");
   const [phase, setPhase] = useState(-1);
@@ -61,6 +62,13 @@ export function BuilderPage() {
   const build = async () => {
     const trimmed = goal.trim();
     if (trimmed === "" || busy) return;
+    if (readOnly) {
+      // 구성 생성도 모델 호출이다 — 읽기 전용 탭은 내지 않는다(SPEC §4.2)
+      setError(
+        "다른 탭에서 이 프로젝트를 편집·실행 중이라 이 탭에서는 템플릿을 만들 수 없습니다. 그 탭을 닫은 뒤 이 탭을 새로고침하면 이어서 작업할 수 있습니다.",
+      );
+      return;
+    }
     if (credential.trim() === "") {
       setError(`${PROVIDER_LABEL.openai} 키를 넣어 주세요 — 구성은 모델이 짭니다.`);
       return;
@@ -172,16 +180,13 @@ export function BuilderPage() {
         <button
           type="button"
           className="primary builder-go"
-          disabled={goal.trim() === "" || busy}
+          disabled={goal.trim() === "" || busy || readOnly}
+          title={readOnly ? "다른 탭에서 이 프로젝트를 편집·실행 중입니다" : undefined}
           onClick={build}
         >
           {busy ? "템플릿 만드는 중…" : "이 목표에 맞는 템플릿 만들기"}
         </button>
-        {error ? (
-          <p className="error" style={{ marginTop: 12 }}>
-            {error}
-          </p>
-        ) : null}
+        <ErrorNote message={error} live="assertive" style={{ marginTop: 12 }} />
       </div>
 
       {phase >= 0 ? (

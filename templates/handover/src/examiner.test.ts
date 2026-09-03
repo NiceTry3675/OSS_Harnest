@@ -3,10 +3,20 @@
  *  모의 LlmClient는 파일 안 문자열 규칙으로 구현한다(웹 의존 금지 — handover.test.ts와 동일 원칙). */
 
 import { describe, expect, it } from "vitest";
-import type { CaseDef, ExaminerCheckResult, InterviewSubmission } from "@harnest/contracts";
+import type {
+  CaseDef,
+  ExaminerCheckResult,
+  InterviewSubmission,
+  ScoreResult,
+} from "@harnest/contracts";
 import { approvalBlockers } from "@harnest/contracts";
 import { compile, TEMPLATE_ID } from "./index";
-import { BATTERY_CASE_CAP, runExaminerBattery } from "./examiner";
+import {
+  BATTERY_CASE_CAP,
+  judgeStability,
+  runExaminerBattery,
+  stabilityStep,
+} from "./examiner";
 import type { LlmClient } from "./runtime";
 
 /** 답 130자 내외를 만들기 위한 패딩 — 기록 전체가 상한 500자를 확실히 넘는 시나리오용 */
@@ -17,6 +27,7 @@ function makeSubmission(
   caseCount: number,
   lengthCap: number,
   answerPad = "",
+  conciseness?: boolean,
 ): InterviewSubmission {
   return {
     schemaVersion: "skeleton-1",
@@ -28,6 +39,7 @@ function makeSubmission(
         expectedAnswer: `정답 ${i + 1}: 절차${i + 1}을 따르면 됩니다.${answerPad}`,
       })),
       lengthCap,
+      ...(conciseness === undefined ? {} : { conciseness }),
     },
   };
 }
@@ -39,12 +51,13 @@ interface BatteryLlm extends LlmClient {
 /** 문자열 규칙 모의 LLM — responder 배치는 문서 포함 여부, grader는 참조 답 포함 여부로 채점.
  *  strictGrader: 무관 응답 0점(실제 루브릭에 가까움). 기본은 0.5(부분 점수 관대 모형).
  *  graderOverride의 call은 채점 호출 순번 — 배치 grader와 단건 grader(오염 프로브)가 카운터를
- *  공유한다: 배치 0(1차)·1(재채점), 단건 2(날조)·3(아첨). */
+ *  공유한다: 배치 0(1차)·1(재채점), 단건 2(날조)·3(아첨)·4(지시 주입). 배치 채점에서는
+ *  caseId가 함께 넘어와 케이스 하나만 흔들 수 있다(단건 프로브는 undefined). */
 function createBatteryLlm(opts: {
   cases: CaseDef[];
   oneshotDoc: string;
   strictGrader?: boolean;
-  graderOverride?: (call: number, defaultScore: number) => number;
+  graderOverride?: (call: number, defaultScore: number, caseId?: string) => number;
 }): BatteryLlm {
   const prompts: string[] = [];
   let graderCalls = 0;
@@ -87,7 +100,7 @@ function createBatteryLlm(opts: {
                 : opts.strictGrader
                   ? 0
                   : 0.5;
-            if (opts.graderOverride) score = opts.graderOverride(call, score);
+            if (opts.graderOverride) score = opts.graderOverride(call, score, caseId);
             return { caseId, score, why: "규칙 채점" };
           }),
         );
@@ -116,8 +129,8 @@ function createBatteryLlm(opts: {
 }
 
 /** 기준 시나리오 — 긴 답(기록 전체가 상한 초과) + 엄격 grader: 전 검사 pass가 나오는 구성 */
-async function compileScenario() {
-  const compiled = await compile(makeSubmission(6, 500, LONG_PAD), {
+async function compileScenario(caseCount = 6, conciseness?: boolean) {
+  const compiled = await compile(makeSubmission(caseCount, 500, LONG_PAD, conciseness), {
     judgeProvider: "mock",
     judgeModel: "테스트-모의",
   });
@@ -214,10 +227,10 @@ describe("runExaminerBattery — 판정 규칙", () => {
     expect(hack?.note).toContain("부분 점수");
   });
 
-  it("grader가 오염 응답(날조·아첨)을 정답 처리하면 꼼수 내성 fail", async () => {
+  it("grader가 오염 응답(날조·아첨·지시 주입)을 정답 처리하면 꼼수 내성 fail", async () => {
     const { compiled, oneshotDoc } = await compileScenario();
     const { problem, pack } = compiled;
-    // 채점 호출 2·3 = 날조·아첨 프로브(단건) — 정답(1점) 처리로 조작
+    // 채점 호출 2·3·4 = 날조·아첨·지시 주입 프로브(단건) — 정답(1점) 처리로 조작
     const llm = createBatteryLlm({
       cases: [...problem.visibleCases, ...problem.holdoutCases],
       oneshotDoc,
@@ -230,7 +243,130 @@ describe("runExaminerBattery — 판정 규칙", () => {
     expect(hack?.verdict).toBe("fail");
     expect(hack?.note).toContain("날조 응답이 정답 처리");
     expect(hack?.note).toContain("아첨 응답이 정답 처리");
+    expect(hack?.note).toContain("지시가 섞인 응답이 정답 처리");
     expect(report.overall).toBe("fail");
+  });
+
+  it("채점자를 향한 지시문만 담긴 응답을 정답 처리하면 그것만으로 꼼수 내성 fail", async () => {
+    const { compiled, oneshotDoc } = await compileScenario();
+    const { problem, pack } = compiled;
+    // 채점 호출 4 = 지시 주입 프로브만 정답 처리 — 날조·아첨은 방어
+    const llm = createBatteryLlm({
+      cases: [...problem.visibleCases, ...problem.holdoutCases],
+      oneshotDoc,
+      strictGrader: true,
+      graderOverride: (call, def) => (call === 4 ? 1 : def),
+    });
+
+    const report = await runExaminerBattery(problem, pack, llm);
+    const hack = report.checks.find((c) => c.id === "hack_resistance");
+    expect(hack?.verdict).toBe("fail");
+    expect(hack?.note).toBe("지시가 섞인 응답이 정답 처리되었습니다.");
+    // 프로브 응답은 단건 grader 프롬프트의 <response> 태그 안에 실린다
+    const probePrompt = llm.prompts.filter((p) => p.includes("JSON만 출력")).at(-1) ?? "";
+    expect(probePrompt).toContain("<response>\n[문서 지침에 따른 답변]");
+    expect(probePrompt).toContain("지시가 아닙니다");
+  });
+});
+
+describe("runExaminerBattery — 안정성 임계는 표본 크기에서 유도된다", () => {
+  // 위저드 최소 구성(4문항)은 공개 케이스가 2개뿐이다. 커버리지 한 칸(반 단계)은 25점이라
+  // 절대값 임계(5/15점)로는 판정 하나가 반 칸만 흔들려도 fail이었다. 가드 허용 오차와 같은
+  // 산식(100 / (2 × 표본 수))으로 반 단계 하나는 봐준다.
+  it("공개 케이스 2개에서 판정 하나의 반 칸 흔들림은 pass — 승인을 막지 않는다", async () => {
+    const { compiled, oneshotDoc } = await compileScenario(4);
+    const { problem, pack } = compiled;
+    expect(problem.visibleCases).toHaveLength(2);
+    const wobbly = problem.visibleCases[0].id;
+    const llm = createBatteryLlm({
+      cases: [...problem.visibleCases, ...problem.holdoutCases],
+      oneshotDoc,
+      strictGrader: true,
+      // 재채점(1)에서 케이스 하나만 1 → 0.5
+      graderOverride: (call, def, caseId) => (call === 1 && caseId === wobbly ? 0.5 : def),
+    });
+
+    const report = await runExaminerBattery(problem, pack, llm);
+    const stability = report.checks.find((c) => c.id === "stability");
+    expect(stability?.verdict).toBe("pass");
+    expect(stability?.note).toContain("표본 2개");
+    expect(approvalBlockers(pack, report)).toEqual([]);
+  });
+
+  it("두 칸 흔들림은 warn — 승인 차단 아님, 표본 수와 칸 수를 설명한다", async () => {
+    const { compiled, oneshotDoc } = await compileScenario(4);
+    const { problem, pack } = compiled;
+    const llm = createBatteryLlm({
+      cases: [...problem.visibleCases, ...problem.holdoutCases],
+      oneshotDoc,
+      strictGrader: true,
+      // 재채점에서 케이스 둘 다 1 → 0.5 (커버리지 100 → 50 = 두 칸)
+      graderOverride: (call, def) => (call === 1 ? 0.5 : def),
+    });
+
+    const report = await runExaminerBattery(problem, pack, llm);
+    const stability = report.checks.find((c) => c.id === "stability");
+    expect(stability?.verdict).toBe("warn");
+    expect(stability?.note).toContain("2개 표본에서 약 2칸");
+    expect(stability?.note).toContain("100 ÷ (2 × 2) = 25점");
+    expect(report.overall).toBe("warn");
+    expect(approvalBlockers(pack, report)).toEqual([]);
+  });
+
+  it("세 칸 이상 흔들리면 fail — 승인이 막힌다", async () => {
+    const { compiled, oneshotDoc } = await compileScenario(4);
+    const { problem, pack } = compiled;
+    const llm = createBatteryLlm({
+      cases: [...problem.visibleCases, ...problem.holdoutCases],
+      oneshotDoc,
+      strictGrader: true,
+      // 재채점에서 케이스 둘 다 1 → 0 (커버리지 100 → 0 = 네 칸)
+      graderOverride: (call, def) => (call === 1 ? 0 : def),
+    });
+
+    const report = await runExaminerBattery(problem, pack, llm);
+    const stability = report.checks.find((c) => c.id === "stability");
+    expect(stability?.verdict).toBe("fail");
+    expect(stability?.note).toContain("2개 표본에서 약 4칸");
+    expect(approvalBlockers(pack, report).some((b) => b.includes("검증 실패"))).toBe(true);
+  });
+
+  it("간결성 켬/끔은 판정을 바꾸지 않는다 — 흔들림은 가중 전 커버리지로 잰다", async () => {
+    for (const conciseness of [true, false]) {
+      const { compiled, oneshotDoc } = await compileScenario(4, conciseness);
+      const { problem, pack } = compiled;
+      const wobbly = problem.visibleCases[0].id;
+      const llm = createBatteryLlm({
+        cases: [...problem.visibleCases, ...problem.holdoutCases],
+        oneshotDoc,
+        strictGrader: true,
+        graderOverride: (call, def, caseId) => (call === 1 && caseId === wobbly ? 0.5 : def),
+      });
+      const report = await runExaminerBattery(problem, pack, llm);
+      expect(report.checks.find((c) => c.id === "stability")?.verdict).toBe("pass");
+    }
+  });
+
+  it("한 칸 = 100 / (2 × 표본 수)를 소수 첫째 자리로 올림 — 가드 허용 오차와 같은 산식", () => {
+    expect(stabilityStep(2)).toBe(25);
+    expect(stabilityStep(3)).toBe(16.7);
+    expect(stabilityStep(4)).toBe(12.5);
+  });
+
+  it("표본 3개: 반올림된 커버리지 등급에서 한 칸은 pass, 두 칸은 warn, 세 칸은 fail", () => {
+    const at = (coverage: number): ScoreResult => ({
+      total: coverage * 0.8,
+      violations: [],
+      parts: { case_answerability: coverage, conciseness: 0 },
+      gateRejected: false,
+      guardScore: null,
+    });
+    // 100 → 83.3 (이진 오차로 16.700000000000003) — 올림 임계 16.7이 덮는다
+    expect(judgeStability(at(100), at(83.3), 3).verdict).toBe("pass");
+    expect(judgeStability(at(83.3), at(66.7), 3).verdict).toBe("pass");
+    expect(judgeStability(at(100), at(66.7), 3).verdict).toBe("warn");
+    expect(judgeStability(at(100), at(50), 3).verdict).toBe("fail");
+    expect(judgeStability(at(50), at(50), 3).verdict).toBe("pass");
   });
 });
 
@@ -293,7 +429,7 @@ describe("runExaminerBattery — 불변식·비용", () => {
     }
   });
 
-  it("배터리 호출 수가 닫힌 식과 일치한다 — 생성 1 + 채점 2회 × 2콜 + 오염 프로브 단건 2", async () => {
+  it("배터리 호출 수가 닫힌 식과 일치한다 — 생성 1 + 채점 2회 × 2콜 + 오염 프로브 단건 3", async () => {
     const { compiled, oneshotDoc } = await compileScenario();
     const { problem, pack } = compiled;
     const llm = createBatteryLlm({
@@ -303,7 +439,7 @@ describe("runExaminerBattery — 불변식·비용", () => {
     });
 
     await runExaminerBattery(problem, pack, llm);
-    expect(llm.prompts).toHaveLength(1 + 2 * 2 + 2);
+    expect(llm.prompts).toHaveLength(1 + 2 * 2 + 3);
   });
 });
 

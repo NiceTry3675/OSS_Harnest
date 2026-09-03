@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ExportSaveError,
   MAX_EXPORT_BYTES,
+  plainTextExcerpt,
+  REJECTION_EXCERPT_MAX_CHARS,
   saveExport,
   savedExportUrl,
   sha256Utf8,
@@ -153,6 +155,96 @@ describe("선택형 서버 기록", () => {
       savedRecord: { id },
     });
     expect((fetchMock.mock.calls[1][1] as RequestInit).signal?.aborted).toBe(true);
+  });
+
+  it("거부 응답의 서버 detail을 메시지에 싣고 429·507은 별도 코드로 구분한다", async () => {
+    const detail = "project.loopSpec.feedbackMode 값이 허용 목록 밖입니다: everything";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce(
+        new Response(JSON.stringify({ detail }), {
+          status: 422,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    await expect(saveExport(serialized)).rejects.toMatchObject({
+      code: "post_rejected",
+      stage: "post",
+      serverMayHaveStored: false,
+      message: `서버가 기록을 거부했습니다(HTTP 422): ${detail}`,
+    });
+
+    const limited = "서버 기록이 시간당 30회를 넘었습니다. 잠시 후 다시 시도하거나 JSON 내보내기로 보관해 주세요.";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ detail: limited }), { status: 429 })),
+    );
+    await expect(saveExport(serialized)).rejects.toMatchObject({
+      code: "post_rate_limited",
+      serverMayHaveStored: false,
+      message: `${limited} (HTTP 429)`,
+    });
+
+    const full = "서버 저장 공간이 가득 차 기록할 수 없습니다. 관리자에게 알리고, 지금은 JSON 내보내기로 보관해 주세요.";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ detail: full }), { status: 507 })),
+    );
+    await expect(saveExport(serialized)).rejects.toMatchObject({
+      code: "post_storage_full",
+      message: `${full} (HTTP 507)`,
+    });
+
+    // detail이 없거나 JSON이 아니어도 상태 코드는 남긴다
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response("", { status: 503 })));
+    await expect(saveExport(serialized)).rejects.toMatchObject({
+      code: "post_rejected",
+      message: "서버가 기록을 거부했습니다(HTTP 503).",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce(new Response("<html>Bad Gateway</html>", { status: 502 })),
+    );
+    await expect(saveExport(serialized)).rejects.toMatchObject({
+      message: "서버가 기록을 거부했습니다(HTTP 502): Bad Gateway",
+    });
+  });
+
+  it("JSON이 아닌 거부 본문은 태그를 걷어낸 글만 200자 이내로 싣고, 글이 없으면 상태 코드 문구만 남긴다", async () => {
+    const page =
+      "<!DOCTYPE html><html><head><title>502 Bad Gateway</title><style>body{color:red}</style>" +
+      "<script>alert('x')</script></head><body><center><h1>502 Bad Gateway</h1></center>" +
+      `<hr><center>nginx</center><p>${"긴 설명 ".repeat(80)}</p><!-- 주석 --></body></html>`;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(page, { status: 502 })));
+    const error = await saveExport(serialized).catch((e: unknown) => e as ExportSaveError);
+    expect(error).toBeInstanceOf(ExportSaveError);
+    const { message } = error as ExportSaveError;
+    expect(message.startsWith("서버가 기록을 거부했습니다(HTTP 502): 502 Bad Gateway 502 Bad Gateway nginx 긴 설명")).toBe(true);
+    expect(message).not.toMatch(/[<>]/);
+    expect(message).not.toContain("alert");
+    expect(message).not.toContain("color:red");
+    expect(message).not.toContain("주석");
+    const detail = message.slice("서버가 기록을 거부했습니다(HTTP 502): ".length);
+    expect(detail.length).toBeLessThanOrEqual(REJECTION_EXCERPT_MAX_CHARS);
+    expect(detail.endsWith("…")).toBe(true);
+
+    // 태그뿐인 본문은 사유가 없는 것과 같다
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce(new Response("<html><body></body></html>", { status: 502 })),
+    );
+    await expect(saveExport(serialized)).rejects.toMatchObject({
+      code: "post_rejected",
+      message: "서버가 기록을 거부했습니다(HTTP 502).",
+    });
+  });
+
+  it("plainTextExcerpt는 엔티티를 풀고 공백을 접으며 상한을 넘기면 말줄임한다", () => {
+    expect(plainTextExcerpt("<p>a &amp; b\n\n  &lt;c&gt;</p>", 200)).toBe("a & b <c>");
+    expect(plainTextExcerpt("   <br/>  ", 200)).toBeNull();
+    expect(plainTextExcerpt("가나다라마", 3)).toBe("가나…");
+    expect(plainTextExcerpt("가나다", 3)).toBe("가나다");
   });
 
   it("명시적 오류 타입은 UI가 메시지와 커밋 가능성을 구분할 수 있다", () => {

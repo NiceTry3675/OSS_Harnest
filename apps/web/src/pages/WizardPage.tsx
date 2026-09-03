@@ -1,6 +1,8 @@
 /** 인터뷰 위저드 — 챗봇이 아니라 스텝 폼 + 라이브 블루프린트(SPEC §4.3).
  *  질문 정의는 템플릿 등록소(entry.questions)가 소유하고, 이 화면은 검증·수집만 담당한다.
- *  채점 모델(저지)은 승인 전에 확정되어야 하므로 마지막 스텝에서 고른다(SPEC §8). */
+ *  채점 모델(저지)은 승인 전에 확정되어야 하므로 마지막 스텝에서 고른다(SPEC §8).
+ *  읽기 전용 탭(다른 탭이 쓰기 잠금을 쥔 경우)은 어떤 모델 호출도 내지 않는다(SPEC §4.2) —
+ *  답을 둘러보는 것은 되지만 제출(연결 확인·컴파일)과 케이스 초안 생성은 막는다. */
 
 import { useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import { useEffect } from "react";
@@ -8,8 +10,12 @@ import { Link, useNavigate } from "react-router-dom";
 import type { Question } from "@harnest/contracts";
 import type { LlmClient } from "@harnest/template-handover";
 import { getTemplate } from "../templates";
-import { readVoice, voiceQuestions } from "../lib/templateVoice";
+import { pickVoice, readVoice, voiceQuestions } from "../lib/templateVoice";
 import { WizardBlueprint } from "../components/WizardBlueprint";
+import { useBlueprint } from "../lib/useBlueprint";
+import { caseUses } from "../lib/caseSplit";
+import { judgeSelectionOf } from "../lib/judgeSelection";
+import { ErrorNote } from "../components/ErrorNote";
 import { ActivityConsole } from "../components/ActivityConsole";
 import { appendStream, clearStream, endStream, withActivityLog } from "../lib/activityLog";
 import { WizardCaseList, type CasePair } from "../components/WizardCaseList";
@@ -26,6 +32,7 @@ import {
   normalizeVertexServiceAccount,
   PROVIDER_LABEL,
   setByoCredential,
+  sharedModelsFor,
   testByoConnection,
   detectByoCredential,
   listAvailableModels,
@@ -57,6 +64,10 @@ type JudgeChoice = "mock" | CredentialProvider;
 /** 공급자별 기본 모델은 llm.ts가 소유한다 — 빌더 화면도 같은 값을 쓴다 */
 const JUDGE_MODEL = DEFAULT_JUDGE_MODEL;
 
+/** 읽기 전용 탭에서 모델 호출이 필요한 동작을 눌렀을 때 — App 상단 배너와 같은 안내 */
+const READ_ONLY_MESSAGE =
+  "다른 탭에서 이 프로젝트를 편집·실행 중이라 이 탭에서는 제출과 AI 초안 생성을 할 수 없습니다. 그 탭을 닫은 뒤 이 탭을 새로고침하면 이어서 작업할 수 있습니다.";
+
 /** 카드로 고르는 공급자 — 모의 모델은 고르는 것이 아니라 빠져나가는 것이라 따로 둔다 */
 const PROVIDER_CHOICES: CredentialProvider[] = [
   "openai",
@@ -75,6 +86,18 @@ const PROVIDER_OPTION_LABEL: Record<JudgeChoice, string> = {
   anthropic: "Claude (API 키 — 브라우저 저장·직접 호출)",
   openrouter: "OpenRouter (API 키 — 여러 회사 모델을 한 키로)",
   ollama: "Ollama (내 컴퓨터 주소 — 키 없음)",
+};
+
+/** BYO 키가 어디로 가는지 — 신뢰 경계 고지는 공급자마다 정확해야 한다(SPEC §3 원칙 1) */
+const DIRECT_SEND_HINT: Record<CredentialProvider, string> = {
+  openai: "키는 이 브라우저(localStorage)에만 저장되고, 요청은 OpenAI API로 직접 전송됩니다.",
+  anthropic: "키는 이 브라우저(localStorage)에만 저장되고, 요청은 Anthropic(Claude) API로 직접 전송됩니다.",
+  gemini: "키는 이 브라우저(localStorage)에만 저장되고, 요청은 Google Gemini API로 직접 전송됩니다.",
+  openrouter:
+    "키는 이 브라우저(localStorage)에만 저장되고, 요청은 OpenRouter로 직접 전송됩니다(OpenRouter가 각 회사 모델로 다시 전달).",
+  vertex:
+    "private key는 localStorage에서 JWT 서명에만 쓰이고, 서명된 assertion은 Google OAuth로, 모델 요청은 Vertex AI로 직접 전송됩니다.",
+  ollama: "키는 저장하지 않으며, 요청은 입력한 Ollama 주소로 직접 전송됩니다.",
 };
 
 const PROVIDER_CARD: Record<
@@ -178,6 +201,7 @@ export function WizardPage() {
     compiled: savedCompiled,
     setAnswers,
     setCompiled,
+    readOnly,
   } = useProject();
   const navigate = useNavigate();
   const entry = getTemplate(templateId);
@@ -253,9 +277,13 @@ export function WizardPage() {
     setFlowStep(questionId ? { kind: "question", questionId } : { kind: "outside" });
   }, [stepGroups, step]);
   const [error, setError] = useState<string | null>(null);
+  /** 검증에 걸린 질문 — 그 입력에 포커스와 aria-invalid를 건다 */
+  const [invalidId, setInvalidId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  // 기본값을 공급자로 둔다 — 키 칸이 처음부터 보여야 한다는 요청
-  const [judgeChoice, setJudgeChoice] = useState<JudgeChoice>("openai");
+  // '입력 수정'으로 돌아온 경우 승인하려던 공급자·모델을 그대로 잇는다 — 다른 답변(draft)처럼.
+  // 새로 시작하면 기본값을 공급자로 둔다 — 키 칸이 처음부터 보여야 한다는 요청
+  const savedJudge = judgeSelectionOf(savedCompiled?.pack);
+  const [judgeChoice, setJudgeChoice] = useState<JudgeChoice>(savedJudge.choice);
   // 초안은 실제 모델로 뽑아야 쓸 만하다 — 모의 모델은 화면 확인용이라 기본값에서 뺀다
   // 채점 모델 기본값과 같은 공급자로 둔다 — 키를 한 번만 넣으면 초안까지 바로 된다
   const [assistChoice, setAssistChoice] = useState<JudgeChoice>("openai");
@@ -281,7 +309,7 @@ export function WizardPage() {
     }),
   );
   // 고른 모델 — 비어 있으면 공급자 기본값을 쓴다
-  const [judgeModel, setJudgeModel] = useState("");
+  const [judgeModel, setJudgeModel] = useState(savedJudge.model);
   // 공급자별로 불러온 모델 목록
   const [modelList, setModelList] = useState<AvailableModel[]>([]);
   const [modelBusy, setModelBusy] = useState(false);
@@ -292,11 +320,17 @@ export function WizardPage() {
   const [sharedProviders, setSharedProviders] = useState<Partial<Record<SharedProvider, boolean>>>(
     {},
   );
+  /** 공유 키로 허용된 모델(서버 /config) — 공유 경로에서는 이 목록만 고르게 한다 */
+  const [sharedModels, setSharedModels] = useState<Partial<Record<SharedProvider, readonly string[]>>>(
+    {},
+  );
 
   useEffect(() => {
     let cancelled = false;
     loadSharedProviders().then((result) => {
-      if (!cancelled) setSharedProviders(result);
+      if (cancelled) return;
+      setSharedProviders(result);
+      setSharedModels({ openai: sharedModelsFor("openai"), gemini: sharedModelsFor("gemini") });
     });
     return () => {
       cancelled = true;
@@ -305,15 +339,40 @@ export function WizardPage() {
 
   const liveAnswers = useMemo(() => toAnswers(questions, draft), [questions, draft]);
 
+  const sharedAvailable = (provider: CredentialProvider): boolean =>
+    (provider === "gemini" || provider === "openai") && sharedProviders[provider] === true;
+
+  const credentialFor = (provider: CredentialProvider): string => {
+    const draft = credentialDrafts[provider].trim();
+    return provider === "vertex" ? draft || storedVertexCredential || "" : draft;
+  };
+
+  // 키를 비워 뒀고 관리자 공유 키가 있는 경우 — 요청이 Harnest 서버(/proxy/*)를 거치고,
+  // 서버 허용 목록 밖 모델은 실행 시 400으로 막히므로 여기서 미리 걸러 준다.
+  const usingSharedKey =
+    judgeChoice !== "mock" && !credentialFor(judgeChoice) && sharedAvailable(judgeChoice);
+  const sharedAllowed: readonly string[] = usingSharedKey
+    ? (sharedModels[judgeChoice as SharedProvider] ?? [])
+    : [];
+  // 빈 칸의 기본 모델 — 공유 경로에서 공급자 기본값이 허용 목록에 없으면 목록의 첫 모델
+  const fallbackModel =
+    judgeChoice === "mock"
+      ? JUDGE_MODEL.mock
+      : sharedAllowed.length > 0 && !sharedAllowed.includes(JUDGE_MODEL[judgeChoice])
+        ? sharedAllowed[0]
+        : JUDGE_MODEL[judgeChoice];
+
   // 저지 선언: needsModel이 아니면 무시되는 자리 표시 값을 넘긴다
   const judge = useMemo(
     () =>
       entry?.needsModel
-        ? { provider: judgeChoice, model: judgeModel.trim() || JUDGE_MODEL[judgeChoice] }
+        ? { provider: judgeChoice, model: judgeModel.trim() || fallbackModel }
         : { provider: "mock" as const, model: "-" },
     // judgeModel을 빠뜨리면 고른 모델 대신 공급자 기본 모델이 승인 팩에 동결된다
-    [entry, judgeChoice, judgeModel],
+    [entry, judgeChoice, judgeModel, fallbackModel],
   );
+  // 라이브 블루프린트 — 미리보기 카드와 케이스 용도 배지가 같은 compile 결과를 읽는다
+  const blueprint = useBlueprint(entry, liveAnswers, judge);
 
   if (!entry) {
     return (
@@ -350,9 +409,6 @@ export function WizardPage() {
 
   const busy = submitting || assistBusy || attachBusy;
 
-  const sharedAvailable = (provider: CredentialProvider): boolean =>
-    (provider === "gemini" || provider === "openai") && sharedProviders[provider] === true;
-
   // 자격 증명이 채워지면 잠깐 기다렸다가 모델 목록을 스스로 불러온다.
   // 글자를 칠 때마다 부르지 않도록 잠시 멈춘 뒤에만 호출한다.
   useEffect(() => {
@@ -374,9 +430,12 @@ export function WizardPage() {
         .then((models) => {
           if (!alive) return;
           setModelList(models);
-          // 벤더 목록의 첫 번째가 아니라 추린 목록의 첫 번째를 집는다 —
-          // 그러지 않으면 구형 모델(babbage-002 등)이 기본으로 잡힌다
-          setJudgeModel((current) => pickModel(models, current));
+          // 빈 칸만 채운다: 카드가 광고하는 기본 모델이 목록에 있으면 그것, 없으면 추린 목록의
+          // 첫 번째(벤더 목록 첫 항목이면 구형 모델이 잡힌다). 이미 적힌 값 — 복원된 모델이나
+          // 직접 적은 이름 — 은 목록에 없어도 덮어쓰지 않는다.
+          setJudgeModel((current) =>
+            current ? current : pickModel(models, current, JUDGE_MODEL[judgeChoice]),
+          );
         })
         .catch((err: unknown) => {
           if (!alive) return;
@@ -415,7 +474,7 @@ export function WizardPage() {
       if (models.length === 0) {
         setModelNote("쓸 수 있는 모델을 찾지 못했습니다.");
       } else {
-        setJudgeModel(pickModel(models, judgeModel));
+        setJudgeModel(pickModel(models, judgeModel, JUDGE_MODEL[judgeChoice]));
       }
     } catch (err) {
       setModelList([]);
@@ -423,11 +482,6 @@ export function WizardPage() {
     } finally {
       setModelBusy(false);
     }
-  };
-
-  const credentialFor = (provider: CredentialProvider): string => {
-    const draft = credentialDrafts[provider].trim();
-    return provider === "vertex" ? draft || storedVertexCredential || "" : draft;
   };
 
   const persistCredential = (provider: CredentialProvider, raw: string): void => {
@@ -450,12 +504,36 @@ export function WizardPage() {
   const casePairs =
     q.type === "caseList" && Array.isArray(draft[q.id]) ? (draft[q.id] as CasePair[]) : [];
   const caseFilled = casePairs.filter((p) => p.question.trim() || p.expectedAnswer.trim()).length;
+  // 케이스 용도 배지 — 실제 분할은 compile 결과(holdoutPolicy)만 안다. 지금 초안과 같은 답변으로
+  // 만든 결과일 때만, 그리고 미확인 초안이 없을 때만 보인다(확인하면 분할이 다시 정해진다).
+  const caseSplitPolicy =
+    q.type === "caseList" &&
+    blueprint.kind === "ok" &&
+    blueprint.answers === liveAnswers &&
+    blueprint.pack.holdoutPolicy.mode === "seeded_split" &&
+    !casePairs.some((p) => p.needsConfirm)
+      ? blueprint.pack.holdoutPolicy
+      : null;
+  const caseUseList =
+    caseSplitPolicy === null ? null : caseUses(casePairs, caseSplitPolicy, entry.caseIdAt);
+  const caseSplitCounts =
+    caseSplitPolicy === null || caseUseList === null
+      ? null
+      : { holdout: caseSplitPolicy.holdoutCaseIds.length, guard: caseSplitPolicy.guardCaseIds.length };
   const assistSliderMax = Math.max(1, (q.max ?? CASE_MAX_DEFAULT) - caseFilled);
   const assistEffective = Math.min(assistCount, assistSliderMax);
 
   function onChange(value: DraftValue) {
     setDraft((d) => ({ ...d, [q.id]: value }));
     setError(null);
+    setInvalidId(null);
+  }
+
+  /** 검증 실패를 보조기기에도 알린다 — 문구는 alert 영역에, 포커스는 걸린 입력으로 */
+  function failValidation(questionId: string, message: string, elementId: string): void {
+    setError(message);
+    setInvalidId(questionId);
+    window.setTimeout(() => document.getElementById(elementId)?.focus(), 0);
   }
 
   /** 파일 첨부 — 추출은 전부 이 브라우저 안에서 일어난다. 상한을 넘는 파일부터 중단하되
@@ -472,7 +550,7 @@ export function WizardPage() {
     for (const file of files) {
       let text: string;
       try {
-        text = await extractFileText(file);
+        text = await extractFileText(file, q.maxChars);
       } catch (err) {
         failure = err instanceof Error ? err.message : `'${file.name}' 파일을 읽지 못했습니다.`;
         break;
@@ -497,6 +575,11 @@ export function WizardPage() {
   async function onDraftCases() {
     const assist = entry!.caseAssist;
     if (!assist || q.type !== "caseList") return;
+    if (readOnly) {
+      // 초안 호출도 모델 호출이다 — 읽기 전용 탭은 내지 않는다(SPEC §4.2)
+      setError(READ_ONLY_MESSAGE);
+      return;
+    }
     const pairs = Array.isArray(draft[q.id]) ? (draft[q.id] as CasePair[]) : [];
     const filled = pairs.filter((p) => p.question.trim() || p.expectedAnswer.trim());
     const max = q.max ?? CASE_MAX_DEFAULT;
@@ -603,7 +686,7 @@ export function WizardPage() {
     for (const asked of group) {
       const err = validate(asked, draft[asked.id] ?? "");
       if (err) {
-        setError(err);
+        failValidation(asked.id, err, asked.type === "caseList" ? "new-q" : `q-${asked.id}`);
         return;
       }
     }
@@ -612,10 +695,24 @@ export function WizardPage() {
       setStep(step + 1);
       return;
     }
+    if (readOnly) {
+      // 제출은 연결 확인(모델 호출)과 컴파일(승인·실행 상태 초기화)을 함께 일으킨다 — 읽기 전용
+      // 탭에서는 둘 다 하지 않는다. 저장이 막혀 있어 새로고침하면 사라질 상태를 보여 주지 않는다.
+      setError(READ_ONLY_MESSAGE);
+      return;
+    }
     if (entry!.needsModel && judgeChoice !== "mock") {
       const credential = credentialFor(judgeChoice);
       if (!credential && !sharedAvailable(judgeChoice)) {
-        setError(`${PROVIDER_LABEL[judgeChoice]} 자격 증명을 입력해 주세요.`);
+        failValidation(q.id, `${PROVIDER_LABEL[judgeChoice]} 자격 증명을 입력해 주세요.`, "judge-credential");
+        return;
+      }
+      if (usingSharedKey && sharedAllowed.length > 0 && !sharedAllowed.includes(judge.model)) {
+        failValidation(
+          q.id,
+          `공유 키로는 다음 모델만 쓸 수 있습니다: ${sharedAllowed.join(", ")}. 모델을 바꾸거나 본인 키를 입력해 주세요.`,
+          "judge-model",
+        );
         return;
       }
     }
@@ -623,13 +720,15 @@ export function WizardPage() {
     try {
       if (entry!.needsModel && judgeChoice !== "mock") {
         const credential = credentialFor(judgeChoice);
+        // 동결될 모델(judge.model)과 같은 값으로 확인한다 — 기본 모델로 통과한 뒤 다른 모델이
+        // 팩에 들어가면 승인 화면의 점검에서야 막힌다.
         if (credential) {
-          await testByoConnection(judgeChoice, credential, judgeModel.trim() || JUDGE_MODEL[judgeChoice]);
+          await testByoConnection(judgeChoice, credential, judge.model);
           // 실패한 자격 증명이 기존의 정상 값을 덮지 않도록 성공한 뒤에만 저장한다.
           persistCredential(judgeChoice, credential);
         } else {
           // 키를 비워 뒀고 관리자 공유 키가 있는 경우 — 그 경로도 승인 전에 한 번 확인한다.
-          await testSharedConnection(judgeChoice as SharedProvider, JUDGE_MODEL[judgeChoice]);
+          await testSharedConnection(judgeChoice as SharedProvider, judge.model);
         }
       }
       const answers = toAnswers(questions, draft);
@@ -637,7 +736,8 @@ export function WizardPage() {
         { schemaVersion: "skeleton-1", templateId: entry!.id, answers },
         judge,
       );
-      setAnswers(answers);
+      // 0단계 어휘·확인 방향은 질문 id가 아니라 별도 키에 산다 — 질문 답만 갈아 끼우고 그 키는 잇는다
+      setAnswers({ ...pickVoice(savedAnswers), ...answers });
       setCompiled(compiled);
       navigate("/approve");
     } catch (err2) {
@@ -689,9 +789,12 @@ export function WizardPage() {
               {q.type === "caseList" ? (
                 <>
                   <WizardCaseList
-                    pairs={Array.isArray(draft[q.id]) ? (draft[q.id] as CasePair[]) : []}
+                    pairs={casePairs}
                     minPairs={q.min ?? CASE_MIN_DEFAULT}
                     maxPairs={q.max ?? CASE_MAX_DEFAULT}
+                    uses={caseUseList}
+                    split={caseSplitCounts}
+                    describedBy={invalidId === q.id ? "wizard-error" : undefined}
                     onChange={onChange}
                   />
                   {entry.caseAssist ? (
@@ -701,7 +804,8 @@ export function WizardPage() {
                         <button
                           type="button"
                           className="primary assist-go"
-                          disabled={busy}
+                          disabled={busy || readOnly}
+                          title={readOnly ? "다른 탭에서 이 프로젝트를 편집·실행 중입니다" : undefined}
                           onClick={onDraftCases}
                         >
                           {assistBusy ? "초안 만드는 중…" : `AI 초안 ${assistEffective}개 넣기`}
@@ -840,6 +944,8 @@ export function WizardPage() {
                       value={typeof draft[q.id] === "string" ? (draft[q.id] as string) : ""}
                       placeholder={q.placeholder}
                       autoFocus
+                      aria-invalid={invalidId === q.id || undefined}
+                      aria-describedby={invalidId === q.id ? "wizard-error" : undefined}
                       onChange={(e) => onChange(e.target.value)}
                     />
                   </div>
@@ -890,6 +996,8 @@ export function WizardPage() {
                   min={q.min}
                   max={q.max}
                   autoFocus
+                  aria-invalid={invalidId === q.id || undefined}
+                  aria-describedby={invalidId === q.id ? "wizard-error" : undefined}
                   onChange={(e) => onChange(e.target.value)}
                 />
               )}
@@ -916,9 +1024,12 @@ export function WizardPage() {
                     placeholder={extra.placeholder}
                     min={extra.min}
                     max={extra.max}
+                    aria-invalid={invalidId === extra.id || undefined}
+                    aria-describedby={invalidId === extra.id ? "wizard-error" : undefined}
                     onChange={(e) => {
                       setDraft((d) => ({ ...d, [extra.id]: e.target.value }));
                       setError(null);
+                      setInvalidId(null);
                     }}
                   />
                 )}
@@ -990,22 +1101,14 @@ export function WizardPage() {
                       onError={setError}
                     />
                     <div className="hint">
-                      {judgeChoice === "vertex" ? (
-                        <>
-                          private key는 localStorage에서 JWT 서명에만 쓰이고, 서명된 assertion은
-                          Google OAuth로, 모델 요청은 Vertex AI로 직접 전송됩니다.
-                        </>
-                      ) : credentialDrafts[judgeChoice].trim() || !sharedAvailable(judgeChoice) ? (
-                        <>
-                          키는 이 브라우저(localStorage)에만 저장되고, 요청은{" "}
-                          {judgeChoice === "openai" ? "OpenAI" : "Gemini"} API로 직접 전송됩니다.
-                        </>
-                      ) : (
+                      {usingSharedKey ? (
                         <>
                           키를 비워 두면 관리자가 서버에 설정한 공유 키를 사용합니다. 이 경우
                           요청이 벤더로 직행하지 않고 Harnest 서버를 거칩니다(키 자체는 여전히
                           브라우저로 오지 않습니다).
                         </>
+                      ) : (
+                        DIRECT_SEND_HINT[judgeChoice]
                       )}{" "}
                       승인 화면으로 이동하기 전에 선택한 모델로 1회 연결을 확인합니다.
                     </div>
@@ -1013,24 +1116,36 @@ export function WizardPage() {
                     <div className="model-pick">
                       <label htmlFor="judge-model">모델</label>
                       <ModelPicker
-                        models={modelList}
+                        id="judge-model"
+                        invalid={invalidId === q.id}
+                        describedBy={invalidId === q.id ? "wizard-error" : undefined}
+                        models={
+                          usingSharedKey
+                            ? sharedAllowed.map((id) => ({ id, label: id, source: "catalog" as const }))
+                            : modelList
+                        }
                         value={judgeModel}
-                        placeholder={JUDGE_MODEL[judgeChoice]}
-                        busy={modelBusy}
+                        placeholder={fallbackModel}
+                        busy={modelBusy && !usingSharedKey}
                         disabled={busy}
                         onChange={(id) => {
                           setJudgeTouched(true);
                           setJudgeModel(id);
                           setError(null);
+                          setInvalidId(null);
                         }}
                       />
                     </div>
                     <div className="hint">
-                      {modelNote
-                        ? modelNote
-                        : modelList.length > 0
-                          ? `${modelList.length}개 중에서 고르거나, 이름을 직접 적어도 됩니다.`
-                          : "이름을 직접 적어도 됩니다."}
+                      {usingSharedKey
+                        ? sharedAllowed.length > 0
+                          ? `공유 키로는 다음 모델만 쓸 수 있습니다: ${sharedAllowed.join(", ")}. 다른 모델은 본인 키를 입력해야 합니다.`
+                          : "공유 키로 쓸 수 있는 모델은 서버가 정합니다 — 허용 목록 밖 모델은 실행 시 거부됩니다."
+                        : modelNote
+                          ? modelNote
+                          : modelList.length > 0
+                            ? `${modelList.length}개 중에서 고르거나, 이름을 직접 적어도 됩니다.`
+                            : "이름을 직접 적어도 됩니다."}
                     </div>
                   </div>
                 ) : null}
@@ -1058,11 +1173,16 @@ export function WizardPage() {
               </div>
             ) : null}
 
-            {error ? <div className="error" style={{ marginBottom: 12 }}>{error}</div> : null}
+            <ErrorNote id="wizard-error" message={error} live="assertive" style={{ marginBottom: 12 }} />
 
             <div className="wizard-nav">
               {isLast ? (
-                <button type="submit" className="primary wizard-go-wide" disabled={busy}>
+                <button
+                  type="submit"
+                  className="primary wizard-go-wide"
+                  disabled={busy || readOnly}
+                  title={readOnly ? "다른 탭에서 이 프로젝트를 편집·실행 중입니다" : undefined}
+                >
                   {submitting
                     ? judgeChoice === "mock"
                       ? "확인 중…"
@@ -1088,12 +1208,7 @@ export function WizardPage() {
 
         {isLast ? null : (
           <div className="wizard-side">
-            <WizardBlueprint
-              entry={entry}
-              answers={liveAnswers}
-              judge={judge}
-              visibility={blueprintVisibility}
-            />
+            <WizardBlueprint state={blueprint} visibility={blueprintVisibility} />
             <button
               type="submit"
               form="wizard-form"

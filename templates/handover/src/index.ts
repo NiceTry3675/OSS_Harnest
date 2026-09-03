@@ -24,6 +24,14 @@ export const TEMPLATE_NAME = "인수인계·온보딩 문서";
 export const MAX_CASES = 30;
 export const MIN_CASES = 4;
 
+/** 제출된 케이스 쌍의 입력 순서(0부터)에 compile이 붙이는 id — `case-1`, `case-2`, ….
+ *  holdoutPolicy의 holdoutCaseIds·guardCaseIds는 이 id를 가리키므로, 웹의 용도 배지는 이 함수로
+ *  id를 입력 순서로 되돌린다(TemplateEntry.caseIdAt). 규약은 여기 한 곳이 소유하며 다이제스트
+ *  범위(holdoutPolicy)에 실리므로 바꾸면 기존 승인이 모두 무효가 된다. */
+export function caseIdAt(index: number): string {
+  return `case-${index + 1}`;
+}
+
 /** 참고 자료 문자 수 상한 — 서버 선택 저장의 봉투 상한(1 MiB)과 매 라운드 생성 프롬프트에
  *  material이 통째로 실리는 비용 구조를 고려한 값. 질문 선언이 정본, compile이 재검증한다. */
 export const MATERIAL_MAX_CHARS = 100_000;
@@ -33,6 +41,14 @@ export const MATERIAL_MAX_CHARS = 100_000;
 export const LENGTH_CAP_MIN = 500;
 export const LENGTH_CAP_MAX = 20_000;
 export const LENGTH_CAP_DEFAULT = 8_000;
+
+/** 글자 수 표기 — 실행 환경 로케일과 무관하게 "8,000" 형태로 고정한다.
+ *  criteria·gates의 label은 digestScope에 들어가므로, 인자 없는 toLocaleString()을 쓰면
+ *  같은 입력이 브라우저 언어(de-DE "8.000" 등)에 따라 다른 definitionDigest를 만든다.
+ *  출력은 ko-KR·en-US 표기와 같아 기존 다이제스트를 바꾸지 않는다. ICU 유무에도 의존하지 않는다. */
+export function formatCount(value: number): string {
+  return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
 
 /** 실행 1회(라운드 0 + 루프 + 홀드아웃 2회 채점)의 모델 호출 예산 (SPEC §5.2).
  *  배치 채점 1회는 최악 4콜(responder+grader+형식 재시도 각 1회)이다. 라운드 0은
@@ -93,7 +109,7 @@ export const questions: Question[] = [
     label: "문서 길이를 어떻게 다룰까요?",
     shortLabel: "분량·간결성",
     nextLabel: "채점 모델 고르기",
-    help: `권장 분량을 정합니다 (${LENGTH_CAP_MIN}~${LENGTH_CAP_MAX.toLocaleString()}자). 초과분은 점진적으로 감점하고, 권장 분량의 125%를 넘으면 점수 비교에서 제외합니다.`,
+    help: `권장 분량을 정합니다 (${LENGTH_CAP_MIN}~${formatCount(LENGTH_CAP_MAX)}자). 초과분은 점진적으로 감점하고, 권장 분량의 125%를 넘으면 점수 비교에서 제외합니다.`,
     min: LENGTH_CAP_MIN,
     max: LENGTH_CAP_MAX,
     defaultValue: LENGTH_CAP_DEFAULT,
@@ -166,18 +182,21 @@ export async function compile(
   const useConciseness = submission.answers["conciseness"] !== false;
 
   if (!Array.isArray(rawCases)) throw new Error("질문·답 기록을 입력해 주세요.");
+  // id는 제출된 쌍(질문·답이 모두 있는 것)에만 입력 순서로 1부터 붙인다 — 빈 쌍이 번호를 차지하면
+  // 웹의 용도 배지(caseSplit)가 다른 질문에 붙는다. 위저드는 빈 쌍을 걸러 보내므로 정상 경로의
+  // id·다이제스트는 이 규칙으로 달라지지 않는다.
   const cases: CaseDef[] = rawCases
-    .map((c, i) => {
+    .map((c) => {
       const prov = (c as CaseDef).provenance;
       return {
-        id: `case-${i + 1}`,
         question: String((c as CaseDef).question ?? "").trim(),
         expectedAnswer: String((c as CaseDef).expectedAnswer ?? "").trim(),
         // "user"는 생략 규약 — 직접 입력 흐름의 casesDigest를 기존과 동일하게 유지한다
         ...(prov === "ai" || prov === "ai_edited" ? { provenance: prov } : {}),
       };
     })
-    .filter((c) => c.question.length > 0 && c.expectedAnswer.length > 0);
+    .filter((c) => c.question.length > 0 && c.expectedAnswer.length > 0)
+    .map((c, i) => ({ id: caseIdAt(i), ...c }));
 
   if (cases.length < MIN_CASES) throw new Error(`질문·답 쌍이 ${MIN_CASES}개 이상 필요합니다.`);
   if (cases.length > MAX_CASES) {
@@ -185,12 +204,12 @@ export async function compile(
   }
   if (!Number.isInteger(lengthCap) || lengthCap < LENGTH_CAP_MIN || lengthCap > LENGTH_CAP_MAX) {
     throw new Error(
-      `문서 최대 분량은 ${LENGTH_CAP_MIN}~${LENGTH_CAP_MAX.toLocaleString()}자여야 합니다.`,
+      `문서 최대 분량은 ${LENGTH_CAP_MIN}~${formatCount(LENGTH_CAP_MAX)}자여야 합니다.`,
     );
   }
   if (material.length > MATERIAL_MAX_CHARS) {
     throw new Error(
-      `참고 자료는 최대 ${MATERIAL_MAX_CHARS.toLocaleString()}자입니다 (현재 ${material.length.toLocaleString()}자).`,
+      `참고 자료는 최대 ${formatCount(MATERIAL_MAX_CHARS)}자입니다 (현재 ${formatCount(material.length)}자).`,
     );
   }
 
@@ -260,7 +279,7 @@ export async function compile(
                 lengthPolicy: LENGTH_POLICY,
               },
               weight: CONCISENESS_WEIGHT,
-              label: `간결성 (권장 ${lengthCap.toLocaleString()}자 이내 가점 — 초과 시 별도 감점)`,
+              label: `간결성 (권장 ${formatCount(lengthCap)}자 이내 가점 — 초과 시 별도 감점)`,
             },
           ]
         : []),
@@ -277,7 +296,7 @@ export async function compile(
           lengthPolicy: LENGTH_POLICY,
         },
         effect: "reject",
-        label: `최대 분량 ${hardLengthCap.toLocaleString()}자 이하 (권장 ${lengthCap.toLocaleString()}자 초과 시 점진 감점)`,
+        label: `최대 분량 ${formatCount(hardLengthCap)}자 이하 (권장 ${formatCount(lengthCap)}자 초과 시 점진 감점)`,
       },
     ],
     judgeProcedure: {
@@ -321,7 +340,7 @@ export async function compile(
   const notices: string[] = [];
   if (verbatimLength <= lengthCap) {
     notices.push(
-      `질문·답 전체(약 ${verbatimLength.toLocaleString()}자)를 그대로 옮겨도 권장 분량 ${lengthCap.toLocaleString()}자를 넘지 않습니다.\n` +
+      `질문·답 전체(약 ${formatCount(verbatimLength)}자)를 그대로 옮겨도 권장 분량 ${formatCount(lengthCap)}자를 넘지 않습니다.\n` +
         "이를 막으려면 권장 분량을 낮추세요. 그대로 두려면 최종 확인 점수를 확인하세요.",
     );
   }

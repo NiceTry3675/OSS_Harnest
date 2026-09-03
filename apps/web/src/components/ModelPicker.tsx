@@ -8,6 +8,9 @@ import type { AvailableModel } from "../lib/llm";
 import { preferredModels } from "../lib/modelChoice";
 
 export function ModelPicker({
+  id,
+  invalid = false,
+  describedBy,
   models,
   value,
   placeholder,
@@ -15,6 +18,12 @@ export function ModelPicker({
   disabled,
   onChange,
 }: {
+  /** 입력칸의 id — 바깥 label의 htmlFor와 검증 실패 시 포커스 이동(failValidation)이 이 값을 찾는다 */
+  id?: string;
+  /** 검증에 걸린 상태 — aria-invalid로 보조기기에 알린다 */
+  invalid?: boolean;
+  /** 오류 문구 요소의 id — aria-describedby로 연결한다 */
+  describedBy?: string;
   models: AvailableModel[];
   value: string;
   placeholder: string;
@@ -52,11 +61,14 @@ export function ModelPicker({
   return (
     <div className="picker" ref={boxRef}>
       <input
+        id={id}
         className="picker-input"
         value={open ? query : (picked?.label ?? value)}
         placeholder={busy ? "모델을 찾는 중…" : placeholder}
         disabled={disabled}
         aria-label="채점에 쓸 모델"
+        aria-invalid={invalid || undefined}
+        aria-describedby={describedBy}
         onFocus={() => {
           setQuery("");
           setOpen(true);

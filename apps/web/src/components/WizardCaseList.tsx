@@ -4,11 +4,14 @@
  *  입력 방식: 위 입력줄에 질문과 답을 함께 넣고 추가한다. 한 쌍이 한 번에 들어가야
  *  답이 빈 채로 쌓이지 않는다. 추가한 뒤에도 카드 안에서 그대로 고칠 수 있다.
  *
- *  뒤쪽 몇 개는 개선·채택 과정에서 숨기고 실행 시작·종료에만 별도 채점한다. 어떤 것이
- *  그렇게 되는지 입력하는 동안 보이지 않으면 결과 화면에서 갑자기 튀어나오므로 미리 표시한다.
- *  다만 최소 개수를 채우기 전에는 분할이 확정되지 않으므로 표시하지 않는다. */
+ *  쌍마다 용도가 있다: 매 회차 채점해 판정 내용을 개선에 쓰는 개선용, 매 회차 합계만 채택 판단에
+ *  쓰는 중간 점검용, 개선에 쓰지 않고 실행 시작·종료에만 채점하는 최종 확인용. 어떤 쌍이 어느
+ *  용도인지 입력하는 동안 보이지 않으면 결과 화면에서 갑자기 튀어나오므로 세 용도 모두 배지로 미리
+ *  표시한다 — 단, 분할 산식은 템플릿의 것이라 여기서 흉내 내지 않고 compile 결과(holdoutPolicy)를
+ *  되돌린 용도(uses)를 받아 그대로 보인다. */
 
 import { useRef, useState } from "react";
+import type { CaseUse } from "../lib/caseSplit";
 
 export interface CasePair {
   question: string;
@@ -20,11 +23,6 @@ export interface CasePair {
   /** 멀티홉 초안의 근거 인용 — 확인용 표시 전용. toAnswers가 싣지 않아 제출·다이제스트에
    *  절대 유입되지 않는다. found=false는 글자 그대로 일치를 확인하지 못했다는 낮은 확신의 경고. */
   evidence?: Array<{ quote: string; found: boolean }>;
-}
-
-/** 템플릿의 홀드아웃 분할과 같은 식 — 뒤에서 이만큼이 숨겨진다 */
-function hiddenCount(n: number): number {
-  return n === 0 ? 0 : Math.max(1, Math.floor(n / 3));
 }
 
 /** 펼쳐 둘 쌍 — 확인이 필요한 것과 손으로 펼친 것만 편집면을 연다 */
@@ -44,11 +42,20 @@ export function WizardCaseList({
   pairs,
   minPairs,
   maxPairs,
+  uses = null,
+  split = null,
+  describedBy,
   onChange,
 }: {
   pairs: CasePair[];
   minPairs: number;
   maxPairs: number;
+  /** compile 결과에서 되돌린 쌍별 용도 — 아직 계산되지 않았으면 null(배지 없음) */
+  uses?: Array<CaseUse | null> | null;
+  /** 용도별 개수(pack 기준) — 안내 문구용 */
+  split?: { holdout: number; guard: number } | null;
+  /** 검증 실패 문구의 id — 입력줄에 aria-describedby로 건다 */
+  describedBy?: string;
   onChange: (next: CasePair[]) => void;
 }) {
   const { opened, toggle } = useOpenRows();
@@ -93,10 +100,10 @@ export function WizardCaseList({
   // 근거 인용 안내는 인용이 있는 첫 카드에서 한 번만 보여준다 — 카드마다 반복하면 소음이다
   const firstEvidenceIdx = pairs.findIndex((p) => p.evidence !== undefined && p.evidence.length > 0);
 
-  // 최소 개수를 채우기 전에는 어느 것이 숨겨질지 확정되지 않는다
+  // 최소 개수를 채우기 전에는 compile이 실패하므로 어느 것이 어떤 용도인지 정해지지 않는다
   const settled = pairs.length >= minPairs;
-  const hidden = settled ? hiddenCount(pairs.length) : 0;
-  const hideFrom = pairs.length - hidden;
+  // 개선용 개수는 pack이 따로 세지 않는다 — 되돌린 용도에서 센다(제출되지 않는 쌍은 어느 용도도 아니다)
+  const visibleCount = uses === null ? 0 : uses.filter((use) => use === "visible").length;
 
   return (
     <div>
@@ -109,6 +116,8 @@ export function WizardCaseList({
             rows={2}
             value={q}
             disabled={full}
+            aria-invalid={describedBy !== undefined || undefined}
+            aria-describedby={describedBy}
             placeholder="예: 월 마감은 며칠까지 끝내야 하나요?"
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => {
@@ -144,31 +153,41 @@ export function WizardCaseList({
 
       <p className="hint" style={{ marginTop: 8 }}>
         {minPairs}~{maxPairs}개.{" "}
-        {settled
-          ? `지금은 뒤에서 ${hidden}개를 숨겨 두고, 시작할 때와 끝날 때만 따로 채점합니다.`
-          : `${minPairs}개를 채우면 뒤쪽 몇 개가 숨겨질지 정해집니다.`}{" "}
+        {uses !== null && split !== null
+          ? `질문마다 용도를 표시합니다. 개선용 ${visibleCount}개는 매 회차 채점해 판정 내용을 결과물 개선에 쓰고, 중간 점검용 ${split.guard}개는 매 회차 합계 점수만 채택 판단에 쓰며, 최종 확인용 ${split.holdout}개는 개선에 쓰지 않고 시작할 때와 끝날 때만 채점합니다. 어떤 질문이 어느 용도인지는 평가 구성이 정하며, 질문을 고치거나 순서를 바꾸면 다시 정해질 수 있습니다.`
+          : settled
+            ? pairs.some((p) => p.needsConfirm)
+              ? "초안을 확인하면 질문마다 용도(개선용·중간 점검용·최종 확인용)가 정해집니다."
+              : "질문마다 용도(개선용·중간 점검용·최종 확인용)를 정하는 중…"
+            : `${minPairs}개를 채우면 질문마다 용도(개선용·중간 점검용·최종 확인용)가 정해집니다.`}{" "}
         Shift+Enter로 줄바꿈.
       </p>
 
       <div className="q-list" style={{ marginTop: 16 }}>
         {pairs.map((p, i) => {
-          const isHidden = settled && i >= hideFrom;
+          const use = uses?.[i] ?? null;
           return (
             <div key={i}>
-              {settled && i === hideFrom ? (
-                <div className="hide-mark">
-                  여기부터는 고치는 동안 숨겨 두고, 시작할 때와 끝날 때만 따로 채점합니다
-                </div>
-              ) : null}
-
               <div
-                className={`q-item${isHidden ? " is-hidden" : ""}${
+                className={`q-item${use === "holdout" ? " is-hidden" : use === "guard" ? " is-guard" : ""}${
                   opened.has(i) || p.needsConfirm ? "" : " is-folded"
                 }`}
               >
                 <div className="q-top">
                   <span className="q-no">{i + 1}</span>
-                  {isHidden ? <span className="badge muted">숨김</span> : null}
+                  {use === "holdout" ? (
+                    <span className="badge muted" title="개선에 쓰지 않고 시작할 때와 끝날 때만 채점합니다">
+                      숨김 · 최종 확인용
+                    </span>
+                  ) : use === "guard" ? (
+                    <span className="badge muted" title="매 회차 채점하되 합계 점수만 채택 판단에 씁니다">
+                      중간 점검용
+                    </span>
+                  ) : use === "visible" ? (
+                    <span className="badge muted" title="매 회차 채점하고 판정 내용을 결과물 개선에 씁니다">
+                      개선용
+                    </span>
+                  ) : null}
                   {p.needsConfirm ? (
                     <span className="badge">확인 필요</span>
                   ) : p.provenance === "ai" ? (

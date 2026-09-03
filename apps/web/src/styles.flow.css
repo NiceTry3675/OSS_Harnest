@@ -83,18 +83,15 @@
 }
 .q-acts { margin-left: auto; display: flex; gap: 6px; }
 .q-acts button { height: 30px; padding: 0 12px; font-size: 12.5px; border-radius: 9px; }
+/* 최종 확인용(개선에 쓰지 않음)은 잠금 색, 중간 점검용은 점선 — 용도는 compile 결과가 정한다 */
 .q-item.is-hidden { border-style: dashed; border-color: var(--lock); background: var(--lock-soft); }
 .q-item.is-hidden .q-no { background: var(--lock); color: var(--surface); }
+.q-item.is-guard { border-style: dotted; border-color: var(--accent); }
 .q-ans-input {
   margin-top: var(--s-2); margin-left: 30px; width: calc(100% - 30px);
   border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft);
   background: var(--accent-soft); font-size: var(--t-sm); padding: 9px 12px; border-radius: 10px;
 }
-.hide-mark {
-  display: flex; align-items: center; gap: var(--s-3);
-  margin: var(--s-4) 0 var(--s-2); color: var(--lock); font-size: var(--t-xs); font-weight: 700;
-}
-.hide-mark::before, .hide-mark::after { content: ""; flex: 1; height: 1px; background: var(--lock); opacity: 0.5; }
 .q-warn { color: var(--accent); font-weight: 600; font-size: var(--t-sm); margin: var(--s-3) 0 0; }
 .q-list { display: flex; flex-direction: column; gap: var(--s-3); }
 
