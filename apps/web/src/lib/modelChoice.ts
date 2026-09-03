@@ -14,7 +14,7 @@ import type { AvailableModel } from "./llm";
 const CURRENT_FAMILY: RegExp[] = [
   /^gpt-[5-9]/, // OpenAI
   /^o[3-9](-|$)/, // OpenAI 추론 계열
-  /^claude-(opus|sonnet)-(4-[6-9]|[5-9])/, // Anthropic — adaptive thinking·effort를 받는 4.6 이후만
+  /^claude-(opus|sonnet|fable|mythos)-(4-[6-9]|[5-9])/, // Anthropic — adaptive thinking·effort를 받는 4.6 이후만 (haiku는 4.5뿐이라 제외)
   /^gemini-[3-9][.-]/, // Google
   /^llama-?[3-9]/, // Meta · Ollama
   /^qwen[3-9]?/, // Alibaba
@@ -52,8 +52,18 @@ export function preferredModels(models: readonly AvailableModel[]): AvailableMod
 }
 
 /** 목록을 새로 받았을 때 어떤 모델을 고를지.
- *  이미 고른 것이 목록에 있으면 그대로 두고, 없으면 추린 목록의 첫 번째를 집는다. */
-export function pickModel(models: readonly AvailableModel[], current: string): string {
+ *  이미 고른 것이 목록에 있으면 그대로 두고, 없으면 공급자 기본 모델(preferred)이 목록에
+ *  있을 때 그것을, 그도 없으면 추린 목록의 첫 번째를 집는다.
+ *
+ *  추린 목록은 라벨 알파벳순이라 첫 항목이 같은 세대 중 가장 오래된 것(gpt-5 < gpt-5.6-sol)이거나
+ *  가장 비싼 것(Claude Fable < Claude Opus)일 수 있다 — 카드가 광고하는 기본 모델이 목록에 있으면
+ *  그것이 먼저다. */
+export function pickModel(
+  models: readonly AvailableModel[],
+  current: string,
+  preferred?: string,
+): string {
   if (current && models.some((m) => m.id === current)) return current;
+  if (preferred && models.some((m) => m.id === preferred)) return preferred;
   return preferredModels(models)[0]?.id ?? current;
 }

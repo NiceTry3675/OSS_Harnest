@@ -51,14 +51,27 @@ const KEY_STORAGE: Record<CredentialProvider, string> = {
   openrouter: "harnest.byo.openrouter",
   ollama: "harnest.byo.ollama",
 };
-// 긴 문서 생성(분량 상한 최대 20,000자 → 출력 수만 토큰)은 수 분이 걸릴 수 있어 5분 여유를 둔다.
-// 연결 테스트는 fail-fast 목적이라 별도의 짧은 상한(CONNECTION_TEST_TIMEOUT_MS)을 유지한다.
+// 한 번에 받는(비스트리밍) 호출의 절대 한도. 출력 수만 토큰(분량 상한 20,000자 → 40,000토큰)은
+// 수 분을 넘기므로, 옵션으로 명시하지 않았을 때는 출력 상한에 비례해 늘린다(requestTimeoutFor).
+// 연결 테스트는 fail-fast 목적이라 별도의 짧은 상한(CONNECTION_TEST_TIMEOUT_MS)을 쓴다.
 const DEFAULT_TIMEOUT_MS = 300_000;
+const MS_PER_OUTPUT_TOKEN = 30;
+// 스트리밍에는 절대 한도를 두지 않는다 — 정상적으로 흐르는 긴 생성을 시간으로 끊으면 스트리밍된
+// 토큰만 과금되고 산출물은 잃는다. 대신 바이트가 도착할 때마다 리셋되는 유휴 한도만 둔다.
+// 추론 요약을 내주지 않는 경로(relaxed OpenAI 등)는 깊은 추론 단계가 몇 분간 바이트 하나 없이 조용할 수
+// 있다 — 3분이던 때는 그 정상 추론을 유휴로 오판해 끊었다(스트리밍된 추론 토큰만 과금되고 산출물은 잃는다).
+const DEFAULT_STREAM_IDLE_MS = 600_000;
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_RETRY_BASE_MS = 1_500;
 const CONNECTION_TEST_TIMEOUT_MS = 15_000;
+// 공유 키 경로의 클라이언트 한도는 서버의 상류 읽기 한도(같은 산식: 토큰당 30ms, 최소 5분)보다 이만큼
+// 여유를 둔다. 클라이언트 타이머는 fetch 전에, 서버 타이머는 벤더에 쓴 뒤에 시작되므로 같은 값이면
+// 항상 클라이언트가 먼저 끊어 서버의 504 안내(재시도 금지·본인 키 권장)가 사용자에게 닿지 않는다.
+const SHARED_PROXY_TIMEOUT_MARGIN_MS = 60_000;
 
 export interface LlmRequestOptions {
+  /** 비스트리밍 호출에는 절대 한도, 스트리밍 호출에는 유휴 한도(바이트가 도착할 때마다 리셋).
+   *  생략하면 비스트리밍은 출력 상한에 비례한 기본값, 스트리밍은 600초 유휴다. */
   requestTimeoutMs?: number;
   maxAttempts?: number;
   retryBaseMs?: number;
@@ -274,10 +287,35 @@ const DEFAULT_EFFORT: ReasoningEffort = "medium";
 function effortOf(opts: LlmCallOptions | undefined): ReasoningEffort {
   return opts?.effort ?? DEFAULT_EFFORT;
 }
-/** 추론 토큰은 출력 한도 안에서 소비된다. 짧은 답을 기대한 호출이 추론만 하다 잘리지 않게 바닥을 둔다. */
-const REASONING_HEADROOM_TOKENS = 4096;
+/** 추론 토큰은 출력 한도 안에서 소비된다(세 벤더 모두). 짧은 답을 기대한 호출이 추론만 하다
+ *  잘리지 않게 effort별 바닥을 둔다 — 호출 쪽의 maxOutputTokens는 본문 예산이고, 깊은 추론일수록
+ *  그 위에 얹히는 여유가 커야 한다. 상한 자체에는 과금이 없지만 실제 추론 소비의 천장도 함께
+ *  오르므로, 바닥을 올리는 것은 라운드당 추론 토큰 지출 상한을 올리는 일이기도 하다. */
+const REASONING_HEADROOM_TOKENS: Record<ReasoningEffort, number> = {
+  low: 4096,
+  medium: 8192,
+  high: 16384,
+};
 function outputCapOf(opts: LlmCallOptions | undefined): number {
-  return Math.max(opts?.maxOutputTokens ?? 8192, REASONING_HEADROOM_TOKENS);
+  return Math.max(opts?.maxOutputTokens ?? 8192, REASONING_HEADROOM_TOKENS[effortOf(opts)]);
+}
+/** 비스트리밍 절대 한도 — 명시하지 않았으면 출력 상한에 비례한다(40,000토큰 → 20분). */
+function requestTimeoutFor(options: LlmRequestOptions, opts: LlmCallOptions | undefined): number {
+  return Math.max(
+    1,
+    options.requestTimeoutMs ?? Math.max(DEFAULT_TIMEOUT_MS, outputCapOf(opts) * MS_PER_OUTPUT_TOKEN),
+  );
+}
+/** 공유 키 경로의 절대 한도 — 명시하지 않았으면 서버 상류 한도에 여유를 더한 값. 명시했으면 그대로
+ *  (연결 테스트의 fail-fast 상한 등). */
+function sharedRequestTimeoutFor(options: LlmRequestOptions, opts: LlmCallOptions | undefined): number {
+  return options.requestTimeoutMs !== undefined
+    ? requestTimeoutFor(options, opts)
+    : requestTimeoutFor(options, opts) + SHARED_PROXY_TIMEOUT_MARGIN_MS;
+}
+/** 스트리밍 유휴 한도 — 같은 옵션이지만 뜻이 다르다(바이트가 도착할 때마다 리셋). */
+function streamIdleFor(options: LlmRequestOptions): number {
+  return Math.max(1, options.requestTimeoutMs ?? DEFAULT_STREAM_IDLE_MS);
 }
 
 /** json = 한 번에 받는 호출, stream = 추론 요약까지 흘리는 호출, stream-relaxed = 요약을 못 내주는 계정용 */
@@ -359,6 +397,29 @@ interface StreamPlan {
   /** 조각이 실패·절단을 알리면 그 사유를 돌려준다. 잘린 산출물이 완성본으로 채점되지 않게
    *  스트림을 오류로 끝내는 근거다. 정상 조각이면 null. */
   failure?(payload: unknown): string | null;
+  /** relaxed 판이 실제로 요청 본문을 바꾸는 벤더(OpenAI summary·Claude display·Ollama think)만
+   *  true — 본문이 같은 벤더의 HTTP 400을 다시 보내는 것은 동일 요청 중복일 뿐이다. */
+  relaxable?: boolean;
+}
+
+/** 스트림이 벤더의 실패·절단 신호로 끝났을 때의 오류. 스트림은 정상적으로 열렸으므로 비스트리밍으로
+ *  다시 받아도 결과가 같고 추론 비용만 두 배다 — withStream은 이 오류를 폴백 없이 그대로 던진다. */
+export class StreamReportedFailure extends Error {}
+
+/** 스트림 요청이 HTTP로 거절됐을 때 — relaxable 400만 한 번 더 시도한다. 429·5xx(일시 거절)는
+ *  비스트리밍 경로의 백오프 재시도에 넘기고, 그 밖(400·401·403·404)은 폴백 없이 던진다. */
+class StreamHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+
+  /** 벤더가 요청을 처리하지 않은 일시 거절(한도·과부하) — 다시 보내도 중복 과금이 없다 */
+  get transient(): boolean {
+    return this.status === 429 || (this.status >= 500 && this.status <= 599);
+  }
 }
 
 const googleFailure = (payload: unknown): string | null => {
@@ -375,22 +436,42 @@ const googleFailure = (payload: unknown): string | null => {
   return null;
 };
 
+/** Responses API의 response 객체(비스트리밍 본문, 스트림의 response.failed/incomplete 안 response)
+ *  가 알리는 실패·절단. status는 스트림 이벤트 종류로 대신 넘길 수 있다. */
+const openAIResponseFailure = (
+  response: unknown,
+  status: unknown = field(response, "status"),
+): string | null => {
+  const message = field(field(response, "error"), "message");
+  if (status === "failed" || typeof message === "string") {
+    return `응답 실패: ${typeof message === "string" ? message : "알 수 없는 오류"}`;
+  }
+  if (status === "incomplete") {
+    const reason = field(field(response, "incomplete_details"), "reason");
+    return reason === "max_output_tokens"
+      ? "출력 토큰 한도에 도달해 산출물이 잘렸습니다"
+      : `응답이 완료되지 않았습니다${typeof reason === "string" ? ` (${reason})` : ""}`;
+  }
+  return null;
+};
+
 const openAIStreamFailure = (payload: unknown): string | null => {
   const kind = field(payload, "type");
   if (kind === "error") {
     const message = field(payload, "message");
     return `응답 실패: ${typeof message === "string" ? message : "알 수 없는 오류"}`;
   }
-  if (kind === "response.failed") {
-    const message = field(field(field(payload, "response"), "error"), "message");
-    return `응답 실패: ${typeof message === "string" ? message : "알 수 없는 오류"}`;
-  }
+  if (kind === "response.failed") return openAIResponseFailure(field(payload, "response"), "failed");
   if (kind === "response.incomplete") {
-    const reason = field(field(field(payload, "response"), "incomplete_details"), "reason");
-    return reason === "max_output_tokens"
-      ? "출력 토큰 한도에 도달해 산출물이 잘렸습니다"
-      : `응답이 완료되지 않았습니다${typeof reason === "string" ? ` (${reason})` : ""}`;
+    return openAIResponseFailure(field(payload, "response"), "incomplete");
   }
+  return null;
+};
+
+/** Claude의 stop_reason — 비스트리밍 message 본문과 스트림 message_delta가 같은 값을 쓴다 */
+const anthropicStopFailure = (stop: unknown): string | null => {
+  if (stop === "max_tokens") return "출력 토큰 한도에 도달해 산출물이 잘렸습니다";
+  if (stop === "refusal") return "모델이 요청을 거부했습니다 (refusal)";
   return null;
 };
 
@@ -400,12 +481,13 @@ const anthropicStreamFailure = (payload: unknown): string | null => {
     const message = field(field(payload, "error"), "message");
     return `응답 실패: ${typeof message === "string" ? message : "알 수 없는 오류"}`;
   }
-  if (kind === "message_delta") {
-    const stop = field(field(payload, "delta"), "stop_reason");
-    if (stop === "max_tokens") return "출력 토큰 한도에 도달해 산출물이 잘렸습니다";
-    if (stop === "refusal") return "모델이 요청을 거부했습니다 (refusal)";
-  }
+  if (kind === "message_delta") return anthropicStopFailure(field(field(payload, "delta"), "stop_reason"));
   return null;
+};
+
+const anthropicMessageFailure = (data: unknown): string | null => {
+  if (field(data, "type") === "error") return anthropicStreamFailure(data);
+  return anthropicStopFailure(field(data, "stop_reason"));
 };
 
 const chatCompletionsFailure = (payload: unknown): string | null => {
@@ -432,11 +514,13 @@ function field(value: unknown, key: string): unknown {
     : undefined;
 }
 
-/** 응답 본문을 줄 단위로 읽어 조각을 순서대로 넘긴다. */
+/** 응답 본문을 줄 단위로 읽어 조각을 순서대로 넘긴다.
+ *  onBytes는 의미 없는 줄(ping·빈 이벤트)까지 포함해 바이트가 도착할 때마다 불린다 — 유휴 타이머용. */
 async function readEventStream(
   res: Response,
   mode: "sse" | "ndjson",
   onPiece: (raw: string) => void,
+  onBytes?: () => void,
 ): Promise<void> {
   const reader = res.body?.getReader();
   if (!reader) throw new Error("스트리밍 응답 본문을 읽을 수 없습니다.");
@@ -457,6 +541,7 @@ async function readEventStream(
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
+    onBytes?.();
     buffer += decoder.decode(value, { stream: true });
     for (;;) {
       const nl = buffer.indexOf("\n");
@@ -470,18 +555,22 @@ async function readEventStream(
 
 /** 비스트리밍 클라이언트에 스트리밍 경로를 덧댄다.
  *
- *  스트리밍은 화면 효과다. 효과가 실패했다고 실행이 죽어서는 안 되므로,
- *  한 글자도 받지 못한 채 실패하면 조용히 기존 경로로 되돌아간다. */
+ *  스트리밍은 화면 효과다. 효과가 실패했다고 실행이 죽어서는 안 되므로, 응답을 아예 받지
+ *  못한 채(네트워크 오류 등) 실패하거나 벤더가 요청을 처리하지 않은 일시 거절(429·5xx)이면 기존
+ *  경로로 되돌아간다 — 그쪽의 백오프 재시도가 한도·과부하를 넘긴다. 그러나 벤더가 요청을 처리한 뒤의
+ *  실패 — 실패·절단 신호, 산출물 일부 수신, 400·401·403·404 거절 — 는 다시 보내도 결과가 같고
+ *  비용만 겹치므로 그대로 던진다. */
 function withStream(
   base: LlmClient,
   label: string,
-  timeoutMs: number,
+  /** 유휴 한도 — 바이트가 도착할 때마다 리셋된다. 절대 한도는 없다. */
+  idleMs: number,
   /** relaxed = 추론 요약 요청을 뺀 판. 계정·모델이 요약을 내주지 않을 때 쓴다. */
   planFor: (
     prompt: string,
     opts: LlmCallOptions | undefined,
     relaxed: boolean,
-    /** 계획 단계의 부수 요청(토큰 발급 등)도 같은 시간 한도에 묶는다 */
+    /** 계획 단계의 부수 요청(토큰 발급 등)도 같은 유휴 한도에 묶는다 */
     signal: AbortSignal,
   ) => StreamPlan | Promise<StreamPlan>,
 ): StreamingLlmClient {
@@ -489,6 +578,8 @@ function withStream(
     ...base,
     async completeStream(prompt, opts, onChunk) {
       let got = "";
+      // 스트림이 열린(HTTP 2xx) 뒤의 실패는 벤더가 이미 받아들인 요청이다 — 재전송하면 이중 과금
+      let streamOpened = false;
       // 실제로 조각으로 흘러왔는지 재 둔다 — 한 번에 온 것과 구분이 안 되면
       // "왜 실시간이 아니냐"를 코드만 보고는 판정할 수 없다.
       const startedAt = Date.now();
@@ -496,9 +587,24 @@ function withStream(
       let thoughtPieces = 0;
       let firstPieceAt = 0;
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+      // 유휴 타이머는 산출물 조각이 아니라 바이트 단위로 리셋한다 — 추론 요약을 못 내주는 모델은
+      // 추론 단계가 몇 분간 조용할 수 있고, 그동안 벤더는 ping·빈 이벤트로 연결을 살려 둔다.
+      let idle: ReturnType<typeof setTimeout> | null = null;
+      let idleFired = false;
+      const touch = (): void => {
+        if (idle !== null) clearTimeout(idle);
+        idle = setTimeout(() => {
+          idleFired = true;
+          controller.abort();
+        }, idleMs);
+      };
+      const settle = (): void => {
+        if (idle !== null) clearTimeout(idle);
+        idle = null;
+      };
 
       const attempt = async (relaxed: boolean): Promise<void> => {
+        touch();
         const plan = await planFor(prompt, opts, relaxed, controller.signal);
         const res = await fetch(plan.url, {
           method: "POST",
@@ -508,63 +614,106 @@ function withStream(
         });
         if (!res.ok) {
           const excerpt = await responseExcerpt(res);
-          const failure = new Error(`${label} HTTP ${res.status}${excerpt ? `: ${excerpt}` : ""}`);
-          // 요약을 못 내주는 계정·모델이면 요약만 빼고 한 번 더 — 흐르는 화면까지
-          // 통째로 잃지 않게 한다. 그래도 안 되면 바깥에서 기존 경로로 되돌아간다.
-          if (!relaxed && res.status >= 400 && res.status < 500) {
+          // 추론 요약(OpenAI summary·Claude display·Ollama think)을 못 받는 계정·모델이면 그 옵션만
+          // 빼고 한 번 더 — 요청 본문이 실제로 달라지는 벤더(relaxable)의 HTTP 400에 한한다.
+          // 401·403·404는 다시 보내도 같은 답이고, 본문이 같은 벤더의 재시도는 중복 요청일 뿐이다.
+          // 429·5xx는 아래 catch가 비스트리밍 경로(백오프 재시도)로 넘긴다.
+          if (!relaxed && plan.relaxable === true && res.status === 400) {
             // 조용히 넘어가면 "생각이 왜 안 나오지"로만 보인다 — 이유를 남긴다
             onChunk(
-              `${label}가 추론 요약을 내주지 않아 요약 없이 다시 요청합니다 (HTTP ${res.status}).`,
+              `${label}가 추론 요약 요청을 거절해 추론 옵션 없이 다시 요청합니다 (HTTP 400).`,
               "notice",
             );
             await attempt(true);
             return;
           }
-          throw failure;
+          throw new StreamHttpError(
+            `${label} HTTP ${res.status}${excerpt ? `: ${excerpt}` : ""}`,
+            res.status,
+          );
         }
-        await readEventStream(res, plan.mode, (raw) => {
-          let payload: unknown;
-          try {
-            payload = JSON.parse(raw);
-          } catch {
-            return;
-          }
-          // 벤더가 실패·절단을 알린 조각은 정상 종료로 삼키지 않는다 — 잘린 산출물이
-          // 완성본으로 채점되면 평가 도구로서 가장 나쁜 실패다.
-          const failure = plan.failure?.(payload) ?? null;
-          if (failure !== null) throw new Error(`${label} ${failure}`);
-          if (firstPieceAt === 0) firstPieceAt = Date.now();
-          const thinking = plan.thought?.(payload) ?? null;
-          if (thinking !== null && thinking !== "") {
-            thoughtPieces += 1;
-            onChunk(thinking, "thought");
-          }
-          const piece = plan.delta(payload);
-          if (piece !== null && piece !== "") {
-            outputPieces += 1;
-            got += piece;
-            onChunk(piece, "output");
-          }
-        });
+        streamOpened = true;
+        await readEventStream(
+          res,
+          plan.mode,
+          (raw) => {
+            let payload: unknown;
+            try {
+              payload = JSON.parse(raw);
+            } catch {
+              return;
+            }
+            // 벤더가 실패·절단을 알린 조각은 정상 종료로 삼키지 않는다 — 잘린 산출물이
+            // 완성본으로 채점되면 평가 도구로서 가장 나쁜 실패다.
+            const failure = plan.failure?.(payload) ?? null;
+            if (failure !== null) throw new StreamReportedFailure(`${label} ${failure}`);
+            if (firstPieceAt === 0) firstPieceAt = Date.now();
+            const thinking = plan.thought?.(payload) ?? null;
+            if (thinking !== null && thinking !== "") {
+              thoughtPieces += 1;
+              onChunk(thinking, "thought");
+            }
+            const piece = plan.delta(payload);
+            if (piece !== null && piece !== "") {
+              outputPieces += 1;
+              got += piece;
+              onChunk(piece, "output");
+            }
+          },
+          touch,
+        );
       };
 
       try {
         await attempt(false);
       } catch (error) {
-        clearTimeout(timeout);
-        if (got !== "") throw error;
-        // 조용히 되돌아가면 "왜 실시간이 아니지"로만 보인다 — 이유를 남긴다
+        settle();
+        // 실패 신호 뒤에 열려 있을 수 있는 본문 연결을 닫는다 — idleFired는 타이머만 세우므로 오판 없음
+        controller.abort();
+        if (idleFired) {
+          throw new Error(
+            `${label} ${idleMs / 1000}초 동안 응답이 없어 중단했습니다 (스트림 유휴 시간 초과 ${idleMs}ms).`,
+          );
+        }
+        // 스트림이 열린 뒤 끊긴 것(네트워크 단절 등)은 벤더가 이미 받아들여 처리 중인 요청이다 —
+        // 산출물을 못 받았더라도 다시 보내지 않는다(SPEC §8).
+        if (streamOpened && !(error instanceof StreamReportedFailure)) {
+          throw new Error(
+            `${label} 스트림이 시작된 뒤 끊겼습니다 — ${
+              error instanceof Error ? error.message : String(error)
+            }. 벤더가 이미 받아들인 요청이라 다시 보내지 않습니다.`,
+          );
+        }
+        // 산출물을 일부라도 받았거나, 벤더가 실패·절단을 알렸거나, 다시 보내도 같은 답인 HTTP 거절이면
+        // 그대로 던진다 — 비스트리밍으로 다시 보내 봐야 결과는 같고 비용만 겹친다.
+        if (
+          got !== "" ||
+          error instanceof StreamReportedFailure ||
+          (error instanceof StreamHttpError && !error.transient)
+        ) {
+          throw error;
+        }
+        // 응답을 받지 못한 경우(네트워크 오류 등)와 일시 거절(429·5xx)만 기존 경로로 — 그쪽이
+        // 백오프 재시도를 맡는다. 조용히 되돌아가면 "왜 실시간이 아니지"로만 보인다 — 이유를 남긴다
         onChunk(
-          `${label} 스트리밍이 열리지 않아 한 번에 받아옵니다 — ${
-            error instanceof Error ? error.message : String(error)
-          }`,
+          error instanceof StreamHttpError
+            ? `${label} 스트림 요청이 일시 거절되어(HTTP ${error.status}) 한 번에 받는 요청으로 다시 시도합니다.`
+            : `${label} 스트리밍이 열리지 않아 한 번에 받아옵니다 — ${
+                error instanceof Error ? error.message : String(error)
+              }`,
           "notice",
         );
         const whole = await base.complete(prompt, opts);
         onChunk(whole, "output");
         return whole;
       }
-      clearTimeout(timeout);
+      settle();
+      // 정상 종료했는데 산출물이 없으면 오류다 — 벤더가 완주한 요청을 다시 보내면 비용만 겹친다.
+      if (got === "") {
+        throw new Error(
+          `${label} 스트림이 산출물 없이 끝났습니다. 벤더가 이미 처리한 요청이라 다시 보내지 않습니다.`,
+        );
+      }
       if (import.meta.env.DEV) {
         const total = ((Date.now() - startedAt) / 1000).toFixed(1);
         const wait = ((firstPieceAt - startedAt) / 1000).toFixed(1);
@@ -573,12 +722,6 @@ function withStream(
             `첫 조각까지 ${wait}초 · 전체 ${total}초`,
           "notice",
         );
-      }
-      if (got === "") {
-        onChunk(`${label} 스트림이 비어 있어 한 번에 받아옵니다.`, "notice");
-        const whole = await base.complete(prompt, opts);
-        onChunk(whole, "output");
-        return whole;
       }
       return got;
     },
@@ -615,30 +758,29 @@ type GeminiResponse = {
   usageMetadata?: { thoughtsTokenCount?: unknown };
 };
 
-/** 텍스트 part가 여러 개인 응답을 합치고, 정상 HTTP 응답 안의 중단 사유를 보존한다. */
+/** 텍스트 part가 여러 개인 응답을 합치고, 정상 HTTP 응답 안의 중단 사유를 보존한다.
+ *  텍스트가 있어도 finishReason이 STOP이 아니면 오류다 — 잘린 산출물을 완성본으로 돌려주지 않는다.
+ *  판정은 스트림과 같은 googleFailure를 쓴다. */
 function geminiOutputText(data: GeminiResponse, label: string): string {
   const candidate = data.candidates?.[0];
+  const failure = googleFailure(data);
+  if (failure !== null) {
+    // 추론이 출력 예산을 잠식한 경우를 구분할 단서 — 텍스트 없이 MAX_TOKENS로 끝난 응답에서 관측됐다
+    const thoughtsTokenCount =
+      typeof data.usageMetadata?.thoughtsTokenCount === "number"
+        ? data.usageMetadata.thoughtsTokenCount
+        : null;
+    throw new Error(
+      `${label} ${failure}` +
+        `${candidate?.finishReason === "MAX_TOKENS" && thoughtsTokenCount !== null ? ` (thinking ${thoughtsTokenCount} tokens)` : ""}`,
+    );
+  }
   const text = (candidate?.content?.parts ?? [])
     .filter((part) => part.thought !== true && typeof part.text === "string")
     .map((part) => part.text as string)
     .join("");
   if (text.length > 0) return text;
 
-  const finishReason =
-    typeof candidate?.finishReason === "string" ? candidate.finishReason : null;
-  const thoughtsTokenCount =
-    typeof data.usageMetadata?.thoughtsTokenCount === "number"
-      ? data.usageMetadata.thoughtsTokenCount
-      : null;
-  if (finishReason === "MAX_TOKENS") {
-    throw new Error(
-      `${label} 응답이 출력 토큰 한도에 도달해 텍스트를 만들지 못했습니다` +
-        `${thoughtsTokenCount === null ? "" : ` (thinking ${thoughtsTokenCount} tokens)`}`,
-    );
-  }
-  if (finishReason !== null) {
-    throw new Error(`${label} 응답이 텍스트 없이 중단되었습니다 (${finishReason})`);
-  }
   const blockReason = data.promptFeedback?.blockReason;
   if (typeof blockReason === "string") {
     throw new Error(`${label} 프롬프트가 차단되었습니다 (${blockReason})`);
@@ -664,7 +806,6 @@ export function createGeminiClient(
   model = "gemini-3.8-flash",
   options: GeminiClientOptions = {},
 ): LlmClient {
-  const timeoutMs = Math.max(1, options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
   const maxAttempts = Math.max(1, Math.floor(options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS));
   const retryBaseMs = Math.max(0, options.retryBaseMs ?? DEFAULT_RETRY_BASE_MS);
 
@@ -676,6 +817,7 @@ export function createGeminiClient(
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: geminiGenerationConfig(opts, false),
       });
+      const timeoutMs = requestTimeoutFor(options, opts);
       let lastError: Error = new Error("LLM 호출 실패");
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         const controller = new AbortController();
@@ -731,7 +873,7 @@ export function createGeminiClient(
     },
   };
 
-  return withStream(base, "Gemini", timeoutMs, (prompt, opts) => ({
+  return withStream(base, "Gemini", streamIdleFor(options), (prompt, opts) => ({
     url: `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`,
     headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
     body: {
@@ -820,7 +962,6 @@ export function createVertexClient(
     typeof rawCredential === "string"
       ? parseVertexServiceAccount(rawCredential)
       : parseVertexServiceAccount(JSON.stringify(rawCredential));
-  const timeoutMs = Math.max(1, options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
   const maxAttempts = Math.max(1, Math.floor(options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS));
   const retryBaseMs = Math.max(0, options.retryBaseMs ?? DEFAULT_RETRY_BASE_MS);
   let accessToken: { value: string; expiresAt: number } | null = null;
@@ -872,6 +1013,7 @@ export function createVertexClient(
       const project = encodeURIComponent(credential.project_id);
       const modelId = encodeURIComponent(model);
       const url = `https://aiplatform.googleapis.com/v1/projects/${project}/locations/${VERTEX_LOCATION}/publishers/google/models/${modelId}:generateContent`;
+      const timeoutMs = requestTimeoutFor(options, opts);
       let lastError: Error = new Error("LLM 호출 실패");
 
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -936,7 +1078,7 @@ export function createVertexClient(
     },
   };
 
-  return withStream(base, "Vertex AI", timeoutMs, async (prompt, opts, _relaxed, signal) => {
+  return withStream(base, "Vertex AI", streamIdleFor(options), async (prompt, opts, _relaxed, signal) => {
     const project = encodeURIComponent(credential.project_id);
     const modelId = encodeURIComponent(model);
     // 토큰 발급이 멈추면 스트림 전체가 영원히 기다린다 — 바깥 시간 한도에 같이 묶는다
@@ -973,6 +1115,16 @@ function openAIOutputText(data: OpenAIResponse): string {
     .join("");
 }
 
+/** 텍스트가 있어도 status가 incomplete·failed면 오류다 — 잘린 산출물을 완성본으로 돌려주지 않는다.
+ *  판정은 스트림과 같은 openAIResponseFailure를 쓴다. */
+function openAIOutputTextOrThrow(data: OpenAIResponse, label: string): string {
+  const failure = openAIResponseFailure(data);
+  if (failure !== null) throw new Error(`${label} ${failure}`);
+  const text = openAIOutputText(data);
+  if (text.length > 0) return text;
+  throw new Error(`${label} 응답에 텍스트 없음`);
+}
+
 /** OpenAI Responses API 브라우저 직행 어댑터 — 2026-08-24 Chrome CORS 실측 go.
  *  401 응답은 CORS 허용 Origin 없이 반환되어 브라우저가 상태·본문을 숨길 수 있으므로,
  *  fetch 실패는 인증·CORS·네트워크 가능성을 합쳐 안내한다(SPEC §8). */
@@ -981,7 +1133,6 @@ export function createOpenAIClient(
   model = "gpt-5.6-sol",
   options: OpenAIClientOptions = {},
 ): LlmClient {
-  const timeoutMs = Math.max(1, options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
   const maxAttempts = Math.max(1, Math.floor(options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS));
   const retryBaseMs = Math.max(0, options.retryBaseMs ?? DEFAULT_RETRY_BASE_MS);
 
@@ -990,6 +1141,7 @@ export function createOpenAIClient(
     model,
     async complete(prompt, opts) {
       const body = JSON.stringify(openAIResponsesBody(model, prompt, opts, "json"));
+      const timeoutMs = requestTimeoutFor(options, opts);
       let lastError: Error = new Error("LLM 호출 실패");
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         const controller = new AbortController();
@@ -1041,29 +1193,19 @@ export function createOpenAIClient(
           throw new Error("OpenAI 응답 JSON을 해석할 수 없습니다.");
         }
         clearTimeout(timeout);
-
-        const text = openAIOutputText(data);
-        if (text.length > 0) return text;
-        if (data.error?.message) {
-          throw new Error(`OpenAI 응답 실패: ${data.error.message}`);
-        }
-        if (data.status === "incomplete") {
-          throw new Error(
-            `OpenAI 응답이 완료되지 않았습니다${data.incomplete_details?.reason ? `: ${data.incomplete_details.reason}` : ""}`,
-          );
-        }
-        throw new Error("OpenAI 응답에 텍스트 없음");
+        return openAIOutputTextOrThrow(data, "OpenAI");
       }
       throw lastError;
     },
   };
 
-  return withStream(base, "OpenAI", timeoutMs, (prompt, opts, relaxed) => ({
+  return withStream(base, "OpenAI", streamIdleFor(options), (prompt, opts, relaxed) => ({
     url: "https://api.openai.com/v1/responses",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     // 화면에 흐르는 "생각"은 모델이 낸 추론 요약이다 — 지어낸 문구가 아니다.
     body: openAIResponsesBody(model, prompt, opts, relaxed ? "stream-relaxed" : "stream"),
     mode: "sse",
+    relaxable: true,
     delta: (payload) =>
       field(payload, "type") === "response.output_text.delta" &&
       typeof field(payload, "delta") === "string"
@@ -1097,10 +1239,11 @@ function createDirectJsonClient(
     completeOptions?: LlmCallOptions,
   ) => DirectJsonRequest,
   outputText: (data: unknown) => string | null,
+  /** 정상 HTTP 응답 안의 실패·절단 사유 — 텍스트가 있어도 이것이 있으면 오류다 */
+  failureOf: (data: unknown) => string | null,
   /** 같은 요청을 흘려받는 경로 — 없으면 스트리밍을 지원하지 않는 클라이언트가 된다 */
   streamOf?: (request: DirectJsonRequest, relaxed: boolean) => Omit<StreamPlan, "url" | "headers">,
 ): LlmClient {
-  const timeoutMs = Math.max(1, options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
   const maxAttempts = Math.max(1, Math.floor(options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS));
   const retryBaseMs = Math.max(0, options.retryBaseMs ?? DEFAULT_RETRY_BASE_MS);
 
@@ -1109,6 +1252,7 @@ function createDirectJsonClient(
     model,
     async complete(prompt, completeOptions) {
       const request = requestFor(prompt, completeOptions);
+      const timeoutMs = requestTimeoutFor(options, completeOptions);
       let lastError: Error = new Error("LLM 호출 실패");
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         const controller = new AbortController();
@@ -1156,6 +1300,9 @@ function createDirectJsonClient(
           throw new Error(`${label} 응답 JSON을 해석할 수 없습니다.`);
         }
         clearTimeout(timeout);
+        // 잘린 산출물을 완성본으로 돌려주지 않는다 — 스트림과 같은 판정을 비스트리밍에도 건다
+        const failure = failureOf(data);
+        if (failure !== null) throw new Error(`${label} ${failure}`);
         const text = outputText(data);
         if (typeof text === "string" && text.length > 0) return text;
         throw new Error(`${label} 응답에 텍스트가 없습니다.`);
@@ -1165,7 +1312,7 @@ function createDirectJsonClient(
   };
 
   if (!streamOf) return base;
-  return withStream(base, label, timeoutMs, (prompt, completeOptions, relaxed) => {
+  return withStream(base, label, streamIdleFor(options), (prompt, completeOptions, relaxed) => {
     const request = requestFor(prompt, completeOptions);
     return { url: request.url, headers: request.headers, ...streamOf(request, relaxed) };
   });
@@ -1216,12 +1363,14 @@ export function createAnthropicClient(
         .join("");
       return text || null;
     },
+    anthropicMessageFailure,
     (request, relaxed) => ({
       body: {
         ...(request.body as Record<string, unknown>),
         thinking: relaxed ? { type: "adaptive" } : { type: "adaptive", display: "summarized" },
         stream: true,
       },
+      relaxable: true,
       ...ANTHROPIC_DELTAS,
     }),
   );
@@ -1248,6 +1397,7 @@ export function createOpenRouterClient(
         ?.message?.content;
       return typeof content === "string" ? content : null;
     },
+    chatCompletionsFailure,
     (request) => ({
       body: { ...(request.body as Record<string, unknown>), stream: true },
       mode: "sse",
@@ -1297,9 +1447,16 @@ export function createOllamaClient(
       const content = (data as { message?: { content?: unknown } }).message?.content;
       return typeof content === "string" ? content : null;
     },
-    (request) => ({
-      // 사고를 지원하지 않는 모델이면 요청이 거절되고, 그때는 기존 경로로 되돌아간다
-      body: { ...(request.body as Record<string, unknown>), think: true, stream: true },
+    ollamaFailure,
+    (request, relaxed) => ({
+      // 사고를 지원하지 않는 모델(기본값 llama3.1 등)은 think를 400으로 거절한다 — relaxed 판은
+      // think만 빼고 다시 흘려받아 스트리밍 자체는 잃지 않는다
+      body: {
+        ...(request.body as Record<string, unknown>),
+        ...(relaxed ? {} : { think: true }),
+        stream: true,
+      },
+      relaxable: true,
       mode: "ndjson",
       delta: (payload) => {
         const piece = field(field(payload, "message"), "content");
@@ -1326,22 +1483,58 @@ function resolveApiBase(apiBase?: string): string {
   return import.meta.env.PROD ? "https://api.harnest.p-e.kr" : "http://localhost:8000";
 }
 
-export async function fetchSharedProviders(
-  apiBase?: string,
-): Promise<Partial<Record<SharedProvider, boolean>>> {
+/** 공유 경로의 재시도 대상 — 429와 5xx 중 504(상류 시간 초과)는 뺀다. 시간 초과된 생성은 벤더
+ *  쪽에서 계속 진행돼 과금되므로, 같은 본문을 다시 보내면 관리자 키에 중복 과금만 된다. */
+function isSharedProxyRetryable(status: number): boolean {
+  return status === 429 || (status >= 500 && status <= 599 && status !== 504);
+}
+
+/** 공유 경로의 클라이언트 시간 초과 — 504와 같은 규칙으로 재시도하지 않는다. 벤더 쪽 생성은
+ *  연결이 끊겨도 완주·과금되므로 같은 본문을 다시 보내면 관리자 키에 중복 과금만 된다. */
+function sharedTimeoutError(label: string, timeoutMs: number): Error {
+  return new Error(
+    `${label} 요청 시간 초과 (${timeoutMs}ms) — 같은 요청을 다시 보내면 관리자 비용만 반복되니 재시도하지 않습니다. 긴 생성은 본인 키로 실행해 주세요.`,
+  );
+}
+
+/** /config가 알리는 공유 키 상태 — 어느 공급자에 관리자 키가 있고, 그 키로 허용된 모델은 무엇인지 */
+interface SharedConfig {
+  providers: Partial<Record<SharedProvider, boolean>>;
+  models: Partial<Record<SharedProvider, string[]>>;
+}
+
+const SHARED_PROVIDERS: readonly SharedProvider[] = ["openai", "gemini"];
+
+function parseSharedConfig(data: unknown): SharedConfig {
+  const providers: SharedConfig["providers"] = {};
+  const models: SharedConfig["models"] = {};
+  for (const provider of SHARED_PROVIDERS) {
+    if (field(field(data, "sharedProviders"), provider) === true) providers[provider] = true;
+    const allowed = field(field(data, "sharedModels"), provider);
+    if (Array.isArray(allowed)) {
+      models[provider] = allowed.filter((m): m is string => typeof m === "string" && m.trim() !== "");
+    }
+  }
+  return { providers, models };
+}
+
+async function fetchSharedConfig(apiBase?: string): Promise<SharedConfig> {
   try {
     const res = await fetch(`${resolveApiBase(apiBase)}/config`);
-    if (!res.ok) return {};
-    const data = (await res.json()) as {
-      sharedProviders?: Partial<Record<SharedProvider, boolean>>;
-    };
-    return data.sharedProviders ?? {};
+    if (!res.ok) return { providers: {}, models: {} };
+    return parseSharedConfig(await res.json());
   } catch {
-    return {};
+    return { providers: {}, models: {} };
   }
 }
 
-let sharedProvidersCache: Partial<Record<SharedProvider, boolean>> = {};
+export async function fetchSharedProviders(
+  apiBase?: string,
+): Promise<Partial<Record<SharedProvider, boolean>>> {
+  return (await fetchSharedConfig(apiBase)).providers;
+}
+
+let sharedConfigCache: SharedConfig = { providers: {}, models: {} };
 
 /** 앱 시작 시, 그리고 위저드가 열릴 때 다시 불러 캐시를 채운다. createLlm()은
  *  동기 함수라 호출 시점에 이 캐시를 그대로 읽는다 — 최신 값을 보장하지는
@@ -1349,12 +1542,19 @@ let sharedProvidersCache: Partial<Record<SharedProvider, boolean>> = {};
 export async function loadSharedProviders(
   apiBase?: string,
 ): Promise<Partial<Record<SharedProvider, boolean>>> {
-  sharedProvidersCache = await fetchSharedProviders(apiBase);
-  return sharedProvidersCache;
+  sharedConfigCache = await fetchSharedConfig(apiBase);
+  return sharedConfigCache.providers;
 }
 
 export function hasSharedKey(provider: SharedProvider): boolean {
-  return sharedProvidersCache[provider] === true;
+  return sharedConfigCache.providers[provider] === true;
+}
+
+/** 공유 키로 허용된 모델 목록 — 서버가 /config에 sharedModels를 아직 싣지 않으면 빈 배열이다.
+ *  위저드는 공유 경로에서 이 목록만 고르게 해, 허용 목록 밖 모델이 팩에 동결된 뒤 400으로
+ *  막히는 일을 예방한다. */
+export function sharedModelsFor(provider: SharedProvider): readonly string[] {
+  return sharedConfigCache.models[provider] ?? [];
 }
 
 export interface SharedProxyOptions extends LlmRequestOptions {
@@ -1365,7 +1565,6 @@ export function createSharedOpenAIClient(
   model = "gpt-5.6-sol",
   options: SharedProxyOptions = {},
 ): LlmClient {
-  const timeoutMs = Math.max(1, options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
   const maxAttempts = Math.max(1, Math.floor(options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS));
   const retryBaseMs = Math.max(0, options.retryBaseMs ?? DEFAULT_RETRY_BASE_MS);
   const base = resolveApiBase(options.apiBase);
@@ -1375,6 +1574,7 @@ export function createSharedOpenAIClient(
     model,
     async complete(prompt, opts) {
       const body = JSON.stringify(openAIResponsesBody(model, prompt, opts, "json"));
+      const timeoutMs = sharedRequestTimeoutFor(options, opts);
       let lastError: Error = new Error("LLM 호출 실패");
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         const controller = new AbortController();
@@ -1389,11 +1589,11 @@ export function createSharedOpenAIClient(
           });
         } catch (e) {
           clearTimeout(timeout);
-          lastError = controller.signal.aborted
-            ? new Error(`OpenAI(공유) 요청 시간 초과 (${timeoutMs}ms)`)
-            : new Error(
-                `OpenAI(공유) 네트워크 오류: ${e instanceof Error ? e.message : String(e)}`,
-              );
+          // 시간 초과는 재시도하지 않는다 — 서버 504와 같은 규칙(중복 과금 방지). 네트워크 오류만 백오프
+          if (controller.signal.aborted) throw sharedTimeoutError("OpenAI(공유)", timeoutMs);
+          lastError = new Error(
+            `OpenAI(공유) 네트워크 오류: ${e instanceof Error ? e.message : String(e)}`,
+          );
           if (attempt + 1 >= maxAttempts) throw lastError;
           await wait(retryBaseMs * (attempt + 1));
           continue;
@@ -1403,7 +1603,9 @@ export function createSharedOpenAIClient(
           const excerpt = await responseExcerpt(res);
           clearTimeout(timeout);
           lastError = new Error(`OpenAI(공유) HTTP ${res.status}${excerpt ? `: ${excerpt}` : ""}`);
-          const retryable = res.status === 429 || (res.status >= 500 && res.status <= 599);
+          // 504는 서버가 상류 시간 초과를 알리는 상태다 — 벤더 쪽 생성은 계속 진행돼 과금되므로
+          // 같은 본문을 다시 보내면 관리자 키에 중복 과금만 된다
+          const retryable = isSharedProxyRetryable(res.status);
           if (!retryable || attempt + 1 >= maxAttempts) throw lastError;
           await wait(retryBaseMs * (attempt + 1));
           continue;
@@ -1414,27 +1616,11 @@ export function createSharedOpenAIClient(
           data = (await res.json()) as OpenAIResponse;
         } catch {
           clearTimeout(timeout);
-          if (controller.signal.aborted) {
-            lastError = new Error(`OpenAI(공유) 요청 시간 초과 (${timeoutMs}ms)`);
-            if (attempt + 1 >= maxAttempts) throw lastError;
-            await wait(retryBaseMs * (attempt + 1));
-            continue;
-          }
+          if (controller.signal.aborted) throw sharedTimeoutError("OpenAI(공유)", timeoutMs);
           throw new Error("OpenAI(공유) 응답 JSON을 해석할 수 없습니다.");
         }
         clearTimeout(timeout);
-
-        const text = openAIOutputText(data);
-        if (text.length > 0) return text;
-        if (data.error?.message) {
-          throw new Error(`OpenAI(공유) 응답 실패: ${data.error.message}`);
-        }
-        if (data.status === "incomplete") {
-          throw new Error(
-            `OpenAI(공유) 응답이 완료되지 않았습니다${data.incomplete_details?.reason ? `: ${data.incomplete_details.reason}` : ""}`,
-          );
-        }
-        throw new Error("OpenAI(공유) 응답에 텍스트 없음");
+        return openAIOutputTextOrThrow(data, "OpenAI(공유)");
       }
       throw lastError;
     },
@@ -1445,7 +1631,6 @@ export function createSharedGeminiClient(
   model = "gemini-3.8-flash",
   options: SharedProxyOptions = {},
 ): LlmClient {
-  const timeoutMs = Math.max(1, options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
   const maxAttempts = Math.max(1, Math.floor(options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS));
   const retryBaseMs = Math.max(0, options.retryBaseMs ?? DEFAULT_RETRY_BASE_MS);
   const base = resolveApiBase(options.apiBase);
@@ -1458,6 +1643,7 @@ export function createSharedGeminiClient(
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: geminiGenerationConfig(opts, false),
       });
+      const timeoutMs = sharedRequestTimeoutFor(options, opts);
       let lastError: Error = new Error("LLM 호출 실패");
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         const controller = new AbortController();
@@ -1472,11 +1658,11 @@ export function createSharedGeminiClient(
           });
         } catch (e) {
           clearTimeout(timeout);
-          lastError = controller.signal.aborted
-            ? new Error(`Gemini(공유) 요청 시간 초과 (${timeoutMs}ms)`)
-            : new Error(
-                `Gemini(공유) 네트워크 오류: ${e instanceof Error ? e.message : String(e)}`,
-              );
+          // 시간 초과는 재시도하지 않는다 — OpenAI(공유)와 같은 규칙
+          if (controller.signal.aborted) throw sharedTimeoutError("Gemini(공유)", timeoutMs);
+          lastError = new Error(
+            `Gemini(공유) 네트워크 오류: ${e instanceof Error ? e.message : String(e)}`,
+          );
           if (attempt + 1 >= maxAttempts) throw lastError;
           await wait(retryBaseMs * (attempt + 1));
           continue;
@@ -1486,7 +1672,8 @@ export function createSharedGeminiClient(
           const excerpt = await responseExcerpt(res);
           clearTimeout(timeout);
           lastError = new Error(`Gemini(공유) HTTP ${res.status}${excerpt ? `: ${excerpt}` : ""}`);
-          const retryable = res.status === 429 || (res.status >= 500 && res.status <= 599);
+          // 504는 상류 시간 초과 — 재시도하면 관리자 키에 중복 과금만 된다(OpenAI(공유)와 같은 규칙)
+          const retryable = isSharedProxyRetryable(res.status);
           if (!retryable || attempt + 1 >= maxAttempts) throw lastError;
           await wait(retryBaseMs * (attempt + 1));
           continue;
@@ -1497,12 +1684,7 @@ export function createSharedGeminiClient(
           data = (await res.json()) as GeminiResponse;
         } catch {
           clearTimeout(timeout);
-          if (controller.signal.aborted) {
-            lastError = new Error(`Gemini(공유) 요청 시간 초과 (${timeoutMs}ms)`);
-            if (attempt + 1 >= maxAttempts) throw lastError;
-            await wait(retryBaseMs * (attempt + 1));
-            continue;
-          }
+          if (controller.signal.aborted) throw sharedTimeoutError("Gemini(공유)", timeoutMs);
           throw new Error("Gemini(공유) 응답 JSON을 해석할 수 없습니다.");
         }
         clearTimeout(timeout);
