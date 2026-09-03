@@ -174,8 +174,14 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      // 쓰기 잠금을 먼저 시도한다 — 못 얻은 탭은 읽기만 하고 저장·실행·승인을 하지 않는다
-      const owned = await acquireProjectLock();
+      // 쓰기 잠금을 먼저 시도한다 — 못 얻은 탭은 읽기만 하고 저장·실행·승인을 하지 않는다.
+      // Web Locks가 없는 환경의 임대 경로는 나중에 소유권을 잃을 수 있다(오래 멈춘 사이 다른 탭이
+      // 만료를 보고 가져감) — 그때는 스냅샷 충돌과 같은 처리로 읽기 전용으로 물러난다.
+      const owned = await acquireProjectLock(() => {
+        console.warn("다른 탭이 프로젝트 쓰기 권한을 가져가 이 탭을 읽기 전용으로 전환합니다.");
+        becomeReadOnly();
+        run.dropExcept(null);
+      });
       if (cancelled) return;
       readOnlyRef.current = !owned;
       setReadOnly(!owned);
